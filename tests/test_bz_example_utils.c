@@ -1,11 +1,11 @@
 
 #include "unity/unity.h"
 #include "fff/fff.h"
-DEFINE_FFF_GLOBALS;
+DEFINE_FFF_GLOBALS
 
 #include "breezy/bz_example_utils.h"
 
-FAKE_VALUE_FUNC(int, multiply, int, int);
+FAKE_VALUE_FUNC(int, multiply, int, int)
 
 void setUp(void) {}
 void tearDown(void) {}
