@@ -2,7 +2,6 @@
 #include "./breezy/bz_logger.h"
 
 #include <stdarg.h>
-#include <stdbool.h>
 #include <stdio.h>
 
 
@@ -14,7 +13,9 @@
 // -------------------------------------------------------------------------------------------------
 
 static bool is_initialized = false;
-static bool log_levels[BZ_LOG_NUM_CATEGORIES];
+static enum bz_log_level log_levels[BZ_LOG_NUM_CATEGORIES];
+static FILE *out_stream;
+static FILE *err_stream;
 
 
 // =================================================================================================
@@ -23,6 +24,14 @@ static bool log_levels[BZ_LOG_NUM_CATEGORIES];
 
 void bz_log_initialize(const enum bz_log_level default_level)
 {
+	bz_log_initialize_custom(default_level, stdout, stderr);
+}
+
+void bz_log_initialize_custom(const enum bz_log_level default_level, FILE *out, FILE *err)
+{
+	out_stream = out;
+	err_stream = err;
+
 	for (int x = 0; x < BZ_LOG_NUM_CATEGORIES; x++) {
 		log_levels[x] = default_level;
 	}
@@ -39,12 +48,20 @@ void bz_log_set_level(const uint8_t category, const enum bz_log_level level)
 //  Logging
 // -------------------------------------------------------------------------------------------------
 
+// NOLINTBEGIN(*-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
 __attribute__((__format__(__printf__, 5, 0) ))
-static void bz_log(const enum bz_log_level level, const uint8_t category, char *file, const int line, const char *message_fmt, va_list args)
-{
-
+static void bz_log(
+	const enum bz_log_level level,
+	const uint8_t category,
+	char *file,
+	const int line,
+	const char *message_fmt,
+	va_list args
+) {
 	if (!is_initialized) {
-		fprintf(stderr, "Cannot use bz_logger prior to calling bz_log_initialize()\n");
+		// This is always "stderr" because the initialization process is what assigns err_stream.
+		(void) fputs("Cannot use bz_logger prior to calling bz_log_initialize()\n", stderr);
+		return;
 	}
 
 	if (log_levels[category] > level) {
@@ -53,19 +70,20 @@ static void bz_log(const enum bz_log_level level, const uint8_t category, char *
 
 	char message[512];
 	const int retval = vsnprintf(message, sizeof(message), message_fmt, args);
-
 	if (retval < 0) {
-		fprintf(stderr, "[%s:%d] Failed to write formatted log message. Error code: %d\n",
+		(void) fprintf(err_stream, "[%s:%d] Failed to format log message. Error code: %d\n",
 			file, line, retval);
 		return;
 	}
 
-	if (level >= BZ_LOG_ERROR) {
-		fprintf(stderr, "[%s:%d] %s\n", file, line, message);
-	} else {
-		fprintf(stdout, "[%s:%d] %s\n", file, line, message);
+	const int result = (level >= BZ_LOG_ERROR)
+		? fprintf(err_stream, "[%s:%d] %s\n", file, line, message)
+		: fprintf(out_stream, "[%s:%d] %s\n", file, line, message);
+	if (result < 0) {
+		(void) fputs("Failed to write log message.\n", err_stream);
 	}
 }
+// NOLINTEND(*-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
 
 __attribute__((__format__(__printf__, 4, 5) ))
 void bz_debug(const uint8_t category, char *file, const int line, const char *message_fmt, ...)

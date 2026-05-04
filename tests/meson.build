@@ -8,7 +8,7 @@ unity_dep = declare_dependency(link_with: unity_lib, include_directories: unity_
 fff_dep = declare_dependency(include_directories: include_directories('fff'))
 
 # Run each of our test suites
-foreach t : ['bz_example_utils']
+foreach t : ['bz_logger']
     exe = executable('test_' + t,
         'test_' + t + '.c',
         dependencies: [utils_dep, unity_dep, fff_dep],
