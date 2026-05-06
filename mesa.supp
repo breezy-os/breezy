@@ -1,0 +1,122 @@
+{
+   <insert_a_suppression_name_here>
+   Memcheck:ReallocZero
+   fun:realloc
+   obj:/usr/lib/libnvidia-eglcore.so.580.126.18
+   obj:/usr/lib/libnvidia-eglcore.so.580.126.18
+   obj:/usr/lib/libnvidia-eglcore.so.580.126.18
+   obj:/usr/lib/libnvidia-eglcore.so.580.126.18
+   fun:NvGlEglApiInit
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libnvidia-egl-wayland.so.1.1.20
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:BadSize
+   fun:posix_memalign
+   obj:/usr/lib/libnvidia-eglcore.so.580.126.18
+   obj:/usr/lib/libnvidia-eglcore.so.580.126.18
+   obj:/usr/lib/libnvidia-eglcore.so.580.126.18
+   obj:/usr/lib/libnvidia-eglcore.so.580.126.18
+   fun:NvGlEglApiInit
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libnvidia-egl-wayland.so.1.1.20
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Addr8
+   obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
+   fun:bz_drm_cleanup
+   fun:main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Addr8
+   obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
+   fun:bz_drm_cleanup
+   fun:main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Addr8
+   obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
+   fun:bz_drm_cleanup
+   fun:main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Addr1
+   obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
+   fun:bz_drm_cleanup
+   fun:main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Addr8
+   obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
+   fun:bz_drm_cleanup
+   fun:main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Addr4
+   obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
+   fun:bz_drm_cleanup
+   fun:main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:tsearch
+   obj:*
+   obj:*
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL_nvidia.so.580.126.18
+   obj:/usr/lib/libEGL.so.1.1.0
+   fun:bz_gles_init
+   fun:bz_drm_initialize
+   fun:main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   obj:*
+   obj:*
+   obj:*
+   obj:*
+   obj:/usr/lib/libgbm.so.1.0.0
+   obj:/usr/lib/libgbm.so.1.0.0
+   fun:gbm_create_device
+   fun:bz_drm_init
+   fun:bz_drm_initialize
+   fun:main
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   obj:/usr/lib/libdbus-1.so.3.38.3
+   fun:_dbus_message_loader_queue_messages
+   obj:/usr/lib/libdbus-1.so.3.38.3
+   obj:/usr/lib/libdbus-1.so.3.38.3
+   obj:/usr/lib/libdbus-1.so.3.38.3
+   obj:/usr/lib/libdbus-1.so.3.38.3
+   obj:/usr/lib/libdbus-1.so.3.38.3
+   fun:dbus_pending_call_block
+   fun:dbus_connection_send_with_reply_and_block
+   fun:dbus_bus_register
+   obj:/usr/lib/libdbus-1.so.3.38.3
+}

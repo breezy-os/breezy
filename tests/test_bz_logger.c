@@ -56,8 +56,9 @@ void test_default_log_level(void)
 	bz_error(BZ_LOG_MAIN, "file", 0, "Error statement");
 	(void) fflush(mem);
 	TEST_ASSERT_EQUAL_STRING(
-		"[file:0] Warn statement\n"
-		"[file:0] Error statement\n",
+		"WARN  [file:0]\tWarn statement\n"
+		"[file:0]\tError statement\n" // From stderr
+		"ERROR [file:0]\tError statement\n",
 		buf);
 }
 
@@ -79,12 +80,14 @@ void test_category_log_level(void)
 	(void) fflush(mem);
 
 	TEST_ASSERT_EQUAL_STRING(
-		"[file:0] Main Warn\n"
-		"[file:0] Main Error\n"
-		"[file:0] DRM Debug\n"
-		"[file:0] DRM Info\n"
-		"[file:0] DRM Warn\n"
-		"[file:0] DRM Error\n",
+		"WARN  [file:0]\tMain Warn\n"
+		"[file:0]\tMain Error\n" // From stderr
+		"ERROR [file:0]\tMain Error\n"
+		"DEBUG [file:0]\tDRM Debug\n"
+		"INFO  [file:0]\tDRM Info\n"
+		"WARN  [file:0]\tDRM Warn\n"
+		"[file:0]\tDRM Error\n" // From stderr
+		"ERROR [file:0]\tDRM Error\n",
 		buf);
 }
 
@@ -106,8 +109,9 @@ void test_off_log_level(void)
 	(void) fflush(mem);
 
 	TEST_ASSERT_EQUAL_STRING(
-		"[file:0] Main Warn\n"
-		"[file:0] Main Error\n",
+		"WARN  [file:0]\tMain Warn\n"
+		"[file:0]\tMain Error\n" // From stderr
+		"ERROR [file:0]\tMain Error\n",
 		buf);
 }
 
@@ -116,7 +120,7 @@ void test_custom_log_message_format(void)
 	bz_log_initialize_custom(BZ_LOG_DEBUG, mem, mem);
 	bz_debug(BZ_LOG_MAIN, "file", 0, "Number: %d, String: %s", 42, "hello");
 	(void) fflush(mem);
-	TEST_ASSERT_EQUAL_STRING("[file:0] Number: 42, String: hello\n", buf);
+	TEST_ASSERT_EQUAL_STRING("DEBUG [file:0]\tNumber: 42, String: hello\n", buf);
 }
 
 

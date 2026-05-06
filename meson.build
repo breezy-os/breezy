@@ -33,11 +33,14 @@ executable('breezy',
     sources: [
         './src/main.c',
         './src/bz_drm.c',
+        './src/gles2.c',
     ],
     include_directories: global_inc,
     dependencies: [
         dependency('libdrm'),
         dependency('libseat'),
+        dependency('gbm'),
+        dependency('egl'),
         utils_dep,
     ]
 )

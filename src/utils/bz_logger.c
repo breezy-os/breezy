@@ -71,14 +71,21 @@ static void bz_log(
 	char message[512];
 	const int retval = vsnprintf(message, sizeof(message), message_fmt, args);
 	if (retval < 0) {
-		(void) fprintf(err_stream, "[%s:%d] Failed to format log message. Error code: %d\n",
+		(void) fprintf(err_stream, "[%s:%d]\tFailed to format log message. Error code: %d\n",
 			file, line, retval);
 		return;
 	}
 
-	const int result = (level >= BZ_LOG_ERROR)
-		? fprintf(err_stream, "[%s:%d] %s\n", file, line, message)
-		: fprintf(out_stream, "[%s:%d] %s\n", file, line, message);
+	if (level >= BZ_LOG_ERROR) {
+		(void) fprintf(err_stream, "[%s:%d]\t%s\n", file, line, message);
+	}
+
+	const char *level_string = level == BZ_LOG_DEBUG ? "DEBUG"
+		: level == BZ_LOG_INFO ? "INFO "
+		: level == BZ_LOG_WARN ? "WARN "
+		: level == BZ_LOG_ERROR ? "ERROR"
+		: "UNKNO";
+	const int result = fprintf(out_stream, "%s [%s:%d]\t%s\n", level_string, file, line, message);
 	if (result < 0) {
 		(void) fputs("Failed to write log message.\n", err_stream);
 	}
