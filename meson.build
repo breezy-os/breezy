@@ -1,6 +1,6 @@
 
 project('breezy-os', 'c', default_options: [
-    'c_std=c11',
+    'c_std=c23',
     'warning_level=3',
 #    'buildtype=debugoptimized', # SETS -O2, which breaks some leak detections
     'buildtype=debug',
@@ -30,7 +30,17 @@ subdir('src')
 subdir('tests')
 
 executable('breezy',
-    sources: ['./src/main.c'],
+    sources: [
+        './src/main.c',
+        './src/bz_graphics.c',
+        './src/gles2.c',
+    ],
     include_directories: global_inc,
-    dependencies: [utils_dep]
+    dependencies: [
+        dependency('libdrm'),
+        dependency('libseat'),
+        dependency('gbm'),
+        dependency('egl'),
+        utils_dep,
+    ]
 )
