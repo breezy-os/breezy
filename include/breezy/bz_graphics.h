@@ -6,9 +6,9 @@
 
 // -- Public API --
 
-int bz_drm_initialize(void);
-int bz_drm_loop_iteration(void);
-int bz_drm_cleanup(void);
+int bz_graphics_initialize(void);
+int bz_graphics_loop_iteration(void);
+void bz_graphics_cleanup(void);
 
 // -- Data Structures --
 

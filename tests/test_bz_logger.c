@@ -66,17 +66,17 @@ void test_category_log_level(void)
 {
 	// Defaulting "WARN", but assigning "DEBUG" to DRM
 	bz_log_initialize_custom(BZ_LOG_WARN, mem, mem);
-	bz_log_set_level(BZ_LOG_DRM, BZ_LOG_DEBUG);
+	bz_log_set_level(BZ_LOG_GRAPHICS, BZ_LOG_DEBUG);
 
 	// "WARN/ERROR" should always be printed. "DEBUG/INFO" only for DRM logs.
 	bz_debug(BZ_LOG_MAIN, "file", 0, "Main Debug");
 	bz_info(BZ_LOG_MAIN, "file", 0, "Main Info");
 	bz_warn(BZ_LOG_MAIN, "file", 0, "Main Warn");
 	bz_error(BZ_LOG_MAIN, "file", 0, "Main Error");
-	bz_debug(BZ_LOG_DRM, "file", 0, "DRM Debug");
-	bz_info(BZ_LOG_DRM, "file", 0, "DRM Info");
-	bz_warn(BZ_LOG_DRM, "file", 0, "DRM Warn");
-	bz_error(BZ_LOG_DRM, "file", 0, "DRM Error");
+	bz_debug(BZ_LOG_GRAPHICS, "file", 0, "DRM Debug");
+	bz_info(BZ_LOG_GRAPHICS, "file", 0, "DRM Info");
+	bz_warn(BZ_LOG_GRAPHICS, "file", 0, "DRM Warn");
+	bz_error(BZ_LOG_GRAPHICS, "file", 0, "DRM Error");
 	(void) fflush(mem);
 
 	TEST_ASSERT_EQUAL_STRING(
@@ -95,17 +95,17 @@ void test_off_log_level(void)
 {
 	// Defaulting "WARN", but assigning "OFF" to DRM
 	bz_log_initialize_custom(BZ_LOG_WARN, mem, mem);
-	bz_log_set_level(BZ_LOG_DRM, BZ_LOG_OFF);
+	bz_log_set_level(BZ_LOG_GRAPHICS, BZ_LOG_OFF);
 
 	// "WARN/ERROR" should be printed for main, and nothing for DRM.
 	bz_debug(BZ_LOG_MAIN, "file", 0, "Main Debug");
 	bz_info(BZ_LOG_MAIN, "file", 0, "Main Info");
 	bz_warn(BZ_LOG_MAIN, "file", 0, "Main Warn");
 	bz_error(BZ_LOG_MAIN, "file", 0, "Main Error");
-	bz_debug(BZ_LOG_DRM, "file", 0, "DRM Debug");
-	bz_info(BZ_LOG_DRM, "file", 0, "DRM Info");
-	bz_warn(BZ_LOG_DRM, "file", 0, "DRM Warn");
-	bz_error(BZ_LOG_DRM, "file", 0, "DRM Error");
+	bz_debug(BZ_LOG_GRAPHICS, "file", 0, "DRM Debug");
+	bz_info(BZ_LOG_GRAPHICS, "file", 0, "DRM Info");
+	bz_warn(BZ_LOG_GRAPHICS, "file", 0, "DRM Warn");
+	bz_error(BZ_LOG_GRAPHICS, "file", 0, "DRM Error");
 	(void) fflush(mem);
 
 	TEST_ASSERT_EQUAL_STRING(

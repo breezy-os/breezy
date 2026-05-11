@@ -32,7 +32,7 @@ subdir('tests')
 executable('breezy',
     sources: [
         './src/main.c',
-        './src/bz_drm.c',
+        './src/bz_graphics.c',
         './src/gles2.c',
     ],
     include_directories: global_inc,
