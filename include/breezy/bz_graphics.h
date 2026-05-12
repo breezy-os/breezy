@@ -1,18 +1,25 @@
-#ifndef BZ_DRM_H
-#define BZ_DRM_H
+#ifndef BZ_GRAPHICS_H
+#define BZ_GRAPHICS_H
 // #################################################################################################
 
 #include <stdint.h>
 
+#include "breezy/bz_breezy.h"
+
 // -- Public API --
 
-int bz_graphics_initialize(void);
-int bz_graphics_loop_iteration(void);
-void bz_graphics_cleanup(void);
+int bz_graphics_initialize(struct bz_breezy *breezy);
+int bz_graphics_loop_iteration(struct bz_breezy *breezy);
+void bz_graphics_cleanup(struct bz_breezy *breezy);
+
+void bz_graphics_handle_drm_event(struct bz_breezy *breezy);
+int bz_graphics_activate(struct bz_breezy *breezy);
+int bz_graphics_deactivate(struct bz_breezy *breezy);
 
 // -- Data Structures --
 
 struct bz_gbm_bo_data {
+	struct bz_breezy *breezy;
 	uint32_t fb_id;
 };
 
