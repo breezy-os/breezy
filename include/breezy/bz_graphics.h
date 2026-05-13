@@ -16,6 +16,10 @@ void bz_graphics_handle_drm_event(struct bz_breezy *breezy);
 int bz_graphics_activate(struct bz_breezy *breezy);
 int bz_graphics_deactivate(struct bz_breezy *breezy);
 
+// TODO: temp fun
+void bz_graphics_set_color_index(int i);
+void bz_graphics_change_color(struct bz_breezy *breezy, float amount);
+
 // -- Data Structures --
 
 struct bz_gbm_bo_data {

@@ -9,6 +9,8 @@
 #include <gbm.h>
 #include <EGL/egl.h>
 
+void bz_shutdown(); // Defined in main.c, don't hate me.
+
 struct bz_drm {
 	int fd;
 	int device_id;
@@ -17,6 +19,7 @@ struct bz_drm {
 	drmModeModeInfo mode_info;
 	uint32_t mode_blob_id;
 	uint32_t plane_id;
+	bool is_dirty;
 };
 
 struct bz_gbm {

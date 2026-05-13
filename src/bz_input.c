@@ -1,10 +1,13 @@
 
 #include "breezy/bz_input.h"
 
+#include <errno.h>
 #include <libinput.h>
+#include <string.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "breezy/bz_breezy.h"
+#include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
@@ -17,6 +20,7 @@
 static int bz_input_open_restricted(const char *path, int flags, void *data);
 static void bz_input_close_restricted(int fd, void *data);
 static bool bz_input_device_fd_matches(void *fd, void *device);
+static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 
 
 // =================================================================================================
@@ -64,6 +68,48 @@ static bool bz_input_device_fd_matches(void *fd, void *device)
 	const int *_fd = fd;
 	const struct bz_input_device *_device = device;
 	return _device->fd == *_fd;
+}
+
+static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event)
+{
+	// Parse the libinput event
+	enum libinput_key_state keystate = libinput_event_keyboard_get_key_state(kb_event);
+	const uint32_t keycode = libinput_event_keyboard_get_key(kb_event);
+
+	// Feed into xkbcommon
+	const uint32_t xkb_keycode = keycode + 8; // xkb keycode is offset by 8 from evdev
+	enum xkb_key_direction press_state = keystate ? XKB_KEY_DOWN : XKB_KEY_UP;
+	xkb_state_update_key(breezy->input.xkb_state, xkb_keycode, press_state);
+	const uint32_t xkb_keysym = xkb_state_key_get_one_sym(breezy->input.xkb_state, xkb_keycode);
+
+	// Handle Breezy keycombos (ie, those with "super")
+	const bool super_active = xkb_state_mod_name_is_active(
+		breezy->input.xkb_state,
+		XKB_MOD_NAME_LOGO,
+		XKB_STATE_MODS_EFFECTIVE
+	);
+	if (super_active && press_state == XKB_KEY_DOWN) {
+		switch (xkb_keysym) {
+		case XKB_KEY_Escape:
+			bz_shutdown();
+			break;
+		case XKB_KEY_1:
+			bz_graphics_set_color_index(0);
+			break;
+		case XKB_KEY_2:
+			bz_graphics_set_color_index(1);
+			break;
+		case XKB_KEY_3:
+			bz_graphics_set_color_index(2);
+			break;
+		case XKB_KEY_Up:
+			bz_graphics_change_color(breezy, 20.0f/255);
+			break;
+		case XKB_KEY_Down:
+			bz_graphics_change_color(breezy, -20.0f/255);
+			break;
+		}
+	}
 }
 
 
@@ -153,4 +199,38 @@ void bz_input_cleanup(struct bz_breezy *breezy) {
 		bz_list_free(breezy->input.device_lookup, free);
 		breezy->input.device_lookup = nullptr;
 	}
+}
+
+int bz_input_activate(struct bz_breezy *breezy)
+{
+	if (breezy->input.libinput != nullptr) {
+		return libinput_resume(breezy->input.libinput);
+	}
+	return 0;
+}
+
+void bz_input_deactivate(struct bz_breezy *breezy)
+{
+	if (breezy->input.libinput != nullptr) {
+		libinput_suspend(breezy->input.libinput);
+	}
+}
+
+int bz_input_process_events(struct bz_breezy *breezy)
+{
+	if (libinput_dispatch(breezy->input.libinput) != 0) {
+		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__,
+			"Failed to dispatch libinput: %s.", strerror(errno));
+		return 1;
+	}
+
+	struct libinput_event *event;
+	while ((event = libinput_get_event(breezy->input.libinput)) != nullptr) {
+		if (libinput_event_get_type(event) == LIBINPUT_EVENT_KEYBOARD_KEY) {
+			bz_input_process_kb_event(breezy, libinput_event_get_keyboard_event(event));
+		}
+		libinput_event_destroy(event);
+	}
+
+	return 0;
 }

@@ -584,6 +584,20 @@ static int bz_gles_init(struct bz_breezy *breezy)
 	return 0;
 }
 
+// TODO: Very temp - delete
+int color_i = 0;
+void bz_graphics_set_color_index(int i) {
+	color_i = i;
+}
+float color[3] = { 0.16f, 0.164f, 0.196f };
+void bz_graphics_change_color(struct bz_breezy *breezy, float amount) {
+	color[color_i] += amount;
+	if (amount > 0 && color[color_i] > 1.0f) color[color_i] = 1.0f;
+	if (amount < 0 && color[color_i] < 0.0f) color[color_i] = 0.0f;
+	glClearColor(color[0], color[1], color[2], 1.0f);
+	breezy->drm.is_dirty = true;
+}
+
 /**
  * Verifies all necessary EGL extensions are installed and available. Returns 0 on success, or a
  * negative value on failure.
@@ -708,6 +722,10 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
  * A value of "0" is returned on success, or a negative value for failure.
  */
 int bz_graphics_loop_iteration(struct bz_breezy *breezy) {
+	// Only redraw if our buffer changed.
+	if (!breezy->drm.is_dirty) { return 0; }
+	breezy->drm.is_dirty = false;
+
 	// Render!
 	glClear(GL_COLOR_BUFFER_BIT);
 	// (...other OpenGL render commands go here...)

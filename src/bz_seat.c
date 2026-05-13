@@ -4,6 +4,7 @@
 #include <libseat.h>
 
 #include "breezy/bz_graphics.h"
+#include "breezy/bz_input.h"
 #include "breezy/bz_logger.h"
 
 
@@ -37,6 +38,7 @@ static void handle_enable_seat(struct libseat * /*s*/, void *data) {
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Enabling seat and claiming DRM Master.");
 	struct bz_breezy *breezy = data;
 	bz_graphics_activate(breezy);
+	bz_input_activate(breezy);
 	breezy->seat.active = true;
 }
 
@@ -44,6 +46,7 @@ static void handle_enable_seat(struct libseat * /*s*/, void *data) {
 static void handle_disable_seat(struct libseat *s, void *data) {
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Disabling seat and releasing DRM Master.");
 	struct bz_breezy *breezy = data;
+	bz_input_deactivate(breezy);
 	bz_graphics_deactivate(breezy);
 	breezy->seat.active = false;
 
