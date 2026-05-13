@@ -39,11 +39,13 @@ executable('breezy',
     ],
     include_directories: global_inc,
     dependencies: [
-        dependency('libdrm'),
         dependency('libseat'),
-        dependency('libinput'),
+        dependency('libdrm'),
         dependency('gbm'),
         dependency('egl'),
+        dependency('libudev'),
+        dependency('libinput'),
+        dependency('xkbcommon'),
         utils_dep,
     ]
 )

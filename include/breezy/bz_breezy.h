@@ -39,12 +39,19 @@ struct bz_seat {
 	int active;
 };
 
+struct bz_input_device {
+	int fd; // Device file descriptor
+	int id; // Libinput device ID
+};
+
 struct bz_input {
+	int fd;
 	struct udev *udev;
 	struct libinput *libinput;
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
 	struct xkb_state *xkb_state;
+	struct bz_list *device_lookup; // Each item is of type "struct bz_input_device"
 };
 
 

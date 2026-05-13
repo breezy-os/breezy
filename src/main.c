@@ -3,6 +3,7 @@
 
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_input.h"
+#include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
 
@@ -33,16 +34,21 @@ int bz_loop_iteration(struct bz_breezy *breezy) {
 int main(void) {
 	int retval = 0;
 
-	// Initialize our main "breezy" struct, explicitly setting non-zero values as needed.
-	struct bz_breezy breezy = { 0 };
-	breezy.drm.fd = -1;
-	breezy.drm.device_id = -1;
-	breezy.seat.fd = -1;
-
 	// Set up our logger
 	bz_log_initialize(BZ_LOG_WARN);
 	bz_log_set_level(BZ_LOG_GRAPHICS, BZ_LOG_INFO);
 	bz_log_set_level(BZ_LOG_INPUT, BZ_LOG_DEBUG);
+
+	// Initialize our main "breezy" struct, explicitly setting non-zero/nullptr values as needed.
+	struct bz_breezy breezy = { 0 };
+	breezy.drm.fd = -1;
+	breezy.drm.device_id = -1;
+	breezy.seat.fd = -1;
+	breezy.input.device_lookup = bz_list_create();
+	if (breezy.input.device_lookup == nullptr) {
+		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__, "Failed to initialize device lookup list.");
+		return -1; // If we're already failing to malloc this early, let's just exit.
+	}
 
 	// Seat initialization
 	retval = bz_seat_initialize(&breezy);
