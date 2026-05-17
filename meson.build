@@ -31,16 +31,21 @@ subdir('tests')
 
 executable('breezy',
     sources: [
-        './src/main.c',
+        './src/bz_seat.c',
         './src/bz_graphics.c',
+        './src/bz_input.c',
         './src/gles2.c',
+        './src/main.c',
     ],
     include_directories: global_inc,
     dependencies: [
-        dependency('libdrm'),
         dependency('libseat'),
+        dependency('libdrm'),
         dependency('gbm'),
         dependency('egl'),
+        dependency('libudev'),
+        dependency('libinput'),
+        dependency('xkbcommon'),
         utils_dep,
     ]
 )

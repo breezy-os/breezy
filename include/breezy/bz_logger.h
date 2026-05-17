@@ -22,6 +22,9 @@ void bz_error(uint8_t category, char *file, int line, const char *message_fmt, .
 // -- Categories for Breezy --
 #define BZ_LOG_MAIN 0
 #define BZ_LOG_GRAPHICS 1
+#define BZ_LOG_INPUT 2
+#define BZ_LOG_SEAT 3
+#define BZ_LOG_LIST 4
 
 
 // #################################################################################################
