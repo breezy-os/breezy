@@ -595,7 +595,7 @@ void bz_graphics_change_color(struct bz_breezy *breezy, float amount) {
 	if (amount > 0 && color[color_i] > 1.0f) color[color_i] = 1.0f;
 	if (amount < 0 && color[color_i] < 0.0f) color[color_i] = 0.0f;
 	glClearColor(color[0], color[1], color[2], 1.0f);
-	breezy->drm.is_dirty = true;
+	breezy->gl.is_dirty = true;
 }
 
 /**
@@ -723,8 +723,8 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
  */
 int bz_graphics_loop_iteration(struct bz_breezy *breezy) {
 	// Only redraw if our buffer changed.
-	if (!breezy->drm.is_dirty) { return 0; }
-	breezy->drm.is_dirty = false;
+	if (!breezy->gl.is_dirty) { return 0; }
+	breezy->gl.is_dirty = false;
 
 	// Render!
 	glClear(GL_COLOR_BUFFER_BIT);

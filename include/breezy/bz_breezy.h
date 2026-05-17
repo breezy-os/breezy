@@ -19,7 +19,6 @@ struct bz_drm {
 	drmModeModeInfo mode_info;
 	uint32_t mode_blob_id;
 	uint32_t plane_id;
-	bool is_dirty;
 };
 
 struct bz_gbm {
@@ -34,6 +33,7 @@ struct bz_gl {
 	EGLConfig config;
 	EGLContext context;
 	EGLSurface surface;
+	bool is_dirty;
 };
 
 struct bz_seat {

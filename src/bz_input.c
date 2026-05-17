@@ -21,6 +21,7 @@ static int bz_input_open_restricted(const char *path, int flags, void *data);
 static void bz_input_close_restricted(int fd, void *data);
 static bool bz_input_device_fd_matches(void *fd, void *device);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
+static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 
 
 // =================================================================================================
@@ -82,13 +83,21 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	xkb_state_update_key(breezy->input.xkb_state, xkb_keycode, press_state);
 	const uint32_t xkb_keysym = xkb_state_key_get_one_sym(breezy->input.xkb_state, xkb_keycode);
 
-	// Handle Breezy keycombos (ie, those with "super")
-	const bool super_active = xkb_state_mod_name_is_active(
-		breezy->input.xkb_state,
-		XKB_MOD_NAME_LOGO,
-		XKB_STATE_MODS_EFFECTIVE
-	);
-	if (super_active && press_state == XKB_KEY_DOWN) {
+	// Figure out our modifier keys
+	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE);
+	const bool ctrl_held  = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE);
+	const bool alt_held   = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE);
+	// const bool shift_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE);
+
+	// First, check for a VT switch. (The only hotkey that doesn't use "super".)
+	const int target_vt = bz_input_check_vt_change(ctrl_held, alt_held, xkb_keysym);
+	if (target_vt != -1) {
+		bz_seat_change_vt(breezy, target_vt);
+		return;
+	}
+
+	// Now handle all Breezy keycombos (ie, those with "super")
+	if (super_held && press_state == XKB_KEY_DOWN) {
 		switch (xkb_keysym) {
 		case XKB_KEY_Escape:
 			bz_shutdown();
@@ -108,7 +117,36 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 		case XKB_KEY_Down:
 			bz_graphics_change_color(breezy, -20.0f/255);
 			break;
+		default:
+			break; // Does nothing, but shuts up clang-tidy
 		}
+	}
+}
+
+/**
+ * Checks if the user is attempting to change VTs using Ctrl+Alt+F1-12. Returns the VT number the
+ * user is trying to switch to, or -1 if an attempt is not being made.
+ */
+static int bz_input_check_vt_change(const bool ctrl_held, const bool alt_held, const uint32_t keysym)
+{
+	if (!ctrl_held || !alt_held) {
+		return -1;
+	}
+
+	switch (keysym) {
+	case XKB_KEY_F1:  case XKB_KEY_XF86Fn_F1:  case XKB_KEY_XF86Switch_VT_1:  return 1;
+	case XKB_KEY_F2:  case XKB_KEY_XF86Fn_F2:  case XKB_KEY_XF86Switch_VT_2:  return 2;
+	case XKB_KEY_F3:  case XKB_KEY_XF86Fn_F3:  case XKB_KEY_XF86Switch_VT_3:  return 3;
+	case XKB_KEY_F4:  case XKB_KEY_XF86Fn_F4:  case XKB_KEY_XF86Switch_VT_4:  return 4;
+	case XKB_KEY_F5:  case XKB_KEY_XF86Fn_F5:  case XKB_KEY_XF86Switch_VT_5:  return 5;
+	case XKB_KEY_F6:  case XKB_KEY_XF86Fn_F6:  case XKB_KEY_XF86Switch_VT_6:  return 6;
+	case XKB_KEY_F7:  case XKB_KEY_XF86Fn_F7:  case XKB_KEY_XF86Switch_VT_7:  return 7;
+	case XKB_KEY_F8:  case XKB_KEY_XF86Fn_F8:  case XKB_KEY_XF86Switch_VT_8:  return 8;
+	case XKB_KEY_F9:  case XKB_KEY_XF86Fn_F9:  case XKB_KEY_XF86Switch_VT_9:  return 9;
+	case XKB_KEY_F10: case XKB_KEY_XF86Fn_F10: case XKB_KEY_XF86Switch_VT_10: return 10;
+	case XKB_KEY_F11: case XKB_KEY_XF86Fn_F11: case XKB_KEY_XF86Switch_VT_11: return 11;
+	case XKB_KEY_F12: case XKB_KEY_XF86Fn_F12: case XKB_KEY_XF86Switch_VT_12: return 12;
+	default: return -1;
 	}
 }
 

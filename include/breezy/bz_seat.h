@@ -12,6 +12,7 @@ void bz_seat_cleanup(struct bz_breezy *breezy);
 const char *bz_seat_name(struct bz_breezy *breezy);
 int bz_seat_open_device(struct bz_breezy *breezy, const char *path, int *fd);
 int bz_seat_close_device(struct bz_breezy *breezy, int device_id);
+void bz_seat_change_vt(struct bz_breezy *breezy, int vt_number);
 
 
 // #################################################################################################

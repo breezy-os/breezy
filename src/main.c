@@ -9,7 +9,8 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
 
-static int bz_loop_iteration(struct bz_breezy *breezy) {
+static int bz_loop_iteration(struct bz_breezy *breezy)
+{
 	bz_debug(BZ_LOG_MAIN, __FILE__, __LINE__, "Executing event loop iteration.");
 
 	// Check for changes to our FDs
@@ -42,12 +43,13 @@ void bz_shutdown()
 	is_shutting_down = true;
 }
 
-int main(void) {
+int main(void)
+{
 	int retval = 0;
 
 	// Set up our logger
 	bz_log_initialize(BZ_LOG_WARN);
-	bz_log_set_level(BZ_LOG_MAIN, BZ_LOG_DEBUG);
+	bz_log_set_level(BZ_LOG_MAIN, BZ_LOG_INFO);
 	bz_log_set_level(BZ_LOG_GRAPHICS, BZ_LOG_INFO);
 	bz_log_set_level(BZ_LOG_INPUT, BZ_LOG_DEBUG);
 
@@ -55,7 +57,7 @@ int main(void) {
 	struct bz_breezy breezy = { 0 };
 	breezy.drm.fd = -1;
 	breezy.drm.device_id = -1;
-	breezy.drm.is_dirty = true;
+	breezy.gl.is_dirty = true;
 	breezy.seat.fd = -1;
 	breezy.input.device_lookup = bz_list_create();
 	if (breezy.input.device_lookup == nullptr) {
@@ -87,7 +89,7 @@ int main(void) {
 		goto input_cleanup;
 	}
 
-	// Fake event loop
+	// Event loop!
 	while (!is_shutting_down) {
 		bz_loop_iteration(&breezy);
 	}

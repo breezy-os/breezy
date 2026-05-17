@@ -40,6 +40,7 @@ static void handle_enable_seat(struct libseat * /*s*/, void *data) {
 	bz_graphics_activate(breezy);
 	bz_input_activate(breezy);
 	breezy->seat.active = true;
+	breezy->gl.is_dirty = true;
 }
 
 /** Disables our seat, and deactivates our DRM resources. */
@@ -126,4 +127,15 @@ int bz_seat_open_device(struct bz_breezy *breezy, const char *path, int *fd) {
 
 int bz_seat_close_device(struct bz_breezy *breezy, const int device_id) {
 	return libseat_close_device(breezy->seat.seat, device_id);
+}
+
+void bz_seat_change_vt(struct bz_breezy *breezy, const int vt_number) {
+	bz_info(BZ_LOG_SEAT, __FILE__, __LINE__, "Changing VT to %u", vt_number);
+	if (vt_number < 1 || vt_number > 12) {
+		bz_warn(BZ_LOG_SEAT, __FILE__, __LINE__, "VT was not in range: %d", vt_number);
+		return;
+	}
+	if (libseat_switch_session(breezy->seat.seat, vt_number) == -1) {
+		bz_warn(BZ_LOG_SEAT, __FILE__, __LINE__, "Failed to change VTs.");
+	}
 }
