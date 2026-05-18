@@ -2,12 +2,9 @@
 #include "breezy/bz_graphics.h"
 
 #include <string.h>
-#include <unistd.h>
 #include <stdlib.h>
-#include <poll.h>
 
 #include <gbm.h>
-#include <libseat.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <glad/gles2.h>
@@ -15,6 +12,7 @@
 #include <EGL/eglext.h>
 
 #include "breezy/bz_logger.h"
+#include "breezy/bz_seat.h"
 
 
 // =================================================================================================
@@ -23,65 +21,33 @@
 
 // -- DRM --
 
-static int drm_fd = -1;
-static int drm_device_id = -1;
-static uint32_t connector_id = 0;
-static uint32_t crtc_id = 0;
-static drmModeModeInfo mode_info;
-static uint32_t mode_blob_id = 0;
-static uint32_t plane_id = 0;
-
-struct bz_drm_prop_ids prop_id_lookup = { 0 };
-
+static struct bz_drm_prop_ids prop_id_lookup = { 0 };
 // Init
-static int bz_drm_init(void);
+static int bz_drm_init(struct bz_breezy *breezy);
 // DRM resource
-static drmModeConnector *bz_drm_get_first_valid_connector(const drmModeRes *resources);
+static drmModeConnector *bz_drm_get_first_valid_connector(int drm_fd, const drmModeRes *resources);
 static void bz_drm_print_modes(const drmModeConnector *connector);
-static uint32_t bz_drm_find_valid_crtc(const drmModeRes *resources, const drmModeConnector *connector, int *crtc_index);
-static uint32_t bz_drm_find_valid_plane(int crtc_index);
-static uint32_t bz_drm_get_prop_id(uint32_t object_type, uint32_t object_id, char *prop_name);
+static uint32_t bz_drm_find_valid_crtc(int drm_fd, const drmModeRes *resources, const drmModeConnector *connector, int *crtc_index);
+static uint32_t bz_drm_find_valid_plane(int drm_fd, int crtc_index);
+static uint32_t bz_drm_get_prop_id(int drm_fd, uint32_t object_type, uint32_t object_id, char *prop_name);
 // GBM / buffer
 static void bz_drm_handle_pageflip(int /*fd*/, uint32_t /*sequence*/, uint32_t /*tv_sec*/, uint32_t /*tv_usec*/, void *user_data);
 static void bz_drm_gbm_bo_destructor(struct gbm_bo *bo, void *data);
-static uint32_t bz_drm_gbm_get_bo_fb(struct gbm_bo *bo);
+static uint32_t bz_drm_gbm_get_bo_fb(struct bz_breezy *breezy, struct gbm_bo *bo);
 // Commit
-static int bz_drm_activate(void);
-static int bz_drm_deactivate(void);
-static int bz_drm_clear_plane(void);
-static int bz_drm_atomic_commit_initial(uint32_t fb_id);
-static int bz_drm_atomic_commit_recurring(uint32_t fb_id, struct gbm_bo *new_bo);
-
-// -- GBM --
-
-struct gbm_device *gbm_device = nullptr;
-struct gbm_surface *gbm_surface = nullptr;
-struct gbm_bo *prev_bo = nullptr;
+static int bz_drm_clear_plane(struct bz_breezy *breezy);
+static int bz_drm_atomic_commit_initial(struct bz_breezy *breezy, uint32_t fb_id);
+static int bz_drm_atomic_commit_recurring(struct bz_breezy *breezy, uint32_t fb_id);
 
 // -- OpenGL --
 
-static EGLDisplay bz_egl_display = nullptr;
-static EGLConfig bz_egl_config = nullptr;
-static EGLContext bz_egl_context = nullptr;
-static EGLSurface bz_egl_surface = nullptr;
-
-static int bz_gles_init(void);
+// Init
+static int bz_gles_init(struct bz_breezy *breezy);
 static int bz_gles_load_egl_extensions(void);
-
+// Helpers
 static int bz_gles_assert_extension(const char *extensionList, const char *extensionName);
 static char *bz_get_egl_error_text(EGLint error);
 static void bz_gles_print_egl_error(char *function_name, EGLint error);
-
-// -- Libseat --
-
-static struct libseat *seat = nullptr;
-static int seat_fd = -1;
-static bool seat_active = false;
-
-static int bz_libseat_init(void);
-
-static void handle_enable_seat(struct libseat *s, void *data);
-static void handle_disable_seat(struct libseat *s, void *data);
 
 
 // =================================================================================================
@@ -95,9 +61,11 @@ static void handle_disable_seat(struct libseat *s, void *data);
  *
  * Returns 0 on success, or a negative value on failure.
  */
-static int bz_drm_init(void)
+static int bz_drm_init(struct bz_breezy *breezy)
 {
 	int retval = 0;
+
+	const int drm_fd = breezy->drm.fd;
 
 	// Make sure our inputs are good.
 	if (drm_fd < 0) {
@@ -127,63 +95,71 @@ static int bz_drm_init(void)
 	}
 
 	// Grab our first connected connector
-	drmModeConnector *connector = bz_drm_get_first_valid_connector(resources);
+	drmModeConnector *connector = bz_drm_get_first_valid_connector(drm_fd, resources);
 	if (connector == nullptr) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to find a suitable connector.");
 		retval = -5;
 		goto clean_resources;
 	}
-	connector_id = connector->connector_id;
+	breezy->drm.connector_id = connector->connector_id;
 
 	// Set up our chosen mode
 	bz_drm_print_modes(connector);
-	mode_info = connector->modes[0];
-	const int result = drmModeCreatePropertyBlob(drm_fd, &mode_info, sizeof(mode_info), &mode_blob_id);
+	breezy->drm.mode_info = connector->modes[0];
+	const int result = drmModeCreatePropertyBlob(
+		drm_fd,
+		&breezy->drm.mode_info,
+		sizeof(breezy->drm.mode_info),
+		&breezy->drm.mode_blob_id
+	);
 	if (result != 0) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to create mode_info blob.");
 		retval = -6;
 		goto clean_connector;
 	}
 	bz_info(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-		"Chosen Mode: %dx%d", mode_info.hdisplay, mode_info.vdisplay);
+		"Chosen Mode: %dx%d", breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay);
 
 	// Get an encoder / CRTC from the connector
 	int crtc_index = -1;
-	crtc_id = bz_drm_find_valid_crtc(resources, connector, &crtc_index);
-	if (crtc_id == 0 || crtc_index == -1) {
+	breezy->drm.crtc_id = bz_drm_find_valid_crtc(drm_fd, resources, connector, &crtc_index);
+	if (breezy->drm.crtc_id == 0 || crtc_index == -1) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to find a suitable CRTC.");
 		retval = -7;
 		goto clean_connector;
 	}
 
-	plane_id = bz_drm_find_valid_plane(crtc_index);
-	if (plane_id == 0) {
+	breezy->drm.plane_id = bz_drm_find_valid_plane(drm_fd, crtc_index);
+	if (breezy->drm.plane_id == 0) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to find a suitable Plane.");
 		retval = -8;
 		goto clean_connector;
 	}
 
 	// Build up a lookup map for all the properties we care about
+	const uint32_t connector_id = breezy->drm.connector_id;
+	const uint32_t crtc_id = breezy->drm.crtc_id;
+	const uint32_t plane_id = breezy->drm.plane_id;
 	// -- Connector --
-	prop_id_lookup.connector_crtc_id = bz_drm_get_prop_id(DRM_MODE_OBJECT_CONNECTOR, connector_id, "CRTC_ID");
+	prop_id_lookup.connector_crtc_id = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_CONNECTOR, connector_id, "CRTC_ID");
 	// -- CRTC --
-	prop_id_lookup.crtc_active  = bz_drm_get_prop_id(DRM_MODE_OBJECT_CRTC, crtc_id, "ACTIVE");
-	prop_id_lookup.crtc_mode_id = bz_drm_get_prop_id(DRM_MODE_OBJECT_CRTC, crtc_id, "MODE_ID");
+	prop_id_lookup.crtc_active  = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_CRTC, crtc_id, "ACTIVE");
+	prop_id_lookup.crtc_mode_id = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_CRTC, crtc_id, "MODE_ID");
 	// -- Plane --
-	prop_id_lookup.plane_fb_id   = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "FB_ID");
-	prop_id_lookup.plane_crtc_id = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_ID");
-	prop_id_lookup.plane_src_x   = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "SRC_X");
-	prop_id_lookup.plane_src_y   = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "SRC_Y");
-	prop_id_lookup.plane_src_w   = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "SRC_W");
-	prop_id_lookup.plane_src_h   = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "SRC_H");
-	prop_id_lookup.plane_crtc_x  = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_X");
-	prop_id_lookup.plane_crtc_y  = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_Y");
-	prop_id_lookup.plane_crtc_w  = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_W");
-	prop_id_lookup.plane_crtc_h  = bz_drm_get_prop_id(DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_H");
+	prop_id_lookup.plane_fb_id   = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "FB_ID");
+	prop_id_lookup.plane_crtc_id = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_ID");
+	prop_id_lookup.plane_src_x   = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "SRC_X");
+	prop_id_lookup.plane_src_y   = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "SRC_Y");
+	prop_id_lookup.plane_src_w   = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "SRC_W");
+	prop_id_lookup.plane_src_h   = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "SRC_H");
+	prop_id_lookup.plane_crtc_x  = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_X");
+	prop_id_lookup.plane_crtc_y  = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_Y");
+	prop_id_lookup.plane_crtc_w  = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_W");
+	prop_id_lookup.plane_crtc_h  = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_H");
 
 	// Create our GBM device.
-	gbm_device = gbm_create_device(drm_fd);
-	if (gbm_device == nullptr) {
+	breezy->gbm.device = gbm_create_device(drm_fd);
+	if (breezy->gbm.device == nullptr) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to create GBM device.");
 		retval = -9;
 		goto clean_connector;
@@ -206,7 +182,7 @@ exit:
  * It's up to the caller to call "drmModeFreeConnector()" on the returned value when
  * they are finished with it.
  */
-static drmModeConnector *bz_drm_get_first_valid_connector(const drmModeRes *resources)
+static drmModeConnector *bz_drm_get_first_valid_connector(const int drm_fd, const drmModeRes *resources)
 {
 	drmModeConnector *connector = nullptr;
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Found %d connectors.", resources->count_connectors);
@@ -245,6 +221,7 @@ static void bz_drm_print_modes(const drmModeConnector *connector)
  * array, which is a necessary value for finding a valid plane later on.
  */
 static uint32_t bz_drm_find_valid_crtc(
+	const int drm_fd,
 	const drmModeRes *resources,
 	const drmModeConnector *connector,
 	int *crtc_index
@@ -285,7 +262,7 @@ static uint32_t bz_drm_find_valid_crtc(
  *
  * If no valid planes are found, then a plane ID of 0 is returned;
  */
-static uint32_t bz_drm_find_valid_plane(const int crtc_index)
+static uint32_t bz_drm_find_valid_plane(const int drm_fd, const int crtc_index)
 {
 	uint32_t _plane_id = 0;
 
@@ -316,6 +293,7 @@ static uint32_t bz_drm_find_valid_plane(const int crtc_index)
  * if the property is found, or 0 if not.
  */
 static uint32_t bz_drm_get_prop_id(
+	const int drm_fd,
 	const uint32_t object_type,
 	const uint32_t object_id,
 	char *prop_name
@@ -345,8 +323,7 @@ static uint32_t bz_drm_get_prop_id(
 /**
  * This function is registered as a callback to our drmEventContext as the page flip handler, and
  * is called whenever the DRM file descriptor has a page flip event published to it. This releases
- * the previous GBM buffer object for reuse and records the new one, which is provided via the
- * user_data parameter.
+ * the previous GBM buffer object for reuse and records the new one.
  */
 void bz_drm_handle_pageflip(
 	int /*fd*/,
@@ -355,9 +332,11 @@ void bz_drm_handle_pageflip(
 	uint32_t /*tv_usec*/,
 	void *user_data
 ) {
+	struct bz_breezy *breezy = user_data;
 	// Release the previous buffer, and record the new one for the next iteration.
-	gbm_surface_release_buffer(gbm_surface, prev_bo);
-	prev_bo = user_data;
+	gbm_surface_release_buffer(breezy->gbm.surface, breezy->gbm.prev_bo);
+	breezy->gbm.prev_bo = breezy->gbm.new_bo;
+	breezy->gbm.new_bo = nullptr;
 }
 
 /**
@@ -368,7 +347,7 @@ void bz_drm_handle_pageflip(
 static void bz_drm_gbm_bo_destructor(struct gbm_bo * /*bo*/, void *data)
 {
 	struct bz_gbm_bo_data *d = data;
-	drmModeRmFB(drm_fd, d->fb_id);
+	drmModeRmFB(d->breezy->drm.fd, d->fb_id);
 	free(d);
 }
 
@@ -377,7 +356,7 @@ static void bz_drm_gbm_bo_destructor(struct gbm_bo * /*bo*/, void *data)
  * yet have an associated framebuffer, then a new one is created with the DRM and saved to the
  * buffer object's internal user data.
  */
-static uint32_t bz_drm_gbm_get_bo_fb(struct gbm_bo *bo)
+static uint32_t bz_drm_gbm_get_bo_fb(struct bz_breezy *breezy, struct gbm_bo *bo)
 {
 	// If we've already processed this buffer object, then no need to reregister it.
 	struct bz_gbm_bo_data *data = gbm_bo_get_user_data(bo);
@@ -386,6 +365,7 @@ static uint32_t bz_drm_gbm_get_bo_fb(struct gbm_bo *bo)
 	// Otherwise, initialize/register it and save off what we need.
 	data = malloc(sizeof(*data)); // This *is* being freed in the bz_drm_gbm_bo_destructor above.
 	data->fb_id = 0;
+	data->breezy = breezy;
 
 	// These are DIFFERENT planes than DRM planes. These planes are for representing memory regions
 	// within the same buffer, commonly used for color formats like NV12. XRGB8888 only uses the
@@ -399,7 +379,7 @@ static uint32_t bz_drm_gbm_get_bo_fb(struct gbm_bo *bo)
 	}
 
 	drmModeAddFB2(
-		drm_fd,
+		breezy->drm.fd,
 		gbm_bo_get_width(bo),
 		gbm_bo_get_height(bo),
 		gbm_bo_get_format(bo),
@@ -415,51 +395,16 @@ static uint32_t bz_drm_gbm_get_bo_fb(struct gbm_bo *bo)
 }
 
 /**
- * Turns on all of our DRM settings whenever we reclaim DRM master. Returns the value of submitting
- * the atomic commit.
- */
-static int bz_drm_activate(void)
-{
-	// Restore our latest, saved settings from our most recent framebuffer
-	if (prev_bo != nullptr) {
-		const uint32_t fb_id = bz_drm_gbm_get_bo_fb(prev_bo);
-		return bz_drm_atomic_commit_initial(fb_id);
-	}
-	return 0;
-}
-
-/**
- * Clears all of our DRM settings whenever we give up DRM master. Returns the value of submitting
- * the atomic commit.
- */
-static int bz_drm_deactivate(void)
-{
-	drmModeAtomicReq *req = drmModeAtomicAlloc();
-
-	// Clear CRTC properties
-	drmModeAtomicAddProperty(req, crtc_id, prop_id_lookup.crtc_active, 0);
-	drmModeAtomicAddProperty(req, crtc_id, prop_id_lookup.crtc_mode_id, 0);
-	// Clear framebuffer properties FOR ALL PLANES
-	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_fb_id, 0);
-	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_crtc_id, 0);
-
-	const int retVal = drmModeAtomicCommit(drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, nullptr);
-	drmModeAtomicFree(req);
-
-	return retVal;
-}
-
-/**
  * Clears the plane with a synchronous, atomic modeset. Returns the value of submitting the atomic
  * commit.
  */
-static int bz_drm_clear_plane(void)
+static int bz_drm_clear_plane(struct bz_breezy *breezy)
 {
 	drmModeAtomicReq *req = drmModeAtomicAlloc();
-	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_fb_id, 0);
-	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_crtc_id, 0);
+	drmModeAtomicAddProperty(req, breezy->drm.plane_id, prop_id_lookup.plane_fb_id, 0);
+	drmModeAtomicAddProperty(req, breezy->drm.plane_id, prop_id_lookup.plane_crtc_id, 0);
 
-	const int retVal = drmModeAtomicCommit(drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, nullptr);
+	const int retVal = drmModeAtomicCommit(breezy->drm.fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, breezy);
 	drmModeAtomicFree(req);
 
 	return retVal;
@@ -469,9 +414,13 @@ static int bz_drm_clear_plane(void)
  * Submits the initial atomic commit needed to configure all of our DRM resources. This is a
  * blocking call. Returns the value of submitting the atomic commit.
  */
-static int bz_drm_atomic_commit_initial(const uint32_t fb_id)
+static int bz_drm_atomic_commit_initial(struct bz_breezy *breezy, const uint32_t fb_id)
 {
 	drmModeAtomicReq *req = drmModeAtomicAlloc();
+	const uint32_t connector_id = breezy->drm.connector_id;
+	const uint32_t crtc_id = breezy->drm.crtc_id;
+	const uint32_t mode_blob_id = breezy->drm.mode_blob_id;
+	const uint32_t plane_id = breezy->drm.plane_id;
 
 	// Set Connector properties
 	drmModeAtomicAddProperty(req, connector_id, prop_id_lookup.connector_crtc_id, crtc_id);
@@ -481,8 +430,8 @@ static int bz_drm_atomic_commit_initial(const uint32_t fb_id)
 	drmModeAtomicAddProperty(req, crtc_id, prop_id_lookup.crtc_mode_id, mode_blob_id);
 
 	// Set Plane properties
-	const uint32_t width = mode_info.hdisplay;
-	const uint32_t height = mode_info.vdisplay;
+	const uint32_t width = breezy->drm.mode_info.hdisplay;
+	const uint32_t height = breezy->drm.mode_info.vdisplay;
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_fb_id, fb_id);
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_crtc_id, crtc_id);
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_src_x, 0 << 16);
@@ -494,7 +443,7 @@ static int bz_drm_atomic_commit_initial(const uint32_t fb_id)
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_crtc_w, width);
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_crtc_h, height);
 
-	const int retVal = drmModeAtomicCommit(drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, nullptr);
+	const int retVal = drmModeAtomicCommit(breezy->drm.fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, breezy);
 	drmModeAtomicFree(req);
 
 	return retVal;
@@ -504,14 +453,14 @@ static int bz_drm_atomic_commit_initial(const uint32_t fb_id)
  * Submits the recurring atomic commits needed to update the framebuffer ID for our
  * double-buffering. This is a non-blocking call. Returns the value of submitting the atomic commit.
  */
-static int bz_drm_atomic_commit_recurring(const uint32_t fb_id, struct gbm_bo *new_bo)
+static int bz_drm_atomic_commit_recurring(struct bz_breezy *breezy, const uint32_t fb_id)
 {
 	// Only need to update the framebuffer id for most frames.
 	drmModeAtomicReq *req = drmModeAtomicAlloc();
-	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_fb_id, fb_id);
+	drmModeAtomicAddProperty(req, breezy->drm.plane_id, prop_id_lookup.plane_fb_id, fb_id);
 
 	constexpr uint32_t flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
-	const int retVal = drmModeAtomicCommit(drm_fd, req, flags, new_bo);
+	const int retVal = drmModeAtomicCommit(breezy->drm.fd, req, flags, breezy);
 	drmModeAtomicFree(req);
 
 	return retVal;
@@ -526,11 +475,11 @@ static int bz_drm_atomic_commit_recurring(const uint32_t fb_id, struct gbm_bo *n
  * Initializes EGL and OpenGL ES, loading the APIs through GLAD. Also loads and compiles our shader
  * programs. A negative integer is returned on failure, or 0 for success.
  */
-static int bz_gles_init(void)
+static int bz_gles_init(struct bz_breezy *breezy)
 {
 	// Create the EGL display
-	bz_egl_display = eglGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, gbm_device, nullptr);
-	if (bz_egl_display == EGL_NO_DISPLAY) {
+	breezy->gl.display = eglGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, breezy->gbm.device, nullptr);
+	if (breezy->gl.display == EGL_NO_DISPLAY) {
 		bz_gles_print_egl_error("eglGetPlatformDisplay()", eglGetError());
 		return -1;
 	}
@@ -538,7 +487,7 @@ static int bz_gles_init(void)
 	// Initialize the EGL display
 	int major_egl_version;
 	int minor_egl_version;
-	if (!eglInitialize(bz_egl_display, &major_egl_version, &minor_egl_version)) {
+	if (!eglInitialize(breezy->gl.display, &major_egl_version, &minor_egl_version)) {
 		bz_gles_print_egl_error("eglInitialize()", eglGetError());
 		return -2;
 	}
@@ -564,7 +513,7 @@ static int bz_gles_init(void)
 		EGL_NONE
 	};
 	EGLint num_configs;
-	if (!eglChooseConfig(bz_egl_display, config_attributes, &bz_egl_config, 1, &num_configs)) {
+	if (!eglChooseConfig(breezy->gl.display, config_attributes, &breezy->gl.config, 1, &num_configs)) {
 		bz_gles_print_egl_error("eglChooseConfig()", eglGetError());
 		return -4;
 	}
@@ -580,33 +529,38 @@ static int bz_gles_init(void)
 		EGL_CONTEXT_OPENGL_DEBUG, EGL_FALSE, // "EGL_TRUE" for debugging.
 		EGL_NONE
 	};
-	bz_egl_context = eglCreateContext(bz_egl_display, bz_egl_config, EGL_NO_CONTEXT, ctx_attrs);
-	if (bz_egl_context == EGL_NO_CONTEXT) {
+	breezy->gl.context = eglCreateContext(breezy->gl.display, breezy->gl.config, EGL_NO_CONTEXT, ctx_attrs);
+	if (breezy->gl.context == EGL_NO_CONTEXT) {
 		bz_gles_print_egl_error("eglCreateContext()", eglGetError());
 		return -6;
 	}
 
 	// Create the GBM surface
-	gbm_surface = gbm_surface_create(
-		gbm_device,
-		mode_info.hdisplay,
-		mode_info.vdisplay,
+	breezy->gbm.surface = gbm_surface_create(
+		breezy->gbm.device,
+		breezy->drm.mode_info.hdisplay,
+		breezy->drm.mode_info.vdisplay,
 		GBM_FORMAT_XRGB8888,
 		GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING
 	);
-	if (gbm_surface == nullptr) {
+	if (breezy->gbm.surface == nullptr) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to create GBM surface.");
 		return -7;
 	}
 
 	// Create the EGL surface
-	bz_egl_surface = eglCreatePlatformWindowSurface(bz_egl_display, bz_egl_config, gbm_surface, nullptr);
-	if (bz_egl_surface == EGL_NO_SURFACE) {
+	breezy->gl.surface = eglCreatePlatformWindowSurface(
+		breezy->gl.display,
+		breezy->gl.config,
+		breezy->gbm.surface,
+		nullptr
+	);
+	if (breezy->gl.surface == EGL_NO_SURFACE) {
 		bz_gles_print_egl_error("eglCreatePlatformWindowSurface()", eglGetError());
 		return -8;
 	}
 
-	if (!eglMakeCurrent(bz_egl_display, bz_egl_surface, bz_egl_surface, bz_egl_context)) {
+	if (!eglMakeCurrent(breezy->gl.display, breezy->gl.surface, breezy->gl.surface, breezy->gl.context)) {
 		bz_gles_print_egl_error("eglMakeCurrent()", eglGetError());
 		return -9;
 	}
@@ -628,6 +582,20 @@ static int bz_gles_init(void)
 
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized GLES.");
 	return 0;
+}
+
+// TODO: Very temp - delete
+int color_i = 0;
+void bz_graphics_set_color_index(int i) {
+	color_i = i;
+}
+float color[3] = { 0.16f, 0.164f, 0.196f };
+void bz_graphics_change_color(struct bz_breezy *breezy, float amount) {
+	color[color_i] += amount;
+	if (amount > 0 && color[color_i] > 1.0f) color[color_i] = 1.0f;
+	if (amount < 0 && color[color_i] < 0.0f) color[color_i] = 0.0f;
+	glClearColor(color[0], color[1], color[2], 1.0f);
+	breezy->gl.is_dirty = true;
 }
 
 /**
@@ -691,96 +659,12 @@ static void bz_gles_print_egl_error(char *function_name, const EGLint error)
 
 
 // =================================================================================================
-//  Seat Management
-// -------------------------------------------------------------------------------------------------
-
-/**
- * Our libseat seat listener interface implementation. Enable and disable seat will be called
- * whenever our seat is activated or deactivated. Our handlers enable/disable the DRM/rendering
- * stuff as necessary.
- */
-static const struct libseat_seat_listener seat_listener = {
-	.enable_seat = handle_enable_seat,
-	.disable_seat = handle_disable_seat,
-};
-
-/**
- * Initializes our libseat implementation by opening a seat for our primary graphics card and
- * ensuring we have DRM master. Returns 0 on success, or a negative integer on failure.
- */
-static int bz_libseat_init(void) {
-	// Open a seat
-	seat = libseat_open_seat(&seat_listener, nullptr);
-	if (!seat) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to open seat.");
-		return -1;
-	}
-
-	// Initial dispatch to trigger "handle_enable_seat()"
-	if (libseat_dispatch(seat, 1000) < 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Initial libseat_dispatch failed.");
-		return -2;
-	}
-
-	if (!seat_active) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Seat not active after open.");
-		libseat_close_seat(seat);
-		return -3;
-	}
-
-	seat_fd = libseat_get_fd(seat);
-
-	// Open our DRM device / graphics card, and claim master
-	// TODO: Swap this out to choose a graphics device more intelligently with udev.
-	drm_device_id = libseat_open_device(seat, "/dev/dri/card1", &drm_fd);
-	if (drm_fd < 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to open DRM device.");
-		libseat_close_seat(seat);
-		return -4;
-	}
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully opened DRM device.");
-
-	// (Make sure we're master)
-	if (!drmIsMaster(drm_fd)) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to claim DRM master.");
-		return -5;
-	}
-	bz_info(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully claimed DRM master.");
-
-	return 0;
-}
-
-/**
- * Enables our seat. If it was previously enabled, the proper DRM commands are run to re-enable
- * our rendering state/buffer.
- */
-static void handle_enable_seat(struct libseat * /*s*/, void * /*data*/) {
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Enabling seat and claiming DRM Master.");
-	bz_drm_activate();
-	seat_active = true;
-}
-
-/** Disables our seat, and deactivates our DRM resources. */
-static void handle_disable_seat(struct libseat *s, void * /*data*/) {
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Disabling seat and releasing DRM Master.");
-	bz_drm_deactivate();
-	seat_active = false;
-
-	// Acknowledge we're done, releasing DRM Master.
-	if (libseat_disable_seat(s) != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to release DRM Master.");
-	}
-}
-
-
-// =================================================================================================
 //  Exposed API
 // -------------------------------------------------------------------------------------------------
 
 /**
- * Initializes our rendering pipeline by verifying the necessary EGL extensions exist, initializing
- * libseat and our DRM master claim, establishes our DRM resource pipeline, and initializes EGL with
- * OpenGL ES.
+ * Initializes our rendering pipeline by verifying the necessary EGL extensions exist, establishing
+ * our DRM resource pipeline, and initializing EGL with OpenGL ES.
  *
  * Returns 0 on success, or a negative value on failure.
  *
@@ -788,8 +672,8 @@ static void handle_disable_seat(struct libseat *s, void * /*data*/) {
  * "bz_graphics_cleanup()" to free and release all DRM-related resources whether this function
  * returned successfully or not.
  */
-int bz_graphics_initialize(void)
-{
+int bz_graphics_initialize(struct bz_breezy *breezy) {
+	// Make sure our EGL extensions are available
 	int retval = bz_gles_load_egl_extensions();
 	if (retval != 0) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
@@ -797,26 +681,35 @@ int bz_graphics_initialize(void)
 		return -1;
 	}
 
-	retval = bz_libseat_init();
-	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-			"Failed to initialize libseat. Code: %d", retval);
+	// Open our DRM device / graphics card, and claim master
+	// TODO: Swap this out to choose a graphics device more intelligently with udev.
+	breezy->drm.device_id = bz_seat_open_device(breezy, "/dev/dri/card1", &breezy->drm.fd);
+	if (breezy->drm.fd < 0) {
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to open DRM device.");
 		return -2;
 	}
+	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully opened DRM device.");
 
-	retval = bz_drm_init();
-	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-			"Failed to initialize DRM. Code: %d", retval);
+	// (Make sure we're master)
+	if (!drmIsMaster(breezy->drm.fd)) {
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to claim DRM master.");
 		return -3;
 	}
+	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully claimed DRM master.");
 
-	retval = bz_gles_init();
+	retval = bz_drm_init(breezy);
 	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-			"Failed to initialize GLES. Code: %d", retval);
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to initialize DRM. Code: %d", retval);
 		return -4;
 	}
+	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized DRM resources.");
+
+	retval = bz_gles_init(breezy);
+	if (retval != 0) {
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to initialize GLES. Code: %d", retval);
+		return -5;
+	}
+	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized EGL/GLES.");
 
 	return 0;
 }
@@ -826,67 +719,36 @@ int bz_graphics_initialize(void)
  * new events to dispatch, renders the current application state, then swaps our front and back
  * buffers.
  *
- * A value of "0" is returned on success, "1" for non-failure (but the current seat is not active,
- * so no rendering updates made), or a negative value for failure.
+ * A value of "0" is returned on success, or a negative value for failure.
  */
-int bz_graphics_loop_iteration(void) {
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Executing graphics event loop iteration.");
-
-	// Check/block for changes to our connection status
-	struct pollfd fds[2] = {
-		{ .fd = seat_fd, .events = POLLIN },
-		{ .fd = drm_fd,  .events = POLLIN },
-	};
-
-	// 0 indicates a timeout, -1 indicates failure
-	const int ret = poll(fds, 2, 1000);
-	if (ret < 0) return -1;
-	if (ret == 0) bz_info(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Timed out polling FDs.");
-
-	// Handle any potential updates from our seat
-	if (fds[0].revents & POLLIN) {
-		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Handling seat_fd event.");
-		if (libseat_dispatch(seat, 0) < 0) {
-			bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "libseat_dispatch failed.");
-		}
-	}
-
-	// Handle any potential updates from our DRM device
-	if (fds[1].revents & POLLIN) {
-		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Handling drm_fd event.");
-		drmEventContext drm_event_context = {
-			.version = DRM_EVENT_CONTEXT_VERSION,
-			.page_flip_handler = bz_drm_handle_pageflip,
-		};
-		drmHandleEvent(drm_fd, &drm_event_context);
-	}
-
-	if (!seat_active) {
-		return 1;
-	}
+int bz_graphics_loop_iteration(struct bz_breezy *breezy) {
+	// Only redraw if our buffer changed.
+	if (!breezy->gl.is_dirty) { return 0; }
+	breezy->gl.is_dirty = false;
 
 	// Render!
 	glClear(GL_COLOR_BUFFER_BIT);
 	// (...other OpenGL render commands go here...)
 
 	// Buffer switcheroo
-	if (!gbm_surface_has_free_buffers(gbm_surface)) {
+	if (!gbm_surface_has_free_buffers(breezy->gbm.surface)) {
 		bz_warn(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GBM surface has no free buffers.");
 		return -1;
 	}
-	eglSwapBuffers(bz_egl_display, bz_egl_surface);
-	struct gbm_bo *bo = gbm_surface_lock_front_buffer(gbm_surface);
-	const uint32_t fb_id = bz_drm_gbm_get_bo_fb(bo);
+	eglSwapBuffers(breezy->gl.display, breezy->gl.surface);
+	struct gbm_bo *bo = gbm_surface_lock_front_buffer(breezy->gbm.surface);
+	const uint32_t fb_id = bz_drm_gbm_get_bo_fb(breezy, bo);
 
 	// Scanout!
 	int retval = 0;
-	if (prev_bo == nullptr) {
+	if (breezy->gbm.prev_bo == nullptr) {
 		// Initial modeset is a blocking operation
-		retval = bz_drm_atomic_commit_initial(fb_id);
-		prev_bo = bo;
+		retval = bz_drm_atomic_commit_initial(breezy, fb_id);
+		breezy->gbm.prev_bo = bo;
 	} else {
 		// Recurring commits are non-blocking, so wait for it to finish before releasing the old bo.
-		retval = bz_drm_atomic_commit_recurring(fb_id, bo);
+		breezy->gbm.new_bo = bo;
+		retval = bz_drm_atomic_commit_recurring(breezy, fb_id);
 		// (When the DRM page flip completes, "bz_drm_handle_pageflip()" is called, which releases
 		// the old buffer object.)
 	}
@@ -903,66 +765,104 @@ int bz_graphics_loop_iteration(void) {
  * expected to call this when the application is terminated. No guarantees are made around trying
  * to re-initialize the graphics system after calling this cleanup function.
  */
-void bz_graphics_cleanup(void) {
+void bz_graphics_cleanup(struct bz_breezy *breezy) {
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Cleaning up bz_graphics.");
 
 	// -- GLES --
 	// TODO: Delete shader programs (future video)
 
 	// -- EGL --
-	if (bz_egl_display != nullptr) {
-		eglMakeCurrent(bz_egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	if (breezy->gl.display != nullptr) {
+		eglMakeCurrent(breezy->gl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 	}
-	if (bz_egl_context) {
-		eglDestroyContext(bz_egl_display, bz_egl_context);
-		bz_egl_context = nullptr;
+	if (breezy->gl.context) {
+		eglDestroyContext(breezy->gl.display, breezy->gl.context);
+		breezy->gl.context = nullptr;
 	}
-	if (bz_egl_surface != nullptr) {
-		eglDestroySurface(bz_egl_display, bz_egl_surface);
-		bz_egl_surface = nullptr;
+	if (breezy->gl.surface != nullptr) {
+		eglDestroySurface(breezy->gl.display, breezy->gl.surface);
+		breezy->gl.surface = nullptr;
 	}
-	if (bz_egl_display && !eglTerminate(bz_egl_display)) {
+	if (breezy->gl.display && !eglTerminate(breezy->gl.display)) {
 		bz_gles_print_egl_error("eglTerminate()", eglGetError());
 	}
-	bz_egl_display = nullptr;
+	breezy->gl.display = nullptr;
 	if (!eglReleaseThread()) {
 		bz_gles_print_egl_error("eglReleaseThread()", eglGetError());
 	}
 
 	// -- GBM --
-	if (gbm_surface != nullptr && prev_bo != nullptr) {
-		gbm_surface_release_buffer(gbm_surface, prev_bo);
-		prev_bo = nullptr;
+	if (breezy->gbm.surface != nullptr && breezy->gbm.prev_bo != nullptr) {
+		gbm_surface_release_buffer(breezy->gbm.surface, breezy->gbm.prev_bo);
+		breezy->gbm.prev_bo = nullptr;
 	}
-	if (gbm_surface != nullptr) {
-		gbm_surface_destroy(gbm_surface);
-		gbm_surface = nullptr;
+	if (breezy->gbm.surface != nullptr) {
+		gbm_surface_destroy(breezy->gbm.surface);
+		breezy->gbm.surface = nullptr;
 	}
-	if (gbm_device != nullptr) {
-		gbm_device_destroy(gbm_device);
-		gbm_device = nullptr;
+	if (breezy->gbm.device != nullptr) {
+		gbm_device_destroy(breezy->gbm.device);
+		breezy->gbm.device = nullptr;
 	}
 
-	// -- DRM / Libseat --
-	if (plane_id != 0) {
-		bz_drm_clear_plane();
+	// -- DRM --
+	if (breezy->drm.plane_id != 0) {
+		bz_drm_clear_plane(breezy);
 	}
-	if (mode_blob_id != 0 && drm_fd != -1) {
-		drmModeDestroyPropertyBlob(drm_fd, mode_blob_id);
-		mode_blob_id = 0;
+	if (breezy->drm.mode_blob_id != 0 && breezy->drm.fd != -1) {
+		drmModeDestroyPropertyBlob(breezy->drm.fd, breezy->drm.mode_blob_id);
+		breezy->drm.mode_blob_id = 0;
 	}
-	if (seat != nullptr && drm_device_id != -1) {
-		libseat_close_device(seat, drm_device_id);
-		drm_device_id = -1;
-	}
-	if (drm_fd != -1) {
-		close(drm_fd);
-		drm_fd = -1;
-	}
-	if (seat != nullptr) {
-		libseat_close_seat(seat);
-		seat = nullptr;
+	if (breezy->drm.device_id != -1) {
+		bz_seat_close_device(breezy, breezy->drm.device_id);
+		breezy->drm.device_id = -1;
+		breezy->drm.fd = -1;
 	}
 
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "DRM clean-up complete!");
+}
+
+/** Handles a pending DRM event. This should only be called when there are events pending. */
+void bz_graphics_handle_drm_event(struct bz_breezy *breezy) {
+	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Handling drm_fd event.");
+	drmEventContext drm_event_context = {
+		.version = DRM_EVENT_CONTEXT_VERSION,
+		.page_flip_handler = bz_drm_handle_pageflip,
+	};
+	drmHandleEvent(breezy->drm.fd, &drm_event_context);
+}
+
+/**
+ * Turns on all of our DRM settings whenever we reclaim DRM master. Returns the value of submitting
+ * the atomic commit.
+ */
+int bz_graphics_activate(struct bz_breezy *breezy)
+{
+	// Restore our latest, saved settings from our most recent framebuffer
+	if (breezy->gbm.prev_bo != nullptr) {
+		const uint32_t fb_id = bz_drm_gbm_get_bo_fb(breezy, breezy->gbm.prev_bo);
+		return bz_drm_atomic_commit_initial(breezy, fb_id);
+	}
+	return 0;
+}
+
+/**
+ * Clears all of our DRM settings whenever we give up DRM master. Returns the value of submitting
+ * the atomic commit.
+ */
+int bz_graphics_deactivate(struct bz_breezy *breezy)
+{
+	drmModeAtomicReq *req = drmModeAtomicAlloc();
+
+	// Clear CRTC properties
+	drmModeAtomicAddProperty(req, breezy->drm.crtc_id, prop_id_lookup.crtc_active, 0);
+	drmModeAtomicAddProperty(req, breezy->drm.crtc_id, prop_id_lookup.crtc_mode_id, 0);
+	// Clear framebuffer properties FOR ALL PLANES
+	drmModeAtomicAddProperty(req, breezy->drm.plane_id, prop_id_lookup.plane_fb_id, 0);
+	drmModeAtomicAddProperty(req, breezy->drm.plane_id, prop_id_lookup.plane_crtc_id, 0);
+
+	const int retVal = drmModeAtomicCommit(breezy->drm.fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, breezy);
+	drmModeAtomicFree(req);
+
+	return retVal;
 }

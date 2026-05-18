@@ -34,42 +34,42 @@
    <insert_a_suppression_name_here>
    Memcheck:Addr8
    obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
-   fun:bz_drm_cleanup
+   fun:bz_graphics_cleanup
    fun:main
 }
 {
    <insert_a_suppression_name_here>
    Memcheck:Addr8
    obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
-   fun:bz_drm_cleanup
+   fun:bz_graphics_cleanup
    fun:main
 }
 {
    <insert_a_suppression_name_here>
    Memcheck:Addr8
    obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
-   fun:bz_drm_cleanup
+   fun:bz_graphics_cleanup
    fun:main
 }
 {
    <insert_a_suppression_name_here>
    Memcheck:Addr1
    obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
-   fun:bz_drm_cleanup
+   fun:bz_graphics_cleanup
    fun:main
 }
 {
    <insert_a_suppression_name_here>
    Memcheck:Addr8
    obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
-   fun:bz_drm_cleanup
+   fun:bz_graphics_cleanup
    fun:main
 }
 {
    <insert_a_suppression_name_here>
    Memcheck:Addr4
    obj:/usr/lib/libnvidia-egl-gbm.so.1.1.3
-   fun:bz_drm_cleanup
+   fun:bz_graphics_cleanup
    fun:main
 }
 {
@@ -84,7 +84,7 @@
    obj:/usr/lib/libEGL_nvidia.so.580.126.18
    obj:/usr/lib/libEGL.so.1.1.0
    fun:bz_gles_init
-   fun:bz_drm_initialize
+   fun:bz_graphics_initialize
    fun:main
 }
 {
@@ -100,7 +100,7 @@
    obj:/usr/lib/libgbm.so.1.0.0
    fun:gbm_create_device
    fun:bz_drm_init
-   fun:bz_drm_initialize
+   fun:bz_graphics_initialize
    fun:main
 }
 {
