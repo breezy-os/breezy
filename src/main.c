@@ -36,13 +36,6 @@ static int bz_loop_iteration(struct bz_breezy *breezy)
 	return 0;
 }
 
-bool is_shutting_down = false;
-void bz_shutdown()
-{
-	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Shutting down...");
-	is_shutting_down = true;
-}
-
 int main(void)
 {
 	int retval = 0;
@@ -90,9 +83,10 @@ int main(void)
 	}
 
 	// Event loop!
-	while (!is_shutting_down) {
+	while (!breezy.is_shutting_down) {
 		bz_loop_iteration(&breezy);
 	}
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Shutting down...");
 
 	// Cleanup (backwards from initialization)
 input_cleanup:

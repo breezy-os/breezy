@@ -29,14 +29,7 @@ global_inc = include_directories('include')
 subdir('src')
 subdir('tests')
 
-executable('breezy',
-    sources: [
-        './src/bz_seat.c',
-        './src/bz_graphics.c',
-        './src/bz_input.c',
-        './src/gles2.c',
-        './src/main.c',
-    ],
+executable('breezy', './src/main.c',
     include_directories: global_inc,
     dependencies: [
         dependency('libseat'),
@@ -46,6 +39,7 @@ executable('breezy',
         dependency('libudev'),
         dependency('libinput'),
         dependency('xkbcommon'),
+        main_dep,
         utils_dep,
     ]
 )

@@ -8,8 +8,7 @@
 #include <xf86drmMode.h>
 #include <gbm.h>
 #include <EGL/egl.h>
-
-void bz_shutdown(); // Defined in main.c, don't hate me.
+#include <libseat.h>
 
 struct bz_drm {
 	int fd;
@@ -59,6 +58,7 @@ struct bz_input {
 
 
 struct bz_breezy {
+	bool is_shutting_down;
 	struct bz_drm drm;
 	struct bz_gbm gbm;
 	struct bz_gl gl;

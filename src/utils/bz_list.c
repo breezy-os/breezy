@@ -349,6 +349,8 @@ void bz_list_clear(struct bz_list *list, void (*free_data)(void *))
 		free(current);
 	}
 	list->length = 0;
+	list->head = nullptr;
+	list->tail = nullptr;
 }
 
 /**
@@ -408,7 +410,9 @@ void *bz_list_get_neighbor(struct bz_list *list, void *item)
 
 	// "item" is first in the list
 	if (list->head->data == item) {
-		return list->head->next->data;
+		return (list->head->next == nullptr)
+			? nullptr
+			: list->head->next->data;
 	}
 
 	// Search for "item", keeping track of the previous node to return.
@@ -436,6 +440,13 @@ struct bz_list *bz_list_clone(struct bz_list *list, void *(*clone_data)(void *))
 {
 	// Base case - source list is null.
 	if (list == nullptr) { return nullptr; }
+
+	// Error case - null "clone_data" function. This is a required parameter.
+	if (clone_data == nullptr) {
+		bz_error(BZ_LOG_LIST, __FILE__, __LINE__,
+			"Clone failed. 'clone_data' parameter is required but was null.");
+		return nullptr;
+	}
 
 	// Create the new list
 	struct bz_list *new_list = bz_list_create();

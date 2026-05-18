@@ -100,7 +100,7 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	if (super_held && press_state == XKB_KEY_DOWN) {
 		switch (xkb_keysym) {
 		case XKB_KEY_Escape:
-			bz_shutdown();
+			breezy->is_shutting_down = true;
 			break;
 		case XKB_KEY_1:
 			bz_graphics_set_color_index(0);
