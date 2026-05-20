@@ -7,6 +7,7 @@ main_lib = static_library(
         './bz_seat.c',
         './bz_graphics.c',
         './bz_input.c',
+        './bz_wayland.c',
         './gles2.c',
     ],
     include_directories: global_inc,
@@ -18,6 +19,7 @@ main_lib = static_library(
         dependency('libudev'),
         dependency('libinput'),
         dependency('xkbcommon'),
+        dependency('wayland-server'),
         utils_dep,
     ])
 main_dep = declare_dependency(link_with: main_lib, include_directories: global_inc)

@@ -56,6 +56,10 @@ struct bz_input {
 	struct bz_list *device_lookup; // Each item is of type "struct bz_input_device"
 };
 
+struct bz_wayland {
+	struct wl_display *display;
+};
+
 
 struct bz_breezy {
 	bool is_shutting_down;
@@ -64,6 +68,7 @@ struct bz_breezy {
 	struct bz_gl gl;
 	struct bz_seat seat;
 	struct bz_input input;
+	struct bz_wayland wayland;
 };
 
 

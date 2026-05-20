@@ -39,6 +39,7 @@ executable('breezy', './src/main.c',
         dependency('libudev'),
         dependency('libinput'),
         dependency('xkbcommon'),
+        dependency('wayland-server'),
         main_dep,
         utils_dep,
     ]

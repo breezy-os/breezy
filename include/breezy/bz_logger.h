@@ -24,7 +24,8 @@ void bz_error(uint8_t category, char *file, int line, const char *message_fmt, .
 #define BZ_LOG_GRAPHICS 1
 #define BZ_LOG_INPUT 2
 #define BZ_LOG_SEAT 3
-#define BZ_LOG_LIST 4
+#define BZ_LOG_WAYLAND 4
+#define BZ_LOG_LIST 5
 
 
 // #################################################################################################
