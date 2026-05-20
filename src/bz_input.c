@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <libinput.h>
 #include <string.h>
+#include <wayland-server-core.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "breezy/bz_breezy.h"
@@ -100,7 +101,7 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	if (super_held && press_state == XKB_KEY_DOWN) {
 		switch (xkb_keysym) {
 		case XKB_KEY_Escape:
-			breezy->is_shutting_down = true;
+			wl_display_terminate(breezy->wayland.display);
 			break;
 		case XKB_KEY_1:
 			bz_graphics_set_color_index(0);
@@ -254,12 +255,13 @@ void bz_input_deactivate(struct bz_breezy *breezy)
 	}
 }
 
-int bz_input_process_events(struct bz_breezy *breezy)
+int bz_input_process_events(int /*fd*/, uint32_t /*mask*/, void *data)
 {
+	struct bz_breezy *breezy = data;
 	if (libinput_dispatch(breezy->input.libinput) != 0) {
 		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__,
 			"Failed to dispatch libinput: %s.", strerror(errno));
-		return 1;
+		return 0;
 	}
 
 	struct libinput_event *event;

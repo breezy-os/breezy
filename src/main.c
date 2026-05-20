@@ -1,8 +1,6 @@
 
 #include "breezy/bz_breezy.h"
 
-#include <sys/poll.h>
-
 #include <wayland-server-core.h>
 
 #include "breezy/bz_graphics.h"
@@ -12,50 +10,22 @@
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
 
-static int bz_loop_iteration(struct bz_breezy *breezy)
-{
-	bz_debug(BZ_LOG_MAIN, __FILE__, __LINE__, "Executing event loop iteration.");
-
-	// Check for changes to our FDs
-	struct pollfd fds[3] = {
-		{ .fd = breezy->seat.fd,  .events = POLLIN },
-		{ .fd = breezy->drm.fd,   .events = POLLIN },
-		{ .fd = breezy->input.fd, .events = POLLIN },
-	};
-	const int ret = poll(fds, 3, 1000); // 0 indicates a timeout, -1 indicates failure
-	if (ret < 0) return -1;
-	if (ret == 0) bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Timed out polling FDs.");
-
-	// Handle any potential updates from our FDs
-	if (fds[0].revents & POLLIN) { bz_seat_handle_libseat_event(breezy); }
-	if (fds[1].revents & POLLIN) { bz_graphics_handle_drm_event(breezy); }
-	if (fds[2].revents & POLLIN) { bz_input_process_events(breezy); }
-
-	// Do other processing as appropriate
-	if (breezy->seat.active) {
-		bz_graphics_loop_iteration(breezy);
-	}
-
-	return 0;
-}
 
 int main(void)
 {
 	int retval = 0;
 
 	// Set up our logger
-	bz_log_initialize(BZ_LOG_WARN);
-	bz_log_set_level(BZ_LOG_MAIN, BZ_LOG_INFO);
-	bz_log_set_level(BZ_LOG_GRAPHICS, BZ_LOG_INFO);
-	bz_log_set_level(BZ_LOG_INPUT, BZ_LOG_DEBUG);
+	bz_log_initialize(BZ_LOG_INFO);
+	bz_log_set_level(BZ_LOG_WAYLAND, BZ_LOG_DEBUG);
 
 	// Initialize our main "breezy" struct, explicitly setting non-zero/nullptr values as needed.
 	struct bz_breezy breezy = { 0 };
 	breezy.drm.fd = -1;
 	breezy.drm.device_id = -1;
-	breezy.gl.is_dirty = true;
 	breezy.seat.fd = -1;
 	breezy.input.device_lookup = bz_list_create();
+	breezy.wayland.event_sources = bz_list_create();
 	if (breezy.input.device_lookup == nullptr) {
 		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__, "Failed to initialize device lookup list.");
 		return -1; // If we're already failing to malloc this early, let's just exit.
@@ -93,10 +63,36 @@ int main(void)
 		goto wayland_cleanup;
 	}
 
+	// Configure our Wayland event loop
+	struct wl_event_loop *evt_loop = wl_display_get_event_loop(breezy.wayland.display);
+	struct wl_event_source *seat_source = wl_event_loop_add_fd(
+		evt_loop,
+		breezy.seat.fd,
+		WL_EVENT_READABLE,
+		bz_seat_handle_libseat_event,
+		&breezy
+	);
+	bz_list_append(breezy.wayland.event_sources, seat_source);
+	struct wl_event_source *drm_source = wl_event_loop_add_fd(
+		evt_loop,
+		breezy.drm.fd,
+		WL_EVENT_READABLE,
+		bz_graphics_handle_drm_event,
+		&breezy
+	);
+	bz_list_append(breezy.wayland.event_sources, drm_source);
+	struct wl_event_source *input_source = wl_event_loop_add_fd(
+		evt_loop,
+		breezy.input.fd,
+		WL_EVENT_READABLE,
+		bz_input_process_events,
+		&breezy
+	);
+	bz_list_append(breezy.wayland.event_sources, input_source);
+
 	// Event loop!
-	while (!breezy.is_shutting_down) {
-		bz_loop_iteration(&breezy);
-	}
+	bz_graphics_schedule_render(&breezy);
+	wl_display_run(breezy.wayland.display);
 	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Shutting down...");
 
 	// Cleanup (backwards from initialization)

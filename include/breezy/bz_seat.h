@@ -6,8 +6,9 @@
 #include "breezy/bz_breezy.h"
 
 int bz_seat_initialize(struct bz_breezy *breezy);
-void bz_seat_handle_libseat_event(struct bz_breezy *breezy);
 void bz_seat_cleanup(struct bz_breezy *breezy);
+
+int bz_seat_handle_libseat_event(int fd, uint32_t mask, void *data);
 
 const char *bz_seat_name(struct bz_breezy *breezy);
 int bz_seat_open_device(struct bz_breezy *breezy, const char *path, int *fd);

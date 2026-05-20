@@ -53,16 +53,16 @@ struct bz_input {
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
 	struct xkb_state *xkb_state;
-	struct bz_list *device_lookup; // Each item is of type "struct bz_input_device"
+	struct bz_list *device_lookup; // Each item is of type "struct bz_input_device *"
 };
 
 struct bz_wayland {
 	struct wl_display *display;
+	struct bz_list *event_sources; // Each item is of type "struct wl_event_source *"
 };
 
 
 struct bz_breezy {
-	bool is_shutting_down;
 	struct bz_drm drm;
 	struct bz_gbm gbm;
 	struct bz_gl gl;
