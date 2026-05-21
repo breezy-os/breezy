@@ -40,6 +40,7 @@ static void handle_enable_seat(struct libseat * /*s*/, void *data) {
 	bz_graphics_activate(breezy);
 	bz_input_activate(breezy);
 	breezy->seat.active = true;
+	bz_graphics_schedule_render(breezy);
 }
 
 /** Disables our seat, and deactivates our DRM resources. */

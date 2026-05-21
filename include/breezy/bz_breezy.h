@@ -58,6 +58,7 @@ struct bz_input {
 
 struct bz_wayland {
 	struct wl_display *display;
+	const char *socket_name;
 	struct bz_list *event_sources; // Each item is of type "struct wl_event_source *"
 };
 

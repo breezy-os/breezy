@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 #include <gbm.h>
-#include <wayland-server-core.h>
+#include <wayland-server.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <glad/gles2.h>
@@ -763,7 +763,7 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
 void bz_graphics_schedule_render(struct bz_breezy *breezy)
 {
 	// Only schedule if we're not already scheduled
-	if (!breezy->gl.is_dirty) {
+	if (breezy->wayland.display && !breezy->gl.is_dirty) {
 		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Scheduling render.");
 		breezy->gl.is_dirty = true;
 		struct wl_event_loop *evt_loop = wl_display_get_event_loop(breezy->wayland.display);
