@@ -1,7 +1,8 @@
 
 subdir('utils')
+subdir('wayland')
 
-main_lib = static_library(
+bz_main_lib = static_library(
     'breezy-main',
     sources: [
         './bz_seat.c',
@@ -20,6 +21,7 @@ main_lib = static_library(
         dependency('libinput'),
         dependency('xkbcommon'),
         dependency('wayland-server'),
-        utils_dep,
+        bz_utils_dep,
+        bz_wayland_dep,
     ])
-main_dep = declare_dependency(link_with: main_lib, include_directories: global_inc)
+bz_main_dep = declare_dependency(link_with: bz_main_lib, include_directories: global_inc)

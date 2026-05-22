@@ -5,9 +5,13 @@
 #include <sys/wait.h>
 
 #include <wayland-server.h>
+#include <wayland/xdg-shell-server-protocol.h>
 
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
+#include "breezy/bz_wl_devices.h"
+#include "breezy/bz_wl_display.h"
+#include "breezy/bz_xdg_shell.h"
 
 
 // =================================================================================================
@@ -17,6 +21,14 @@
 static void bz_wayland_destroy_event_source(void *source);
 static int bz_wayland_sigchld_handler(int /*signal_number*/, void * /*data*/);
 static void bz_wayland_handle_client_connection(struct wl_listener * /*listener*/, void *data);
+
+// Wayland "Global" constructors
+static int bz_wayland_create_compositor(struct bz_breezy *breezy);
+static int bz_wayland_create_subcompositor(struct bz_breezy *breezy);
+static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy);
+static int bz_wayland_create_data_device_manager(struct bz_breezy *breezy);
+static int bz_wayland_create_seat(struct bz_breezy *breezy);
+static int bz_wayland_create_output(struct bz_breezy *breezy);
 
 
 // =================================================================================================
@@ -56,6 +68,108 @@ static void bz_wayland_handle_client_connection(struct wl_listener * /*listener*
 	// TODO-now: Save off wl_client in a list somewhere..?
 }
 
+static int bz_wayland_create_compositor(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&wl_compositor_interface,
+		BZ_COMPOSITOR_VERSION,
+		nullptr,
+		bz_compositor_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Error creating compositor global.");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int bz_wayland_create_subcompositor(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&wl_subcompositor_interface,
+		BZ_SUBCOMPOSITOR_VERSION,
+		nullptr,
+		bz_subcompositor_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Error creating subcompositor global.");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&xdg_wm_base_interface,
+		BZ_XDG_WM_BASE_VERSION,
+		nullptr,
+		bz_xdg_wm_base_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Error creating xdg_wm_base global.");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int bz_wayland_create_data_device_manager(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&wl_data_device_manager_interface,
+		BZ_DATA_DEVICE_MANAGER_VERSION,
+		nullptr,
+		bz_data_device_manager_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Error creating data_device_manager global.");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int bz_wayland_create_seat(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&wl_seat_interface,
+		BZ_SEAT_VERSION,
+		nullptr,
+		bz_seat_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Error creating wl_seat global.");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int bz_wayland_create_output(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&wl_output_interface,
+		BZ_OUTPUT_VERSION,
+		nullptr,
+		bz_output_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Error creating wl_output global.");
+		return -1;
+	}
+
+	return 0;
+}
+
 
 // =================================================================================================
 //  Exposed API
@@ -77,7 +191,28 @@ int bz_wayland_initialize(struct bz_breezy *breezy)
 	bz_list_append(breezy->wayland.event_sources, sigchld_handler);
 
 	// Create our globals
-	// TODO: Upcoming video (wl_compositor, wl_shm, xwm_base)
+	if (bz_wayland_create_compositor(breezy) < 0) {
+		return -2;
+	}
+	if (bz_wayland_create_subcompositor(breezy) < 0) {
+		return -3;
+	}
+	if (wl_display_init_shm(breezy->wayland.display) != 0) {
+		return -4;
+	}
+	if (bz_wayland_create_xdg_wm_base(breezy) < 0) {
+		return -5;
+	}
+	if (bz_wayland_create_data_device_manager(breezy) < 0) {
+		return -6;
+	}
+	if (bz_wayland_create_seat(breezy) < 0) {
+		return -7;
+	}
+	if (bz_wayland_create_output(breezy) < 0) {
+		return -8;
+	}
+
 
 	// Set up a listener for new client connections
 	struct wl_listener client_conn_listener;
@@ -88,7 +223,7 @@ int bz_wayland_initialize(struct bz_breezy *breezy)
 	breezy->wayland.socket_name = wl_display_add_socket_auto(breezy->wayland.display);
 	if (!breezy->wayland.socket_name) {
 		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to add socket to Wayland display.");
-		return -2;
+		return -9;
 	}
 
 	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Successfully initialized our Wayland system.");
