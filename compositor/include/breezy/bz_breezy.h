@@ -9,6 +9,9 @@
 #include <gbm.h>
 #include <EGL/egl.h>
 #include <libseat.h>
+#include <wayland-server.h>
+
+#include "glad/gles2.h"
 
 struct bz_drm {
 	int fd;
@@ -33,6 +36,7 @@ struct bz_gl {
 	EGLContext context;
 	EGLSurface surface;
 	bool is_dirty;
+	GLuint client_shader_program;
 };
 
 struct bz_seat {
@@ -59,7 +63,9 @@ struct bz_input {
 struct bz_wayland {
 	struct wl_display *display;
 	const char *socket_name;
+	struct wl_listener new_client_listener;
 	struct bz_list *event_sources; // Each item is of type "struct wl_event_source *"
+	struct bz_list *clients; // Each item is of type "struct wl_client *"
 };
 
 

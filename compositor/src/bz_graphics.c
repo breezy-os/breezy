@@ -1,5 +1,6 @@
 
 #include "breezy/bz_graphics.h"
+#include "breezy/bz_shaders.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -12,8 +13,10 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+#include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
+#include "breezy/bz_wayland.h"
 
 
 // =================================================================================================
@@ -50,6 +53,9 @@ static int bz_gles_assert_extension(const char *extensionList, const char *exten
 static char *bz_get_egl_error_text(EGLint error);
 static void bz_gles_print_egl_error(char *function_name, EGLint error);
 static void bz_gles_render_and_commit(void *data);
+// Shaders
+static GLuint bz_gles_create_client_shader_program(void);
+static GLuint compile_shader(GLenum type, const char *code);
 
 
 // =================================================================================================
@@ -579,8 +585,12 @@ static int bz_gles_init(struct bz_breezy *breezy)
 	// Define some GLES configs
 	glClearColor(0.16f, 0.164f, 0.196f, 1.0f);
 
-	// Load our shaders
-	// TODO: Future video :)
+	// Create our "client shader program" for drawing connected clients
+	GLuint program = bz_gles_create_client_shader_program();
+	if (program == 0) {
+		return -11;
+	}
+	breezy->gl.client_shader_program = program;
 
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized GLES.");
 	return 0;
@@ -668,9 +678,19 @@ static void bz_gles_render_and_commit(void *data) {
 	if (!breezy->gl.is_dirty) { return; }
 	breezy->gl.is_dirty = false;
 
-	// Render!
+	// Render time! First, clear the creen
 	glClear(GL_COLOR_BUFFER_BIT);
-	// (...other OpenGL render commands go here...)
+	// ...then render each client
+	struct bz_node *curr_client = breezy->wayland.clients->head;
+	while (curr_client != nullptr) {
+		glUseProgram(breezy->gl.client_shader_program);
+		struct wl_client *client = curr_client->data;
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		glBindVertexArray(client_data->vao);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+		curr_client = curr_client->next;
+	}
+	glBindVertexArray(0);
 
 	// Buffer switcheroo
 	if (!gbm_surface_has_free_buffers(breezy->gbm.surface)) {
@@ -697,6 +717,54 @@ static void bz_gles_render_and_commit(void *data) {
 	if (retval != 0) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to make an atomic commit.");
 	}
+}
+
+static GLuint bz_gles_create_client_shader_program(void)
+{
+	// Compile our shaders
+	GLuint client_vert_shader = compile_shader(GL_VERTEX_SHADER,   CLIENT_VERT_SRC);
+	GLuint client_frag_shader = compile_shader(GL_FRAGMENT_SHADER, CLIENT_FRAG_SRC);
+
+	// Create/link our OpenGL program
+	GLuint client_shader_program = glCreateProgram();
+	glAttachShader(client_shader_program, client_vert_shader);
+	glAttachShader(client_shader_program, client_frag_shader);
+	glLinkProgram(client_shader_program);
+
+	GLint status;
+	glGetProgramiv(client_shader_program, GL_LINK_STATUS, &status);
+	if (status == GL_FALSE) {
+		char message[512];
+		glGetProgramInfoLog(client_shader_program, 512, nullptr, message);
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Shader link error: %s", message);
+		return 0;
+	}
+
+	glDeleteShader(client_vert_shader);
+	glDeleteShader(client_frag_shader);
+
+	return client_shader_program;
+}
+
+static GLuint compile_shader(GLenum type, const char *code)
+{
+	// Create / compile the shader
+	GLuint shader = glCreateShader(type);
+	glShaderSource(shader, 1, &code, NULL);
+	glCompileShader(shader);
+
+	// Error checking / handling
+	GLint status;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+	if (status == GL_FALSE) {
+		// It failed, so print the latest message from the OpenGL shader log
+		char message[512];
+		glGetShaderInfoLog(shader, 512, NULL, message);
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Shader error: %s", message);
+	}
+
+	// It all worked, return the goods!
+	return shader;
 }
 
 
@@ -781,7 +849,9 @@ void bz_graphics_cleanup(struct bz_breezy *breezy) {
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Cleaning up bz_graphics.");
 
 	// -- GLES --
-	// TODO: Delete shader programs (future video)
+	if (breezy->gl.client_shader_program != 0) {
+		glDeleteProgram(breezy->gl.client_shader_program);
+	}
 
 	// -- EGL --
 	if (breezy->gl.display != nullptr) {

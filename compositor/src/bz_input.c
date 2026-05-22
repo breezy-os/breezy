@@ -18,6 +18,7 @@
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
+#include "breezy/bz_wayland.h"
 
 
 // =================================================================================================
@@ -30,6 +31,7 @@ static bool bz_input_device_fd_matches(void *fd, void *device);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
+static void bz_input_terminate_client(struct bz_breezy *breezy);
 
 
 // =================================================================================================
@@ -113,7 +115,10 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 			break;
 		// Start / Stop Applications
 		case XKB_KEY_t:
-			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/bin/bins/bzfoot");
+			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/git/breezy/build/test-client/test-client");
+			break;
+		case XKB_KEY_q:
+			bz_input_terminate_client(breezy);
 			break;
 		// Change Colors
 		case XKB_KEY_1:
@@ -196,6 +201,23 @@ static void bz_input_spawn_child(const char *socket_name, const char *program_pa
 
 	// -- Parent Process --
 	// Nothing to do!
+}
+
+/**
+ * Terminates the first client in our list of connected clients. This will eventually be improved
+ * to terminate whichever client is "active", but at the time of writing, we don't have any concept
+ * of an "active client".
+ */
+static void bz_input_terminate_client(struct bz_breezy *breezy)
+{
+	struct wl_client *client = breezy->wayland.clients->head->data;
+	const struct bz_client *client_data = wl_client_get_user_data(client);
+
+	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "Terminating client with pid %d.", client_data->pid);
+	kill(client_data->pid, SIGTERM);
+	// TODO: After a few seconds, if it still exists: kill(client_data->pid, SIGKILL);
+
+	// (Data cleanup is handled in the client disconnect handlers.)
 }
 
 

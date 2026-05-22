@@ -2,11 +2,13 @@
 #include "breezy/bz_wayland.h"
 
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/wait.h>
 
 #include <wayland-server.h>
 #include <wayland/xdg-shell-server-protocol.h>
 
+#include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wl_devices.h"
@@ -20,7 +22,9 @@
 
 static void bz_wayland_destroy_event_source(void *source);
 static int bz_wayland_sigchld_handler(int /*signal_number*/, void * /*data*/);
-static void bz_wayland_handle_client_connection(struct wl_listener * /*listener*/, void *data);
+static void bz_wayland_client_dtor(void *data);
+static void bz_wayland_handle_client_connection(struct wl_listener *listener, void *data);
+static void bz_wayland_handle_client_disconnect(struct wl_listener * /*listener*/, void *data);
 
 // Wayland "Global" constructors
 static int bz_wayland_create_compositor(struct bz_breezy *breezy);
@@ -53,21 +57,115 @@ static int bz_wayland_sigchld_handler(int /*signal_number*/, void * /*data*/)
 	return 0;
 }
 
-/** Registers new clients, and sets up proper tracking structures for them. */
-static void bz_wayland_handle_client_connection(struct wl_listener * /*listener*/, void *data)
+// TODO: Temporary -- will be replaced/moved to surface functionality when that's implemented.
+static void bz_wayland_add_opengl_objects(struct bz_client *client_data)
 {
-	struct wl_client *client = data;
+	static float x = -0.9f;
+	static float y = 0.9f;
+	const float w = 0.2f;
+	const float h = 0.2f;
 
+	float left = x; float right  = x + w;
+	float top  = y; float bottom = y - h;
+	float vertices[] = {
+		// Position (xy)  // Color (rgb)
+		right, top,       1.0f, 0.0f, 0.0f,
+		right, bottom,    1.0f, 1.0f, 1.0f,
+		left,  bottom,    0.0f, 0.0f, 1.0f,
+		left,  top,       1.0f, 1.0f, 1.0f,
+	};
+	uint32_t indices[] = {
+		0, 1, 3, // Triangle 1 (red)
+		1, 2, 3, // Triangle 2 (blue)
+	};
+	x += w;
+	y -= h;
+
+	glGenVertexArrays(1, &client_data->vao);
+	glBindVertexArray(client_data->vao);
+
+	glGenBuffers(1, &client_data->vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, client_data->vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+	glGenBuffers(1, &client_data->ebo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, client_data->ebo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(0);
+
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(2 * sizeof(float)));
+	glEnableVertexAttribArray(1);
+
+	glBindVertexArray(0);
+}
+
+static void bz_wayland_client_dtor(void *data)
+{
+	struct bz_client *client_data = data;
+
+	// TODO: This deletion/cleanup will be moved when we implement surfaces:
+	glDeleteVertexArrays(1, &client_data->vao);
+	glDeleteBuffers(1, &client_data->vbo);
+	glDeleteBuffers(1, &client_data->ebo);
+
+	free(client_data);
+}
+
+/** Registers new clients, and sets up proper tracking structures for them. */
+static void bz_wayland_handle_client_connection(struct wl_listener *listener, void *data)
+{
+	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Handling client connection");
+	struct wl_client *client = data;
+	struct bz_wayland *wayland_data = wl_container_of(listener, wayland_data, new_client_listener);
+	struct bz_breezy *breezy = wl_container_of(wayland_data, breezy, wayland);
+
+	// Figure out the PID.
 	pid_t pid;
 	uid_t uid;
 	gid_t gid;
 	wl_client_get_credentials(client, &pid, &uid, &gid);
-
 	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Client with pid %d connected!", pid);
 
-	// TODO-now: Save off wl_client in a list somewhere..?
+	// Set up our custom data for the client
+	struct bz_client *client_data = malloc(sizeof(*client_data));
+	if (client_data == nullptr) {
+		return;
+	}
+	client_data->breezy = breezy;
+	client_data->pid = pid;
+	bz_wayland_add_opengl_objects(client_data);
+	wl_client_set_user_data(client, client_data, bz_wayland_client_dtor);
+
+	// Add the client to our "clients" list.
+	bz_list_append(wayland_data->clients, client);
+
+	// Set up a listener to clean up the client.
+	client_data->client_disconnect_listener.notify = bz_wayland_handle_client_disconnect;
+	wl_client_add_destroy_listener(client, &client_data->client_disconnect_listener);
+
+	// Make sure the client gets drawn
+	// TODO: This is temporary, and will be (re)moved when we set up surfaces.
+	bz_graphics_schedule_render(breezy);
 }
 
+/** Handles client disconnects by removing the client from our global tracking list. */
+static void bz_wayland_handle_client_disconnect(struct wl_listener * /*listener*/, void *data)
+{
+	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Handling client disconnect");
+	// Remove the wl_client from our globally-tracked list of wayland clients
+	struct wl_client *client = data;
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	bz_list_remove(client_data->breezy->wayland.clients, client, nullptr);
+	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Client with pid %d disconnected!", client_data->pid);
+
+	// Make sure the client gets undrawn
+	// TODO: This is temporary, and will be (re)moved when we set up surfaces.
+	bz_graphics_schedule_render(client_data->breezy);
+}
+
+/** Creates the wl_compositor global. */
 static int bz_wayland_create_compositor(struct bz_breezy *breezy)
 {
 	struct wl_global *glob = wl_global_create(
@@ -85,6 +183,7 @@ static int bz_wayland_create_compositor(struct bz_breezy *breezy)
 	return 0;
 }
 
+/** Creates the wl_subcompositor global. */
 static int bz_wayland_create_subcompositor(struct bz_breezy *breezy)
 {
 	struct wl_global *glob = wl_global_create(
@@ -102,6 +201,7 @@ static int bz_wayland_create_subcompositor(struct bz_breezy *breezy)
 	return 0;
 }
 
+/** Creates the xdg_wm_base global. */
 static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy)
 {
 	struct wl_global *glob = wl_global_create(
@@ -119,6 +219,7 @@ static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy)
 	return 0;
 }
 
+/** Creates the wl_data_device_manager global. */
 static int bz_wayland_create_data_device_manager(struct bz_breezy *breezy)
 {
 	struct wl_global *glob = wl_global_create(
@@ -136,6 +237,7 @@ static int bz_wayland_create_data_device_manager(struct bz_breezy *breezy)
 	return 0;
 }
 
+/** Creates the wl_seat global. */
 static int bz_wayland_create_seat(struct bz_breezy *breezy)
 {
 	struct wl_global *glob = wl_global_create(
@@ -153,6 +255,7 @@ static int bz_wayland_create_seat(struct bz_breezy *breezy)
 	return 0;
 }
 
+/** Creates the wl_output global. */
 static int bz_wayland_create_output(struct bz_breezy *breezy)
 {
 	struct wl_global *glob = wl_global_create(
@@ -215,9 +318,11 @@ int bz_wayland_initialize(struct bz_breezy *breezy)
 
 
 	// Set up a listener for new client connections
-	struct wl_listener client_conn_listener;
-	client_conn_listener.notify = bz_wayland_handle_client_connection;
-	wl_display_add_client_created_listener(breezy->wayland.display, &client_conn_listener);
+	breezy->wayland.new_client_listener.notify = bz_wayland_handle_client_connection;
+	wl_display_add_client_created_listener(
+		breezy->wayland.display,
+		&breezy->wayland.new_client_listener
+	);
 
 	// Prepare the socket for client connection
 	breezy->wayland.socket_name = wl_display_add_socket_auto(breezy->wayland.display);
@@ -234,6 +339,10 @@ void bz_wayland_cleanup(struct bz_breezy *breezy)
 {
 	if (breezy->wayland.event_sources != nullptr) {
 		bz_list_free(breezy->wayland.event_sources, bz_wayland_destroy_event_source);
+	}
+	if (breezy->wayland.clients != nullptr) {
+		// This is a list of "wl_clients" which should be cleaned up by other means.
+		bz_list_free(breezy->wayland.clients, nullptr);
 	}
 	if (breezy->wayland.display != nullptr) {
 		wl_display_destroy_clients(breezy->wayland.display);

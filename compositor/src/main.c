@@ -29,6 +29,7 @@ int main(void)
 	breezy.seat.fd = -1;
 	breezy.input.device_lookup = bz_list_create();
 	breezy.wayland.event_sources = bz_list_create();
+	breezy.wayland.clients = bz_list_create();
 	if (breezy.input.device_lookup == nullptr) {
 		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__, "Failed to initialize device lookup list.");
 		return -1; // If we're already failing to malloc this early, let's just exit.
