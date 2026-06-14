@@ -16,7 +16,7 @@ foreach t : [
     exe = executable('test_' + t,
         'test_' + t + '.c',
         dependencies: [
-            main_dep,
+            bz_main_dep,
             unity_dep,
             fff_dep,
             dependency('libdrm'),

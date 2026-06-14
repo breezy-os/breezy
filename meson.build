@@ -2,7 +2,7 @@
 project('breezy-os', 'c', default_options: [
     'c_std=c23',
     'warning_level=3',
-#    'buildtype=debugoptimized', # SETS -O2, which breaks some leak detections
+    #    'buildtype=debugoptimized', # SETS -O2, which breaks some leak detections
     'buildtype=debug',
     'b_sanitize=address,undefined',
     'b_lundef=false',
@@ -24,22 +24,5 @@ extra_warnings = cc.get_supported_arguments([
 ])
 add_project_arguments(extra_warnings, language: 'c')
 
-global_inc = include_directories('include')
-
-subdir('src')
-subdir('tests')
-
-executable('breezy', './src/main.c',
-    include_directories: global_inc,
-    dependencies: [
-        dependency('libseat'),
-        dependency('libdrm'),
-        dependency('gbm'),
-        dependency('egl'),
-        dependency('libudev'),
-        dependency('libinput'),
-        dependency('xkbcommon'),
-        main_dep,
-        utils_dep,
-    ]
-)
+subdir('compositor')
+subdir('test-client')

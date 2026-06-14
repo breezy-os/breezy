@@ -1,9 +1,16 @@
+// This gives us access to setenv() for setting WAYLAND_DISPLAY on the forked child process
+#define _POSIX_C_SOURCE 200809L // NOLINT
 
 #include "breezy/bz_input.h"
 
 #include <errno.h>
 #include <libinput.h>
+#include <libgen.h>
+#include <signal.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <wayland-server.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "breezy/bz_breezy.h"
@@ -11,6 +18,7 @@
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
+#include "breezy/bz_wayland.h"
 
 
 // =================================================================================================
@@ -22,6 +30,8 @@ static void bz_input_close_restricted(int fd, void *data);
 static bool bz_input_device_fd_matches(void *fd, void *device);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
+static void bz_input_spawn_child(const char *socket_name, const char *program_path);
+static void bz_input_terminate_client(struct bz_breezy *breezy);
 
 
 // =================================================================================================
@@ -99,9 +109,18 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	// Now handle all Breezy keycombos (ie, those with "super")
 	if (super_held && press_state == XKB_KEY_DOWN) {
 		switch (xkb_keysym) {
+		// Quit Compositor
 		case XKB_KEY_Escape:
-			breezy->is_shutting_down = true;
+			wl_display_terminate(breezy->wayland.display);
 			break;
+		// Start / Stop Applications
+		case XKB_KEY_t:
+			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/git/breezy/build/test-client/test-client");
+			break;
+		case XKB_KEY_q:
+			bz_input_terminate_client(breezy);
+			break;
+		// Change Colors
 		case XKB_KEY_1:
 			bz_graphics_set_color_index(0);
 			break;
@@ -148,6 +167,57 @@ static int bz_input_check_vt_change(const bool ctrl_held, const bool alt_held, c
 	case XKB_KEY_F12: case XKB_KEY_XF86Fn_F12: case XKB_KEY_XF86Switch_VT_12: return 12;
 	default: return -1;
 	}
+}
+
+/**
+ * Forks the current process, and runs the provided program_path in its place. The socket_name is
+ * provided to the WAYLAND_DISPLAY environment variable.
+ */
+static void bz_input_spawn_child(const char *socket_name, const char *program_path)
+{
+	const pid_t pid = fork();
+	if (pid == -1) {
+		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Failed to fork the child process.");
+		return;
+	}
+
+	// -- Child Process --
+	if (pid == 0) {
+		// Unblock all signals
+		sigset_t set;
+		sigfillset(&set);
+		sigprocmask(SIG_UNBLOCK, &set, nullptr);
+
+		// Launch the program
+		setenv("WAYLAND_DISPLAY", socket_name, 1);
+		const char *prog_name = basename((char *)program_path);
+		if (prog_name) {
+			execlp(program_path, prog_name, nullptr);
+		}
+
+		// This is unreachable when everything goes correctly
+		_exit(1);
+	}
+
+	// -- Parent Process --
+	// Nothing to do!
+}
+
+/**
+ * Terminates the first client in our list of connected clients. This will eventually be improved
+ * to terminate whichever client is "active", but at the time of writing, we don't have any concept
+ * of an "active client".
+ */
+static void bz_input_terminate_client(struct bz_breezy *breezy)
+{
+	struct wl_client *client = breezy->wayland.clients->head->data;
+	const struct bz_client *client_data = wl_client_get_user_data(client);
+
+	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "Terminating client with pid %d.", client_data->pid);
+	kill(client_data->pid, SIGTERM);
+	// TODO: After a few seconds, if it still exists: kill(client_data->pid, SIGKILL);
+
+	// (Data cleanup is handled in the client disconnect handlers.)
 }
 
 
@@ -254,12 +324,13 @@ void bz_input_deactivate(struct bz_breezy *breezy)
 	}
 }
 
-int bz_input_process_events(struct bz_breezy *breezy)
+int bz_input_process_events(int /*fd*/, uint32_t /*mask*/, void *data)
 {
+	struct bz_breezy *breezy = data;
 	if (libinput_dispatch(breezy->input.libinput) != 0) {
 		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__,
 			"Failed to dispatch libinput: %s.", strerror(errno));
-		return 1;
+		return 0;
 	}
 
 	struct libinput_event *event;

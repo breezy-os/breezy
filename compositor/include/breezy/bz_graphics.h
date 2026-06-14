@@ -9,10 +9,11 @@
 // -- Public API --
 
 int bz_graphics_initialize(struct bz_breezy *breezy);
-int bz_graphics_loop_iteration(struct bz_breezy *breezy);
 void bz_graphics_cleanup(struct bz_breezy *breezy);
 
-void bz_graphics_handle_drm_event(struct bz_breezy *breezy);
+int bz_graphics_handle_drm_event(int fd, uint32_t mask, void *data);
+void bz_graphics_schedule_render(struct bz_breezy *breezy);
+
 int bz_graphics_activate(struct bz_breezy *breezy);
 int bz_graphics_deactivate(struct bz_breezy *breezy);
 

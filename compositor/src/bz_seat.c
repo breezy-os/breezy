@@ -40,7 +40,7 @@ static void handle_enable_seat(struct libseat * /*s*/, void *data) {
 	bz_graphics_activate(breezy);
 	bz_input_activate(breezy);
 	breezy->seat.active = true;
-	breezy->gl.is_dirty = true;
+	bz_graphics_schedule_render(breezy);
 }
 
 /** Disables our seat, and deactivates our DRM resources. */
@@ -87,15 +87,20 @@ int bz_seat_initialize(struct bz_breezy *breezy) {
 
 	breezy->seat.fd = libseat_get_fd(breezy->seat.seat);
 
+	bz_info(BZ_LOG_SEAT, __FILE__, __LINE__, "Successfully initialized our seat system.");
 	return 0;
 }
 
 /** Dispatches a pending libseat event. This should only be called when there are events pending. */
-void bz_seat_handle_libseat_event(struct bz_breezy *breezy) {
+
+int bz_seat_handle_libseat_event(int /*fd*/, uint32_t /*mask*/, void *data)
+{
+	struct bz_breezy *breezy = data;
 	bz_debug(BZ_LOG_SEAT, __FILE__, __LINE__, "Handling seat_fd event.");
 	if (libseat_dispatch(breezy->seat.seat, 0) < 0) {
 		bz_error(BZ_LOG_SEAT, __FILE__, __LINE__, "libseat_dispatch failed.");
 	}
+	return 0;
 }
 
 /**

@@ -1,18 +1,22 @@
 
 #include "breezy/bz_graphics.h"
+#include "breezy/bz_shaders.h"
 
 #include <string.h>
 #include <stdlib.h>
 
 #include <gbm.h>
+#include <wayland-server.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <glad/gles2.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+#include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
+#include "breezy/bz_wayland.h"
 
 
 // =================================================================================================
@@ -48,6 +52,10 @@ static int bz_gles_load_egl_extensions(void);
 static int bz_gles_assert_extension(const char *extensionList, const char *extensionName);
 static char *bz_get_egl_error_text(EGLint error);
 static void bz_gles_print_egl_error(char *function_name, EGLint error);
+static void bz_gles_render_and_commit(void *data);
+// Shaders
+static GLuint bz_gles_create_client_shader_program(void);
+static GLuint compile_shader(GLenum type, const char *code);
 
 
 // =================================================================================================
@@ -577,8 +585,12 @@ static int bz_gles_init(struct bz_breezy *breezy)
 	// Define some GLES configs
 	glClearColor(0.16f, 0.164f, 0.196f, 1.0f);
 
-	// Load our shaders
-	// TODO: Future video :)
+	// Create our "client shader program" for drawing connected clients
+	GLuint program = bz_gles_create_client_shader_program();
+	if (program == 0) {
+		return -11;
+	}
+	breezy->gl.client_shader_program = program;
 
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized GLES.");
 	return 0;
@@ -595,7 +607,7 @@ void bz_graphics_change_color(struct bz_breezy *breezy, float amount) {
 	if (amount > 0 && color[color_i] > 1.0f) color[color_i] = 1.0f;
 	if (amount < 0 && color[color_i] < 0.0f) color[color_i] = 0.0f;
 	glClearColor(color[0], color[1], color[2], 1.0f);
-	breezy->gl.is_dirty = true;
+	bz_graphics_schedule_render(breezy);
 }
 
 /**
@@ -657,6 +669,104 @@ static void bz_gles_print_egl_error(char *function_name, const EGLint error)
 		function_name, bz_get_egl_error_text(error));
 }
 
+/** Renders via OpenGL, and then swaps and commits our buffer to DRM. */
+static void bz_gles_render_and_commit(void *data) {
+	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Rendering!");
+	struct bz_breezy *breezy = data;
+
+	// Only redraw if our buffer changed.
+	if (!breezy->gl.is_dirty) { return; }
+	breezy->gl.is_dirty = false;
+
+	// Render time! First, clear the creen
+	glClear(GL_COLOR_BUFFER_BIT);
+	// ...then render each client
+	struct bz_node *curr_client = breezy->wayland.clients->head;
+	while (curr_client != nullptr) {
+		glUseProgram(breezy->gl.client_shader_program);
+		struct wl_client *client = curr_client->data;
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		glBindVertexArray(client_data->vao);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+		curr_client = curr_client->next;
+	}
+	glBindVertexArray(0);
+
+	// Buffer switcheroo
+	if (!gbm_surface_has_free_buffers(breezy->gbm.surface)) {
+		bz_warn(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GBM surface has no free buffers.");
+		return;
+	}
+	eglSwapBuffers(breezy->gl.display, breezy->gl.surface);
+	struct gbm_bo *bo = gbm_surface_lock_front_buffer(breezy->gbm.surface);
+	const uint32_t fb_id = bz_drm_gbm_get_bo_fb(breezy, bo);
+
+	// Scanout!
+	int retval = 0;
+	if (breezy->gbm.prev_bo == nullptr) {
+		// Initial modeset is a blocking operation
+		retval = bz_drm_atomic_commit_initial(breezy, fb_id);
+		breezy->gbm.prev_bo = bo;
+	} else {
+		// Recurring commits are non-blocking, so wait for it to finish before releasing the old bo.
+		breezy->gbm.new_bo = bo;
+		retval = bz_drm_atomic_commit_recurring(breezy, fb_id);
+		// (When the DRM page flip completes, "bz_drm_handle_pageflip()" is called, which releases
+		// the old buffer object.)
+	}
+	if (retval != 0) {
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to make an atomic commit.");
+	}
+}
+
+static GLuint bz_gles_create_client_shader_program(void)
+{
+	// Compile our shaders
+	GLuint client_vert_shader = compile_shader(GL_VERTEX_SHADER,   CLIENT_VERT_SRC);
+	GLuint client_frag_shader = compile_shader(GL_FRAGMENT_SHADER, CLIENT_FRAG_SRC);
+
+	// Create/link our OpenGL program
+	GLuint client_shader_program = glCreateProgram();
+	glAttachShader(client_shader_program, client_vert_shader);
+	glAttachShader(client_shader_program, client_frag_shader);
+	glLinkProgram(client_shader_program);
+
+	GLint status;
+	glGetProgramiv(client_shader_program, GL_LINK_STATUS, &status);
+	if (status == GL_FALSE) {
+		char message[512];
+		glGetProgramInfoLog(client_shader_program, 512, nullptr, message);
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Shader link error: %s", message);
+		return 0;
+	}
+
+	glDeleteShader(client_vert_shader);
+	glDeleteShader(client_frag_shader);
+
+	return client_shader_program;
+}
+
+static GLuint compile_shader(GLenum type, const char *code)
+{
+	// Create / compile the shader
+	GLuint shader = glCreateShader(type);
+	glShaderSource(shader, 1, &code, NULL);
+	glCompileShader(shader);
+
+	// Error checking / handling
+	GLint status;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+	if (status == GL_FALSE) {
+		// It failed, so print the latest message from the OpenGL shader log
+		char message[512];
+		glGetShaderInfoLog(shader, 512, NULL, message);
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Shader error: %s", message);
+	}
+
+	// It all worked, return the goods!
+	return shader;
+}
+
 
 // =================================================================================================
 //  Exposed API
@@ -711,52 +821,22 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
 	}
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized EGL/GLES.");
 
+	bz_info(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized our graphics system.");
 	return 0;
 }
 
 /**
- * Handles one loop iteration for our main rendering loop. Checks our main file descriptors for
- * new events to dispatch, renders the current application state, then swaps our front and back
- * buffers.
- *
- * A value of "0" is returned on success, or a negative value for failure.
+ * Schedules a render if one is not already scheduled. There's no danger to calling this repeatedly.
  */
-int bz_graphics_loop_iteration(struct bz_breezy *breezy) {
-	// Only redraw if our buffer changed.
-	if (!breezy->gl.is_dirty) { return 0; }
-	breezy->gl.is_dirty = false;
-
-	// Render!
-	glClear(GL_COLOR_BUFFER_BIT);
-	// (...other OpenGL render commands go here...)
-
-	// Buffer switcheroo
-	if (!gbm_surface_has_free_buffers(breezy->gbm.surface)) {
-		bz_warn(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GBM surface has no free buffers.");
-		return -1;
+void bz_graphics_schedule_render(struct bz_breezy *breezy)
+{
+	// Only schedule if we're not already scheduled
+	if (breezy->wayland.display && !breezy->gl.is_dirty) {
+		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Scheduling render.");
+		breezy->gl.is_dirty = true;
+		struct wl_event_loop *evt_loop = wl_display_get_event_loop(breezy->wayland.display);
+		wl_event_loop_add_idle(evt_loop, bz_gles_render_and_commit, breezy);
 	}
-	eglSwapBuffers(breezy->gl.display, breezy->gl.surface);
-	struct gbm_bo *bo = gbm_surface_lock_front_buffer(breezy->gbm.surface);
-	const uint32_t fb_id = bz_drm_gbm_get_bo_fb(breezy, bo);
-
-	// Scanout!
-	int retval = 0;
-	if (breezy->gbm.prev_bo == nullptr) {
-		// Initial modeset is a blocking operation
-		retval = bz_drm_atomic_commit_initial(breezy, fb_id);
-		breezy->gbm.prev_bo = bo;
-	} else {
-		// Recurring commits are non-blocking, so wait for it to finish before releasing the old bo.
-		breezy->gbm.new_bo = bo;
-		retval = bz_drm_atomic_commit_recurring(breezy, fb_id);
-		// (When the DRM page flip completes, "bz_drm_handle_pageflip()" is called, which releases
-		// the old buffer object.)
-	}
-	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to make an atomic commit.");
-	}
-
-	return retval;
 }
 
 /**
@@ -769,7 +849,9 @@ void bz_graphics_cleanup(struct bz_breezy *breezy) {
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Cleaning up bz_graphics.");
 
 	// -- GLES --
-	// TODO: Delete shader programs (future video)
+	if (breezy->gl.client_shader_program != 0) {
+		glDeleteProgram(breezy->gl.client_shader_program);
+	}
 
 	// -- EGL --
 	if (breezy->gl.display != nullptr) {
@@ -823,13 +905,16 @@ void bz_graphics_cleanup(struct bz_breezy *breezy) {
 }
 
 /** Handles a pending DRM event. This should only be called when there are events pending. */
-void bz_graphics_handle_drm_event(struct bz_breezy *breezy) {
+int bz_graphics_handle_drm_event(int /*fd*/, uint32_t /*mask*/, void *data)
+{
+	struct bz_breezy *breezy = data;
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Handling drm_fd event.");
 	drmEventContext drm_event_context = {
 		.version = DRM_EVENT_CONTEXT_VERSION,
 		.page_flip_handler = bz_drm_handle_pageflip,
 	};
 	drmHandleEvent(breezy->drm.fd, &drm_event_context);
+	return 0;
 }
 
 /**
