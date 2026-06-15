@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "unity/unity.h"
-#include "fff/fff.h"
+#include "unity.h"
+#include "fff.h"
 DEFINE_FFF_GLOBALS
 
 #include "breezy/bz_logger.h"

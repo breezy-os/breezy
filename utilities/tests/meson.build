@@ -1,18 +1,16 @@
 
 # Run each of our test suites
 foreach t : [
-    'bz_seat',
+    'bz_list',
+    'bz_logger',
 ]
     exe = executable('test_' + t,
         'test_' + t + '.c',
         dependencies: [
-            bz_main_dep,
             bz_utils_dep,
             unity_dep,
             fff_dep,
-            dependency('libdrm'),
-            dependency('libseat'),
         ],
-        include_directories: compositor_inc)
+        include_directories: utilities_inc)
     test(t, exe)
 endforeach

@@ -24,5 +24,7 @@ extra_warnings = cc.get_supported_arguments([
 ])
 add_project_arguments(extra_warnings, language: 'c')
 
+subdir('test-frameworks')
+subdir('utilities')
 subdir('compositor')
 subdir('test-client')

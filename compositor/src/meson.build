@@ -1,5 +1,4 @@
 
-subdir('utils')
 subdir('wayland')
 
 bz_main_lib = static_library(
@@ -11,7 +10,7 @@ bz_main_lib = static_library(
         './bz_wayland.c',
         './gles2.c',
     ],
-    include_directories: global_inc,
+    include_directories: compositor_inc,
     dependencies: [
         dependency('libseat'),
         dependency('libdrm'),
@@ -24,4 +23,4 @@ bz_main_lib = static_library(
         bz_utils_dep,
         bz_wayland_dep,
     ])
-bz_main_dep = declare_dependency(link_with: bz_main_lib, include_directories: global_inc)
+bz_main_dep = declare_dependency(link_with: bz_main_lib, include_directories: compositor_inc)

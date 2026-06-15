@@ -5,8 +5,8 @@
 
 #include <libseat.h>
 
-#include "unity/unity.h"
-#include "fff/fff.h"
+#include "unity.h"
+#include "fff.h"
 #include "breezy/bz_breezy.h"
 #include "breezy/bz_logger.h"
 

@@ -10,6 +10,9 @@
 
 #include <wayland-client.h>
 
+#include "breezy/bz_logger.h"
+#include "breezy/bz_wl_protocol.h"
+
 
 // =================================================================================================
 //  Structs
@@ -66,6 +69,10 @@ static void bz_sleep_ms(uint32_t ms)
 
 int main(void)
 {
+	// Set up our logger
+	bz_log_initialize(BZ_LOG_INFO);
+	bz_log_set_level(BZ_LOG_WAYLAND, BZ_LOG_DEBUG);
+
 	globals.is_quitting = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 
 	bz_add_termint_handler(SIGTERM);
@@ -74,7 +81,7 @@ int main(void)
 	// Establish the connection
 	struct wl_display *display = wl_display_connect(nullptr);
 	if (!display) {
-		fprintf(stderr, "Client: Failed to connect to Wayland display.\n");
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to connect to Wayland display.");
 		return 1;
 	}
 
@@ -103,7 +110,7 @@ int main(void)
 			{ .fd = wayland_fd,          .events = POLLIN },
 		};
 		const int ret = poll(fds, 2, 1000);
-		if (ret == 0) fprintf(stdout, "Client: Timeout waiting for FD.\n");
+		if (ret == 0) bz_warn(BZ_LOG_MAIN, __FILE__, __LINE__, "Timeout waiting for FD.");
 		if (ret < 0) {
 			wl_display_cancel_read(display);
 			break; // Failure
@@ -123,10 +130,10 @@ int main(void)
 		wl_display_dispatch_pending(display);
 	}
 
-	printf("Client: Disconnecting.\n");
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Disconnecting from compositor.");
 	wl_display_disconnect(display);
 	close(globals.is_quitting);
 
-	printf("Client: Clean exit.\n");
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Clean exit.");
 	return 0;
 }

@@ -1,11 +1,11 @@
 
-global_inc = include_directories('include')
+compositor_inc = include_directories('include')
 
 subdir('src')
 subdir('tests')
 
 executable('breezy', './src/main.c',
-    include_directories: global_inc,
+    include_directories: compositor_inc,
     dependencies: [
         dependency('libseat'),
         dependency('libdrm'),
