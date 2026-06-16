@@ -12,25 +12,19 @@
 
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wl_protocol.h"
-
-
-// =================================================================================================
-//  Structs
-// -------------------------------------------------------------------------------------------------
-
-struct bz_test_client {
-	int is_quitting;
-};
+#include "breezy/bz_client_globals.h"
 
 
 // =================================================================================================
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
 
-static struct bz_test_client globals = {0};
+static struct bz_client_globals client_globals = {0};
 
 static void bz_termint_handler(int signum);
 static void bz_add_termint_handler(int signum);
+static void bz_sleep_ms(uint32_t ms);
+static void bz_run_event_loop(const struct bz_client_globals *globals);
 
 // =================================================================================================
 //  Function Definitions
@@ -38,9 +32,9 @@ static void bz_add_termint_handler(int signum);
 
 static void bz_termint_handler(int signum)
 {
-	printf("Client: Terminated\n");
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "SIGTERM/SIGINT (%d) signal received", signum);
 	constexpr uint64_t val = 1;
-	write(globals.is_quitting, &val, sizeof(val));
+	write(client_globals.is_quitting, &val, sizeof(val));
 }
 
 static void bz_add_termint_handler(int signum)
@@ -62,6 +56,54 @@ static void bz_sleep_ms(uint32_t ms)
 	nanosleep(&ts, nullptr);
 }
 
+static void bz_run_event_loop(const struct bz_client_globals *globals)
+{
+	const int wayland_fd = wl_display_get_fd(globals->display);
+
+	// Run our event loop
+	while (true) {
+		// "wl_display_prepare_read" must be paired with either "wl_display_read_events" or, if
+		//   unable to read events for some reason, "wl_display_cancel_read".
+		while (wl_display_prepare_read(globals->display) != 0) {
+			wl_display_dispatch_pending(globals->display);
+		}
+
+		// Flush pending requests to the server
+		if (wl_display_flush(globals->display) < 0) {
+			// If errno is EAGAIN, then we'd ideally be polling the display fd to wait for it to
+			//   become writable before trying again ... but this client doesn't really matter, so
+			//   let's just exit to keep things simple.
+			wl_display_cancel_read(globals->display);
+			break;
+		}
+
+		// Check for changes to our FDs
+		struct pollfd fds[2] = {
+			{ .fd = globals->is_quitting, .events = POLLIN },
+			{ .fd = wayland_fd,           .events = POLLIN },
+		};
+		const int ret = poll(fds, 2, 1000);
+		if (ret == 0) bz_warn(BZ_LOG_MAIN, __FILE__, __LINE__, "Timeout waiting for FD.");
+		if (ret < 0) {
+			wl_display_cancel_read(globals->display);
+			break; // Failure
+		}
+
+		if (fds[0].revents & POLLIN) {
+			wl_display_cancel_read(globals->display);
+			break; // is_quitting got toggled
+		}
+
+		if (fds[1].revents & POLLIN) {
+			wl_display_read_events(globals->display);
+		} else {
+			wl_display_cancel_read(globals->display);
+		}
+
+		wl_display_dispatch_pending(globals->display);
+	}
+}
+
 
 // =================================================================================================
 //  Main Program
@@ -73,66 +115,29 @@ int main(void)
 	bz_log_initialize(BZ_LOG_INFO);
 	bz_log_set_level(BZ_LOG_WAYLAND, BZ_LOG_DEBUG);
 
-	globals.is_quitting = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+	client_globals.is_quitting = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 
 	bz_add_termint_handler(SIGTERM);
 	bz_add_termint_handler(SIGINT);
 
 	// Establish the connection
-	struct wl_display *display = wl_display_connect(nullptr);
-	if (!display) {
+	client_globals.display = wl_display_connect(nullptr);
+	if (!client_globals.display) {
 		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to connect to Wayland display.");
+		close(client_globals.is_quitting);
 		return 1;
 	}
 
-	int wayland_fd = wl_display_get_fd(display);
+	// Set up our globals
+	bz_registry_constructor(&client_globals);
+	wl_display_roundtrip(client_globals.display);
 
-	// Run our event loop
-	while (true) {
-		// "wl_display_prepare_read" must be paired with either "wl_display_read_events" or, if
-		//   unable to read events for some reason, "wl_display_cancel_read".
-		while (wl_display_prepare_read(display) != 0) {
-			wl_display_dispatch_pending(display);
-		}
-
-		// Flush pending requests to the server
-		if (wl_display_flush(display) < 0) {
-			// If errno is EAGAIN, then we'd ideally be polling the display fd to wait for it to
-			//   become writable before trying again ... but this client doesn't really matter, so
-			//   let's just exit to keep things simple.
-			wl_display_cancel_read(display);
-			break;
-		}
-
-		// Check for changes to our FDs
-		struct pollfd fds[2] = {
-			{ .fd = globals.is_quitting, .events = POLLIN },
-			{ .fd = wayland_fd,          .events = POLLIN },
-		};
-		const int ret = poll(fds, 2, 1000);
-		if (ret == 0) bz_warn(BZ_LOG_MAIN, __FILE__, __LINE__, "Timeout waiting for FD.");
-		if (ret < 0) {
-			wl_display_cancel_read(display);
-			break; // Failure
-		}
-
-		if (fds[0].revents & POLLIN) {
-			wl_display_cancel_read(display);
-			break; // is_quitting got toggled
-		}
-
-		if (fds[1].revents & POLLIN) {
-			wl_display_read_events(display);
-		} else {
-			wl_display_cancel_read(display);
-		}
-
-		wl_display_dispatch_pending(display);
-	}
+	// Loop!
+	bz_run_event_loop(&client_globals);
 
 	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Disconnecting from compositor.");
-	wl_display_disconnect(display);
-	close(globals.is_quitting);
+	wl_display_disconnect(client_globals.display);
+	close(client_globals.is_quitting);
 
 	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Clean exit.");
 	return 0;
