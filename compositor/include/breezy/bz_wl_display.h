@@ -15,6 +15,8 @@ void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t ve
 #define BZ_SUBCOMPOSITOR_VERSION 1
 void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
+// -- wl_surface --
+#define BZ_SURFACE_VERSION 6
 
 // #################################################################################################
 #endif

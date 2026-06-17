@@ -2,7 +2,7 @@
 #define _POSIX_C_SOURCE 200809L // NOLINT
 
 #include <signal.h>
-#include <stdio.h>
+#include <stdlib.h>
 #include <sys/poll.h>
 #include <sys/eventfd.h>
 #include <time.h>
@@ -13,6 +13,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wl_protocol.h"
 #include "breezy/bz_client_globals.h"
+#include "breezy/bz_client_utils.h"
 
 
 // =================================================================================================
@@ -119,6 +120,11 @@ int main(void)
 
 	bz_add_termint_handler(SIGTERM);
 	bz_add_termint_handler(SIGINT);
+
+	// Pick some random colors for our app
+	srand(time(nullptr));
+	client_globals.bg_color = bz_random_color();
+	client_globals.fg_color = bz_random_color();
 
 	// Establish the connection
 	client_globals.display = wl_display_connect(nullptr);

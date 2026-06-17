@@ -3,6 +3,8 @@
 
 #include <string.h>
 
+#include <xdg-shell-client-protocol.h>
+
 #include "breezy/bz_logger.h"
 
 
@@ -15,6 +17,11 @@
 static const struct wl_registry_listener bz_registry_implementation;
 static void bz_registry_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version);
 static void bz_registry_global_remove(void *data, struct wl_registry *registry, uint32_t name);
+
+// -- wl_shm --
+
+static const struct wl_shm_listener bz_shm_implementation;
+static void bz_shm_format(void *data, struct wl_shm *shm, uint32_t format);
 
 
 // =================================================================================================
@@ -48,12 +55,24 @@ static void bz_registry_global(
 	if (strcmp(interface, wl_compositor_interface.name) == 0) {
 		globals->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 6);
 		globals->compositor_name = name;
+	} else if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
+		// Version 2
 	} else if (strcmp(interface, wl_shm_interface.name) == 0) {
-		// TODO
+		globals->shm = wl_registry_bind(registry, name, &wl_shm_interface, 2);
+		globals->shm_name = name;
+		wl_shm_add_listener(globals->shm, &bz_shm_implementation, data);
+	} else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
+		// Version 7
+	} else if (strcmp(interface, wl_data_device_manager_interface.name) == 0) {
+		// Version 3
+	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
+		// Version 10
+	} else if (strcmp(interface, wl_output_interface.name) == 0) {
+		// Version 4
 	}
 }
 
-static void bz_registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
+static void bz_registry_global_remove(void *data, struct wl_registry * /*registry*/, uint32_t name)
 {
 	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Removing global with name: %d", name);
 	struct bz_client_globals *globals = data;
@@ -62,6 +81,24 @@ static void bz_registry_global_remove(void *data, struct wl_registry *registry, 
 		wl_compositor_destroy(globals->compositor);
 		globals->compositor = nullptr;
 		globals->compositor_name = 0;
+	} else if (name == globals->shm_name) {
+		wl_shm_destroy(globals->shm);
+		globals->shm = nullptr;
+		globals->shm_name = 0;
 	}
-	// TODO: Remove other global types, such as outputs for hotplug events, etc.
+	// TODO: Remember to clean up other global types, such as outputs for hotplug events, etc.
+}
+
+
+// =================================================================================================
+//  wl_shm
+// -------------------------------------------------------------------------------------------------
+
+static const struct wl_shm_listener bz_shm_implementation = {
+	.format = bz_shm_format,
+};
+
+static void bz_shm_format(void * /*data*/, struct wl_shm * /*shm*/, uint32_t format)
+{
+	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Supported shm format: %d", format);
 }

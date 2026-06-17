@@ -1,12 +1,12 @@
-#ifndef BZ_WL_PROTOCOL_H
-#define BZ_WL_PROTOCOL_H
+#ifndef BZ_CLIENT_UTILS_H
+#define BZ_CLIENT_UTILS_H
 // #################################################################################################
 
-#include <wayland-client.h>
+#include <stdint.h>
+#include <bits/types.h>
 
-#include "breezy/bz_client_globals.h"
-
-void bz_registry_constructor(struct bz_client_globals *globals);
+int bz_allocate_shm_file(__off64_t size);
+uint32_t bz_random_color(void);
 
 // #################################################################################################
 #endif
