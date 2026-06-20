@@ -65,10 +65,8 @@ int bz_allocate_shm_file(const __off64_t size)
 
 uint32_t bz_random_color(void)
 {
-	uint32_t color = rand() & 0xff;
-	color |= (rand() & 0xff) << 8;
-	color |= (rand() & 0xff) << 16;
-	color |= (rand() & 0xff) << 24;
-	return color;
+	return ((uint32_t)(rand() & 0xFF) << 16) |  // R
+		   ((uint32_t)(rand() & 0xFF) << 8)  |  // G
+		   ((uint32_t)(rand() & 0xFF));         // B
 }
 

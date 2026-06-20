@@ -14,6 +14,8 @@ struct bz_client {
 	struct wl_listener client_disconnect_listener;
 	pid_t pid;
 
+	struct bz_list *surfaces; // Stores a list of "struct wl_resource *"
+
 	// TODO: Temporary OpenGL things. Will be moved to surfaces. (Also move cleanup code from dtor)
 	GLuint vao;
 	GLuint vbo;

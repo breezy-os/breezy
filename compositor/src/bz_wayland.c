@@ -6,7 +6,7 @@
 #include <sys/wait.h>
 
 #include <wayland-server.h>
-#include <wayland/xdg-shell-server-protocol.h>
+#include <xdg-shell-server-protocol.h>
 
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
@@ -110,6 +110,8 @@ static void bz_wayland_client_dtor(void *data)
 	glDeleteBuffers(1, &client_data->vbo);
 	glDeleteBuffers(1, &client_data->ebo);
 
+	bz_list_free(client_data->surfaces, nullptr);
+
 	free(client_data);
 }
 
@@ -129,12 +131,13 @@ static void bz_wayland_handle_client_connection(struct wl_listener *listener, vo
 	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Client with pid %d connected!", pid);
 
 	// Set up our custom data for the client
-	struct bz_client *client_data = malloc(sizeof(*client_data));
+	struct bz_client *client_data = calloc(1, sizeof(*client_data));
 	if (client_data == nullptr) {
 		return;
 	}
 	client_data->breezy = breezy;
 	client_data->pid = pid;
+	client_data->surfaces = bz_list_create();
 	bz_wayland_add_opengl_objects(client_data);
 	wl_client_set_user_data(client, client_data, bz_wayland_client_dtor);
 
@@ -341,7 +344,7 @@ void bz_wayland_cleanup(struct bz_breezy *breezy)
 		bz_list_free(breezy->wayland.event_sources, bz_wayland_destroy_event_source);
 	}
 	if (breezy->wayland.clients != nullptr) {
-		// This is a list of "wl_clients" which should be cleaned up by other means.
+		// The actual wl_clients (and resources) are destroyed through wl_display_destroy_clients()
 		bz_list_free(breezy->wayland.clients, nullptr);
 	}
 	if (breezy->wayland.display != nullptr) {

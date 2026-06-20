@@ -2,10 +2,14 @@
 #include "breezy/bz_wl_display.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 
 #include <wayland-server.h>
 
+#include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
+#include "breezy/bz_wayland.h"
+#include "breezy/bz_xdg_shell.h"
 
 
 // =================================================================================================
@@ -17,6 +21,8 @@
 static const struct wl_compositor_interface bz_compositor_implementation;
 static void bz_compositor_create_surface(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_compositor_create_region(struct wl_client *client, struct wl_resource *resource, uint32_t id);
+// Helpers
+static struct bz_surface_state *bz_surface_state_init(void);
 
 // -- wl_subcompositor --
 
@@ -68,8 +74,71 @@ static void bz_compositor_create_surface(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_compositor.create_surface not implemented");
-	// TODO
+	// Allocate our user data
+	struct bz_surface *surface = calloc(1, sizeof(*surface));
+	if (surface == nullptr) {
+		wl_client_post_no_memory(client);
+		goto surface_alloc_failed;
+	}
+	struct bz_surface_state *pending = bz_surface_state_init();
+	if (pending == nullptr) {
+		wl_client_post_no_memory(client);
+		goto pending_state_alloc_failed;
+	}
+	struct bz_surface_state *active = bz_surface_state_init();
+	if (active == nullptr) {
+		wl_client_post_no_memory(client);
+		goto active_state_alloc_failed;
+	}
+
+	// Create the resource, bound to the data
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_surface_interface,
+		BZ_SURFACE_VERSION,
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_surface_implementation,
+		surface,
+		bz_surface_dtor
+	);
+
+	// Track this surface on the client
+	const struct bz_client *client_data = wl_client_get_user_data(client);
+	const int append_status = bz_list_append(client_data->surfaces, surface);
+	if (append_status != 0) {
+		if (append_status == -2) {
+			wl_client_post_no_memory(client);
+		}
+		goto list_append_failed;
+	}
+
+	// Populate the surface's user data
+	surface->resource = res;
+	surface->role = BZ_SURF_ROLE_NONE;
+	surface->pending_state = pending;
+	surface->active_state = active;
+
+	// Everything succeeded!
+	return;
+
+	// Error cleanups
+	list_append_failed:
+		wl_resource_destroy(res);
+	resource_failed:
+		free(active);
+	active_state_alloc_failed:
+		free(pending);
+	pending_state_alloc_failed:
+		free(surface);
+	surface_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new surface.");
 }
 
 static void bz_compositor_create_region(
@@ -79,6 +148,17 @@ static void bz_compositor_create_region(
 ) {
 	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_compositor.create_region not implemented");
 	// TODO
+}
+
+// ---  Helpers  -----------------------------------------------------------------------------------
+
+static struct bz_surface_state *bz_surface_state_init(void)
+{
+	struct bz_surface_state *state = calloc(1, sizeof(*state));
+	if (state == nullptr) {
+		return nullptr;
+	}
+	return state;
 }
 
 
@@ -141,10 +221,22 @@ static const struct wl_surface_interface bz_surface_implementation = {
 	.offset = bz_surface_offset,
 };
 
+void bz_surface_dtor(struct wl_resource *data)
+{
+	struct bz_surface *bzsurf = wl_resource_get_user_data(data);
+
+	free(bzsurf->pending_state);
+	free(bzsurf->active_state);
+
+	free(bzsurf);
+}
+
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource)
 {
 	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.destroy not implemented");
 	// TODO
+	// wl_resource_destroy(resource);
+	// Role must be destroyed first. Otherwise, "defunct_role_object" error
 }
 
 static void bz_surface_attach(
@@ -199,8 +291,25 @@ static void bz_surface_set_input_region(
 
 static void bz_surface_commit(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.commit not implemented");
-	// TODO
+	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
+
+	// After creating an XDG role, the client must perform an initial commit w/o a buffer. The
+	//   compositor will reply with initial wl_surface state, followed by xdg_surface.configure.
+	//   The client must acknowledge it, and can then proceed to attach a buffer / map the surface.
+	if ((bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->role == BZ_SURF_ROLE_XDG_POPUP)
+			&& bzsurf->pending_state->buffer == nullptr
+	) {
+		if (bzsurf->xdgsurface == nullptr) {
+			bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__,
+				"XDG surface object was null on wl_surface after being assigned. "
+				"THIS SHOULD NEVER HAPPEN.");
+			wl_client_post_implementation_error(client,
+				"XDG surface object does not exist on the wl_surface.");
+			return;
+		}
+		bz_xdg_surface_initial_configure(client, bzsurf);
+		return;
+	}
 }
 
 static void bz_surface_set_buffer_transform(

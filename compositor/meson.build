@@ -17,6 +17,5 @@ executable('breezy', './src/main.c',
         dependency('wayland-server'),
         bz_main_dep,
         bz_utils_dep,
-        bz_wayland_dep,
     ]
 )

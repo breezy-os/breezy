@@ -14,6 +14,7 @@ bz_testclient_lib = static_library(
     'breezy-test-client',
     sources: [
         './bz_wl_protocol.c',
+        './bz_application.c',
         './bz_client_utils.c',
         xdg_shell_code,
     ],
