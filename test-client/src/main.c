@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <wayland-client.h>
+#include <sys/mman.h>
 
 #include "breezy/bz_logger.h"
 #include "breezy/bz_application.h"
@@ -86,7 +87,20 @@ int main(void)
 	bz_run_event_loop(&client_globals);
 
 	// Cleanup
-	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Disconnecting from compositor.");
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Cleaning up and disconnecting.");
+	if (client_globals.window != nullptr) {
+		for (uint8_t i = 0; i < 2; i++) {
+			if (client_globals.window->buffers[i].buffer != nullptr) {
+				wl_buffer_destroy(client_globals.window->buffers[i].buffer);
+			}
+		}
+		if (client_globals.window->shm_pool != nullptr) {
+			wl_shm_pool_destroy(client_globals.window->shm_pool);
+		}
+		if (client_globals.window->pool_data != nullptr) {
+			munmap(client_globals.window->pool_data, client_globals.window->pool_size);
+		}
+	}
 	wl_display_disconnect(client_globals.display);
 	close(client_globals.is_quitting);
 

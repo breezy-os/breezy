@@ -3,9 +3,12 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/mman.h>
 
 #include <xdg-shell-client-protocol.h>
 
+#include "breezy/bz_client_utils.h"
 #include "breezy/bz_logger.h"
 
 
@@ -24,6 +27,11 @@ static void bz_registry_global_remove(void *data, struct wl_registry *registry, 
 static const struct wl_shm_listener bz_shm_implementation;
 static void bz_shm_format(void *data, struct wl_shm *shm, uint32_t format);
 
+// -- wl_buffer --
+
+static const struct wl_buffer_listener bz_buffer_implementation;
+static void bz_buffer_release(void *data, struct wl_buffer *buffer);
+
 // -- xdg_wm_base --
 
 static const struct xdg_wm_base_listener bz_xdg_wm_base_implementation;
@@ -33,6 +41,10 @@ static void bz_xdg_wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base, uin
 
 static const struct xdg_surface_listener bz_xdg_surface_implementation;
 static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial);
+// Helpers
+static void bz_initialize_surface_buffers(struct bz_client_globals *globals, struct bz_application_window* window);
+static void bz_draw_frame(struct bz_application_window* window);
+static void bz_submit_frame(struct bz_application_window* window);
 
 // -- xdg_toplevel --
 
@@ -132,6 +144,22 @@ static void bz_shm_format(void * /*data*/, struct wl_shm * /*shm*/, uint32_t for
 
 
 // =================================================================================================
+//  wl_buffer
+// -------------------------------------------------------------------------------------------------
+
+static const struct wl_buffer_listener bz_buffer_implementation = {
+	.release = bz_buffer_release,
+};
+
+static void bz_buffer_release(void *data, struct wl_buffer *buffer)
+{
+	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Releasing buffer.");
+	struct bz_buffer *bzbuff = data;
+	bzbuff->is_released = true;
+}
+
+
+// =================================================================================================
 //  xdg_wm_base
 // -------------------------------------------------------------------------------------------------
 
@@ -177,9 +205,83 @@ static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface
 	window->finalized = window->pending;
 	window->pending = calloc(1, sizeof(*window->pending));
 
+	window->size.w = window->finalized->recommended_size.w;
+	window->size.h = window->finalized->recommended_size.h;
+
 	// Build our buffer, ack our configure, and submit!
 	xdg_surface_ack_configure(window->xdgsurface, window->finalized->serial);
-	// TODO
+	bz_initialize_surface_buffers(client_globals, window);
+	bz_draw_frame(window);
+	bz_submit_frame(window);
+}
+
+// ---  Helpers  -----------------------------------------------------------------------------------
+
+static void bz_initialize_surface_buffers(
+	struct bz_client_globals *globals,
+	struct bz_application_window *window
+) {
+	// Create a pool for our buffers
+	size_t buffer_size = window->size.w * window->size.h * 4; // 4 bytes per px (XRGB8888)
+	window->pool_size = buffer_size * 2; // Two buffers per pool (double-buffered)
+	int fd = bz_allocate_shm_file(window->pool_size);
+	if (fd == -1) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to allocate shared memory.");
+		return;
+	}
+
+	// Map the pool's file descriptor to memory
+	window->pool_data = mmap(NULL, window->pool_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (window->pool_data == MAP_FAILED) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to mmap pool data.");
+		window->pool_data = nullptr;
+		close(fd);
+		return;
+	}
+
+	// Send the pool to the server
+	window->shm_pool = wl_shm_create_pool(globals->shm, fd, window->pool_size);
+	close(fd);
+
+	// Create our two buffers
+	for (uint8_t i = 0; i < 2; i++) {
+		size_t offset = i * buffer_size;
+		window->buffers[i].is_released = true;
+		window->buffers[i].size = window->size;
+		window->buffers[i].pixel_data = (uint32_t *)(&window->pool_data[offset]);
+		window->buffers[i].buffer = wl_shm_pool_create_buffer(
+			window->shm_pool,
+			offset,
+			window->size.w,
+			window->size.h,
+			window->size.w * 4, // Stride
+			WL_SHM_FORMAT_XRGB8888
+		);
+		wl_buffer_add_listener(
+			window->buffers[i].buffer,
+			&bz_buffer_implementation,
+			&window->buffers[i]
+		);
+	}
+	window->active_buffer = 0;
+}
+
+static void bz_draw_frame(struct bz_application_window *window)
+{
+	const struct bz_buffer buffer = window->buffers[window->active_buffer];
+	if (!buffer.is_released) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Cannot draw frame on an unreleased buffer.");
+		return;
+	}
+	for (int y = 0; y < buffer.size.h; y++) {
+		for (int x = 0; x < buffer.size.w; x++) {
+			buffer.pixel_data[y * buffer.size.w + x] = 0xFFFFFFFF; // AARRGGBB
+		}
+	}
+}
+
+static void bz_submit_frame(struct bz_application_window *window)
+{
 }
 
 
@@ -205,8 +307,13 @@ static const struct xdg_toplevel_listener bz_xdg_toplevel_implementation = {
 	.wm_capabilities = bz_xdg_toplevel_wm_capabilities,
 };
 
-static void bz_xdg_toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel, int32_t width, int32_t height, struct wl_array *states)
-{
+static void bz_xdg_toplevel_configure(
+	void *data,
+	struct xdg_toplevel *xdg_toplevel,
+	int32_t width,
+	int32_t height,
+	struct wl_array *states
+) {
 	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__,
 		"xdg_toplevel.configure(): Setting recommended bounds (%dx%d) and states on xdg toplevel.",
 		width, height);
@@ -239,4 +346,3 @@ static void bz_xdg_toplevel_wm_capabilities(void * /*data*/, struct xdg_toplevel
 	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "xdg_toplevel.wm_capabilities not implemented");
 	// TODO
 }
-

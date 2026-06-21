@@ -15,10 +15,23 @@ struct bz_configure_sequence {
 	struct wl_array *states;
 };
 
+struct bz_buffer {
+	bool is_released;
+	struct wl_buffer *buffer;
+	uint32_t *pixel_data;
+	struct bz_dimension size;
+};
+
 struct bz_application_window {
 	struct wl_surface *wlsurface;
 	struct xdg_surface *xdgsurface;
 	struct xdg_toplevel *xdgtoplevel;
+
+	size_t pool_size;
+	uint8_t *pool_data;           // nullptr prior to mmap
+	struct wl_shm_pool *shm_pool; // nullptr prior to wl_shm_create_pool
+	uint8_t active_buffer;        // The index of the buffer we should write to
+	struct bz_buffer buffers[2];
 
 	struct bz_configure_sequence *pending;
 	struct bz_configure_sequence *finalized;
