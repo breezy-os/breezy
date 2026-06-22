@@ -214,6 +214,10 @@ static void bz_input_spawn_child(const char *socket_name, const char *program_pa
  */
 static void bz_input_terminate_client(struct bz_breezy *breezy)
 {
+	if (breezy->wayland.clients->length == 0) {
+		bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "No clients to terminate.");
+		return;
+	}
 	struct wl_client *client = breezy->wayland.clients->head->data;
 	const struct bz_client *client_data = wl_client_get_user_data(client);
 

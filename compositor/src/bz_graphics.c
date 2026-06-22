@@ -15,8 +15,10 @@
 
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
+#include "breezy/bz_math.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_wl_display.h"
 
 
 // =================================================================================================
@@ -48,6 +50,7 @@ static int bz_drm_atomic_commit_recurring(struct bz_breezy *breezy, uint32_t fb_
 // Init
 static int bz_gles_init(struct bz_breezy *breezy);
 static int bz_gles_load_egl_extensions(void);
+static void bz_gles_create_unit_quad(struct bz_breezy *breezy);
 // Helpers
 static int bz_gles_assert_extension(const char *extensionList, const char *extensionName);
 static char *bz_get_egl_error_text(EGLint error);
@@ -127,6 +130,13 @@ static int bz_drm_init(struct bz_breezy *breezy)
 	}
 	bz_info(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
 		"Chosen Mode: %dx%d", breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay);
+
+	// Set up our projection matrix based on the chosen mode
+	bz_fill_projection_matrix(
+		breezy->drm.output_projection,
+		0, 0, breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay,
+		-1, 1, 2, -2 // OpenGL's coordinate system
+	);
 
 	// Get an encoder / CRTC from the connector
 	int crtc_index = -1;
@@ -584,6 +594,7 @@ static int bz_gles_init(struct bz_breezy *breezy)
 
 	// Define some GLES configs
 	glClearColor(0.16f, 0.164f, 0.196f, 1.0f);
+	bz_gles_create_unit_quad(breezy);
 
 	// Create our "client shader program" for drawing connected clients
 	GLuint program = bz_gles_create_client_shader_program();
@@ -625,6 +636,22 @@ static int bz_gles_load_egl_extensions(void)
 	if (failure) return -1;
 
 	return 0;
+}
+
+static void bz_gles_create_unit_quad(struct bz_breezy *breezy)
+{
+	// VBO uses a unit quad, and just gets transformed at render time by both an output-level
+	//   projection (to screen pixels) and surface-level projection (surface x/y,w/h).
+	static GLfloat vertices[] = {
+		// Position (xy)  // Texture (uv)
+		0.0f, 0.0f,       0.0f, 0.0f, // Top left
+		1.0f, 0.0f,       1.0f, 0.0f, // Top right
+		0.0f, 1.0f,       0.0f, 1.0f, // Bottom left
+		1.0f, 1.0f,       1.0f, 1.0f, // Bottom right
+	};
+	glGenBuffers(1, &breezy->gl.vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 }
 
 /**
@@ -678,19 +705,50 @@ static void bz_gles_render_and_commit(void *data) {
 	if (!breezy->gl.is_dirty) { return; }
 	breezy->gl.is_dirty = false;
 
-	// Render time! First, clear the creen
+	// Render time! First, clear the screen
+	// glViewport(0, 0, output->width, output->height);
 	glClear(GL_COLOR_BUFFER_BIT);
-	// ...then render each client
-	struct bz_node *curr_client = breezy->wayland.clients->head;
-	while (curr_client != nullptr) {
-		glUseProgram(breezy->gl.client_shader_program);
-		struct wl_client *client = curr_client->data;
-		struct bz_client *client_data = wl_client_get_user_data(client);
-		glBindVertexArray(client_data->vao);
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
-		curr_client = curr_client->next;
+	if (breezy->gl.vbo != 0) {
+		// ...then load our program
+		GLuint client_program = breezy->gl.client_shader_program;
+		glUseProgram(client_program);
+		// ...our projection matrix
+		GLint outputProj = glGetUniformLocation(client_program, "u_outputProj");
+		glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.output_projection);
+		// ...and our unit quad vbo
+		glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+
+		// ...then render each client's surfaces
+		struct bz_node *curr_client = breezy->wayland.clients->head;
+		while (curr_client != nullptr) {
+			struct wl_client *client = curr_client->data;
+			struct bz_client *client_data = wl_client_get_user_data(client);
+			struct bz_node *curr_surf = client_data->surfaces->head;
+			while (curr_surf != nullptr) {
+				struct bz_surface *bzsurf = curr_surf->data;
+				if (bzsurf->texture != 0 && bzsurf->active_state->buffer != nullptr) {
+					// Load our surface projection matrix
+					GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+					glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, bzsurf->projection);
+
+					// Prep the texture
+					glActiveTexture(GL_TEXTURE0);
+					glBindTexture(GL_TEXTURE_2D, bzsurf->texture);
+					GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+					glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+					// Render!
+					glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+				}
+				curr_surf = curr_surf->next;
+			}
+			curr_client = curr_client->next;
+		}
 	}
-	glBindVertexArray(0);
 
 	// Buffer switcheroo
 	if (!gbm_surface_has_free_buffers(breezy->gbm.surface)) {
@@ -849,6 +907,9 @@ void bz_graphics_cleanup(struct bz_breezy *breezy) {
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Cleaning up bz_graphics.");
 
 	// -- GLES --
+	if (breezy->gl.vbo != 0) {
+		glDeleteBuffers(1, &breezy->gl.vbo);
+	}
 	if (breezy->gl.client_shader_program != 0) {
 		glDeleteProgram(breezy->gl.client_shader_program);
 	}

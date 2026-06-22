@@ -6,6 +6,9 @@
 
 #include <wayland-server.h>
 
+#include "breezy/bz_math.h"
+#include "glad/gles2.h"
+
 
 // -- wl_compositor --
 
@@ -52,6 +55,10 @@ struct bz_surface {
 	// Double-buffered state management
 	struct bz_surface_state *pending_state;
 	struct bz_surface_state *active_state;
+
+	// OpenGL data
+	GLuint texture;
+	bz_mat3 projection;
 };
 
 void bz_surface_dtor(struct wl_resource *data);

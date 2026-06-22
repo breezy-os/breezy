@@ -4,6 +4,7 @@ bz_utils_lib = static_library(
     sources: [
         'bz_logger.c',
         'bz_list.c',
+        'bz_math.c',
     ],
     include_directories: utilities_inc)
 

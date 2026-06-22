@@ -12,6 +12,7 @@
 #include <wayland-server.h>
 
 #include "glad/gles2.h"
+#include "breezy/bz_math.h"
 
 struct bz_drm {
 	int fd;
@@ -21,6 +22,7 @@ struct bz_drm {
 	drmModeModeInfo mode_info;
 	uint32_t mode_blob_id;
 	uint32_t plane_id;
+	bz_mat3 output_projection;
 };
 
 struct bz_gbm {
@@ -37,6 +39,7 @@ struct bz_gl {
 	EGLSurface surface;
 	bool is_dirty;
 	GLuint client_shader_program;
+	GLuint vbo;
 };
 
 struct bz_seat {

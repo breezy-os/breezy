@@ -6,8 +6,10 @@
 
 #include <wayland-server.h>
 
+#include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
+#include "breezy/bz_math.h"
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_xdg_shell.h"
 
@@ -44,6 +46,9 @@ static void bz_surface_set_buffer_transform(struct wl_client *client, struct wl_
 static void bz_surface_set_buffer_scale(struct wl_client *client, struct wl_resource *resource, int32_t scale);
 static void bz_surface_damage_buffer(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
 static void bz_surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
+// Helpers
+static void bz_initialize_gl_texture(struct bz_surface *surface);
+static void bz_apply_damage(struct bz_surface *bzsurf);
 
 
 // =================================================================================================
@@ -228,7 +233,14 @@ void bz_surface_dtor(struct wl_resource *data)
 	free(bzsurf->pending_state);
 	free(bzsurf->active_state);
 
+	glDeleteTextures(1, &bzsurf->texture);
+
 	free(bzsurf);
+
+	// Not sure I really like this here... keep an eye out for a better place to unrender clients.
+	struct wl_client *client = wl_resource_get_client(data);
+	struct bz_client *bzclient = wl_client_get_user_data(client);
+	bz_graphics_schedule_render(bzclient->breezy);
 }
 
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource)
@@ -246,8 +258,9 @@ static void bz_surface_attach(
 	int32_t x,
 	int32_t y
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.attach not implemented");
-	// TODO
+	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
+	bzsurf->pending_state->buffer = buffer;
+	// TODO: accommodate x and y
 }
 
 static void bz_surface_damage(
@@ -291,6 +304,7 @@ static void bz_surface_set_input_region(
 
 static void bz_surface_commit(struct wl_client *client, struct wl_resource *resource)
 {
+	struct bz_client *bzclient = wl_client_get_user_data(client);
 	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
 
 	// After creating an XDG role, the client must perform an initial commit w/o a buffer. The
@@ -298,6 +312,8 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	//   The client must acknowledge it, and can then proceed to attach a buffer / map the surface.
 	if ((bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->role == BZ_SURF_ROLE_XDG_POPUP)
 			&& bzsurf->pending_state->buffer == nullptr
+			// Also checking active because user might commit a NULL buffer to clear the surface.
+			&& bzsurf->active_state->buffer == nullptr
 	) {
 		if (bzsurf->xdgsurface == nullptr) {
 			bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__,
@@ -310,6 +326,34 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 		bz_xdg_surface_initial_configure(client, bzsurf);
 		return;
 	}
+
+	// TODO: If a NULL value is assigned to the pending buffer, the following commit removes the
+	//   surface contents. (ie, DON'T clear pending_state->buffer unless it's explicitly set to null.)
+
+	// Copy over our other pending state into active state.
+	bzsurf->active_state->buffer = bzsurf->pending_state->buffer;
+	bz_fill_projection_matrix(bzsurf->projection,
+		0, 0, 1, 1,
+		100, 100, 400, 300 // Surface x,y / w,h
+	);
+	// TODO: other state
+
+	// Update our OpenGL texture
+	if (bzsurf->active_state->buffer != nullptr) {
+		if (bzsurf->texture == 0) {
+			bz_initialize_gl_texture(bzsurf);
+		}
+		bz_apply_damage(bzsurf);
+	}
+
+	// Since the buffer is on our OpenGL texture, release the buffer.
+	// TODO: This might need to be deferred for the DMA-BUF protocol..?
+	if (bzsurf->active_state->buffer != nullptr) {
+		wl_buffer_send_release(bzsurf->active_state->buffer);
+	}
+
+	// Schedule a repaint
+	bz_graphics_schedule_render(bzclient->breezy);
 }
 
 static void bz_surface_set_buffer_transform(
@@ -352,3 +396,47 @@ static void bz_surface_offset(
 	// TODO
 }
 
+// ---  Helpers  -----------------------------------------------------------------------------------
+
+static void bz_initialize_gl_texture(struct bz_surface *surface)
+{
+	bz_info(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Initializing OpenGL texture for surface.");
+
+	glGenTextures(1, &surface->texture);
+	glBindTexture(GL_TEXTURE_2D, surface->texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
+static void bz_apply_damage(struct bz_surface *bzsurf)
+{
+	if (bzsurf->active_state->buffer == nullptr) {
+		return;
+	}
+
+	struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->active_state->buffer);
+	wl_shm_buffer_begin_access(shmbuf);
+	// --- Buffer Access Begin ---------------------------------------------------------------------
+
+	uint32_t *data = wl_shm_buffer_get_data(shmbuf);
+	int32_t width = wl_shm_buffer_get_width(shmbuf);
+	int32_t height = wl_shm_buffer_get_height(shmbuf);
+	glBindTexture(GL_TEXTURE_2D, bzsurf->texture);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
+	glTexImage2D(
+		GL_TEXTURE_2D,
+		0,                // mipmap level
+		GL_RGBA,          // format
+		width,
+		height,
+		0,                // border
+		GL_RGBA,          // format
+		GL_UNSIGNED_BYTE, // type
+		data              // pointer to new data
+	);
+
+	// --- Buffer Access End -----------------------------------------------------------------------
+	wl_shm_buffer_end_access(shmbuf);
+}
