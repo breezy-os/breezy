@@ -348,8 +348,8 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		wl_array_init(&configevt->toplevel.states);
 		configevt->toplevel.max_size.w = globals->drm.mode_info.hdisplay;
 		configevt->toplevel.max_size.h = globals->drm.mode_info.vdisplay;
-		configevt->toplevel.recommended_size.w = globals->drm.mode_info.hdisplay;
-		configevt->toplevel.recommended_size.h = globals->drm.mode_info.vdisplay;
+		configevt->toplevel.recommended_size.w = randInt(400, globals->drm.mode_info.hdisplay/2);
+		configevt->toplevel.recommended_size.h = randInt(300, globals->drm.mode_info.vdisplay/2);
 
 		// Send initial state values
 		//   wl_surface_send_preferred_buffer_scale(resource, 1);

@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 
 
 /**
@@ -37,4 +38,9 @@ double distance(int x1, int y1, int x2, int y2)
 	int dx = x2 - x1;
 	int dy = y2 - y1;
 	return sqrt(dx * dx + dy * dy);
+}
+
+int32_t randInt(int min, int max)
+{
+	return (rand() % (max - min + 1)) + min;
 }

@@ -56,9 +56,10 @@ struct bz_surface {
 	struct bz_surface_state *pending_state;
 	struct bz_surface_state *active_state;
 
-	// OpenGL data
+	// Display data
 	GLuint texture;
-	bz_mat3 projection;
+	struct bz_position position;
+	struct bz_dimension size;
 };
 
 void bz_surface_dtor(struct wl_resource *data);

@@ -732,8 +732,13 @@ static void bz_gles_render_and_commit(void *data) {
 				struct bz_surface *bzsurf = curr_surf->data;
 				if (bzsurf->texture != 0 && bzsurf->active_state->buffer != nullptr) {
 					// Load our surface projection matrix
+					bz_mat3 projection = {0};
+					bz_fill_projection_matrix(projection,
+						0, 0, 1, 1,
+						bzsurf->position.x, bzsurf->position.y, bzsurf->size.w, bzsurf->size.h
+					);
 					GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
-					glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, bzsurf->projection);
+					glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
 
 					// Prep the texture
 					glActiveTexture(GL_TEXTURE0);

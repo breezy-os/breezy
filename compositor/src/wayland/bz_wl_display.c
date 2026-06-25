@@ -129,6 +129,8 @@ static void bz_compositor_create_surface(
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
+	surface->position.x = randInt(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
+	surface->position.y = randInt(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
 
 	// Everything succeeded!
 	return;
@@ -332,18 +334,18 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 
 	// Copy over our other pending state into active state.
 	bzsurf->active_state->buffer = bzsurf->pending_state->buffer;
-	bz_fill_projection_matrix(bzsurf->projection,
-		0, 0, 1, 1,
-		100, 100, 400, 300 // Surface x,y / w,h
-	);
 	// TODO: other state
 
-	// Update our OpenGL texture
 	if (bzsurf->active_state->buffer != nullptr) {
+		// Update our OpenGL texture
 		if (bzsurf->texture == 0) {
 			bz_initialize_gl_texture(bzsurf);
 		}
 		bz_apply_damage(bzsurf);
+		// Update our displayed window size
+		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->active_state->buffer);
+		bzsurf->size.w = wl_shm_buffer_get_width(shmbuf);
+		bzsurf->size.h = wl_shm_buffer_get_height(shmbuf);
 	}
 
 	// Since the buffer is on our OpenGL texture, release the buffer.

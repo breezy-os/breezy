@@ -24,5 +24,7 @@ void bz_fill_projection_matrix(bz_mat3 proj,
 
 double distance(int x1, int y1, int x2, int y2);
 
+int32_t randInt(int min, int max);
+
 // #################################################################################################
 #endif

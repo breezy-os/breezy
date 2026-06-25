@@ -266,9 +266,9 @@ static void bz_initialize_surface_buffers(
 	window->active_buffer = 0;
 }
 
-#define BZ_BORDER_WIDTH 50
-#define BZ_TITLE_WIDTH 200
-#define BZ_CIRCLE_RADIUS 200
+#define BZ_BORDER_WIDTH 4
+#define BZ_TITLE_WIDTH 40
+#define BZ_CIRCLE_RADIUS 50
 static void bz_draw_frame(struct bz_client_globals *globals, struct bz_application_window *window)
 {
 	const struct bz_buffer *buffer = &window->buffers[window->active_buffer];
