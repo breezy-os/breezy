@@ -2,6 +2,9 @@
 # Run each of our test suites
 foreach t : [
     'bz_seat',
+    # Wayland interfaces
+    'bz_wl_compositor',
+    'bz_wl_surface',
 ]
     exe = executable('test_' + t,
         'test_' + t + '.c',

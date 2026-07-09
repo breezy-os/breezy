@@ -21,15 +21,14 @@ FAKE_VALUE_FUNC(int, libseat_switch_session, struct libseat *, int)
 
 void setUp(void)
 {
-	bz_log_initialize(BZ_LOG_OFF);
-}
-
-void tearDown(void)
-{
 	RESET_FAKE(libseat_seat_name);
 	RESET_FAKE(libseat_switch_session);
 	FFF_RESET_HISTORY();
+
+	bz_log_initialize(BZ_LOG_OFF);
 }
+
+void tearDown(void) { }
 
 
 // =================================================================================================

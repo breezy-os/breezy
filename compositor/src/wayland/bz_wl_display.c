@@ -34,7 +34,7 @@ static void bz_subcompositor_get_subsurface(struct wl_client *client, struct wl_
 
 // -- wl_surface --
 
-static const struct wl_surface_interface bz_surface_implementation;
+const struct wl_surface_interface bz_surface_implementation;
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_surface_attach(struct wl_client *client, struct wl_resource *resource, struct wl_resource *buffer, int32_t x, int32_t y);
 static void bz_surface_damage(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
@@ -214,7 +214,7 @@ static void bz_subcompositor_get_subsurface(
 //  wl_surface
 // -------------------------------------------------------------------------------------------------
 
-static const struct wl_surface_interface bz_surface_implementation = {
+const struct wl_surface_interface bz_surface_implementation = {
 	.destroy = bz_surface_destroy,
 	.attach = bz_surface_attach,
 	.damage = bz_surface_damage,
