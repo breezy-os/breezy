@@ -43,6 +43,7 @@ static const struct xdg_surface_listener bz_xdg_surface_implementation;
 static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial);
 // Helpers
 static void bz_initialize_surface_buffers(struct bz_client_globals *globals, struct bz_application_window* window);
+static void bz_update_circle(struct bz_application_window *window, uint32_t new_time);
 static void bz_draw_frame(struct bz_application_window *window);
 static void bz_submit_frame(struct bz_application_window* window);
 static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t callback_data);
@@ -208,6 +209,9 @@ static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface
 	window->size.w = window->finalized->recommended_size.w;
 	window->size.h = window->finalized->recommended_size.h;
 
+	window->circle_center.x = window->size.w/2;
+	window->circle_center.y = window->size.h/2;
+
 	// Build our buffer, ack our configure, and submit!
 	xdg_surface_ack_configure(window->xdgsurface, window->finalized->serial);
 	bz_initialize_surface_buffers(client_globals, window);
@@ -266,6 +270,30 @@ static void bz_initialize_surface_buffers(
 	window->active_buffer = 0;
 }
 
+static void bz_update_circle(struct bz_application_window *window, uint32_t new_time)
+{
+	// Don't bother updating if this is our first frame.
+	if (window->prev_time == 0) {
+		window->prev_time = new_time;
+		return;
+	}
+
+	const uint32_t elapsed_ms = (new_time - window->prev_time);
+	window->prev_time = new_time;
+
+	// Calculate the distance the circle should move
+	struct bz_position delta = {
+		.x = window->circle_speed_x * elapsed_ms,
+		.y = window->circle_speed_y * elapsed_ms,
+	};
+
+	window->circle_center.x += delta.x;
+	window->circle_center.y += delta.y;
+
+	window->circle_center.x %= (2 * window->size.w);
+	window->circle_center.y %= (2 * window->size.h);
+}
+
 #define BZ_BORDER_WIDTH 4
 #define BZ_TITLE_WIDTH 40
 #define BZ_CIRCLE_RADIUS 50
@@ -276,8 +304,14 @@ static void bz_draw_frame(struct bz_application_window *window)
 		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Cannot draw frame on an unreleased buffer.");
 		return;
 	}
-	int circle_x = buffer->size.w/2;
-	int circle_y = buffer->size.h/2;
+
+	int circle_x = (window->circle_center.x < window->size.w)
+		? window->circle_center.x
+		: (window->size.w - (window->circle_center.x - window->size.w));
+	int circle_y = (window->circle_center.y < window->size.h)
+		? window->circle_center.y
+		: (window->size.h - (window->circle_center.y - window->size.h));
+
 	for (int y = 0; y < buffer->size.h; y++) {
 		for (int x = 0; x < buffer->size.w; x++) {
 			if (x < BZ_BORDER_WIDTH || x > (buffer->size.w - BZ_BORDER_WIDTH) || y > (buffer->size.h - BZ_BORDER_WIDTH)) {
@@ -321,6 +355,7 @@ static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t call
 	window->frame_callback = nullptr;
 	wl_callback_destroy(wl_callback);
 
+	bz_update_circle(window, callback_data);
 	bz_draw_frame(window);
 	bz_submit_frame(window);
 }

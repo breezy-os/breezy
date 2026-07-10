@@ -39,6 +39,10 @@ struct bz_application_window {
 	struct bz_dimension size;
 	uint32_t bg_color;
 	uint32_t fg_color;
+	uint32_t prev_time; // Used for circle animation.
+	struct bz_position circle_center;
+	float circle_speed_x;
+	float circle_speed_y;
 
 	struct wl_callback *frame_callback; // nullptr when not active
 };

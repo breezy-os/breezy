@@ -24,6 +24,7 @@ void bz_list_clear(struct bz_list *list, void (*free_data)(void *));
 void bz_list_free(struct bz_list *list, void (*free_data)(void *));
 void *bz_list_find(struct bz_list *list, void *match_data, bool (*item_matches)(void *, void *));
 void *bz_list_get_neighbor(struct bz_list *list, void *item);
+int bz_list_move_to_end(struct bz_list *list_dest, struct bz_list *list_src);
 struct bz_list *bz_list_clone(struct bz_list *list, void *(*clone_data)(void *));
 
 

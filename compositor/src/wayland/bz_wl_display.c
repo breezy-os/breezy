@@ -373,11 +373,10 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 
 	// Copy over our other pending state into active state.
 	bzsurf->active_state->buffer = bzsurf->pending_state->buffer;
-	// Swap the frame_callback lists.
-	// TODO-dl9: Move pending_state items to active_state. DON'T delete existing active state callbacks.
-	bz_list_free(bzsurf->active_state->frame_callbacks, nullptr);
-	bzsurf->active_state->frame_callbacks = bzsurf->pending_state->frame_callbacks;
-	bzsurf->pending_state->frame_callbacks = bz_list_create();
+	bz_list_move_to_end(
+		bzsurf->active_state->frame_callbacks,
+		bzsurf->pending_state->frame_callbacks
+	);
 
 	if (bzsurf->active_state->buffer != nullptr) {
 		// Update our OpenGL texture

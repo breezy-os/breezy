@@ -433,6 +433,50 @@ void *bz_list_get_neighbor(struct bz_list *list, void *item)
 }
 
 /**
+ * Moves all items from list_src to the end of list_dest. After this call, list_src will be an
+ * empty list. If either list is null, a value of -1 will be returned. Otherwise, the number of
+ * moved items will be returned.
+ */
+int bz_list_move_to_end(struct bz_list *list_dest, struct bz_list *list_src)
+{
+	// Validation checks
+	if (list_dest == nullptr) {
+		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__,
+			"Move to end failed: destination list was not initialized.");
+		return -1;
+	}
+	if (list_src == nullptr) {
+		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__,
+			"Move to end failed: source list was not initialized.");
+		return -1;
+	}
+
+	// Base cases for simpler logic
+	if (list_src->length == 0) {
+		return 0; // nothing to do
+	}
+	if (list_dest->length == 0) {
+		list_dest->head = list_src->head;
+		list_dest->tail = list_src->tail;
+		list_dest->length = list_src->length;
+		list_src->head = nullptr;
+		list_src->tail = nullptr;
+		list_src->length = 0;
+		return list_dest->length;
+	}
+
+	// Move the values simply by updating the head/tail pointers
+	int moved_items = list_src->length;
+	list_dest->tail->next = list_src->head;
+	list_dest->tail = list_src->tail;
+	list_dest->length += list_src->length;
+	list_src->head = nullptr;
+	list_src->tail = nullptr;
+	list_src->length = 0;
+	return moved_items;
+}
+
+/**
  * Creates a duplicate of the provided list. The data for each element is provided to "clone_data",
  * and its returned value is used as the data for the new list. The original list is unchanged.
  */

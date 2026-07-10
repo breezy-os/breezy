@@ -37,14 +37,14 @@ static uint32_t bz_drm_find_valid_crtc(int drm_fd, const drmModeRes *resources, 
 static uint32_t bz_drm_find_valid_plane(int drm_fd, int crtc_index);
 static uint32_t bz_drm_get_prop_id(int drm_fd, uint32_t object_type, uint32_t object_id, char *prop_name);
 // GBM / buffer
-static void bz_drm_handle_pageflip(int /*fd*/, uint32_t /*sequence*/, uint32_t /*tv_sec*/, uint32_t /*tv_usec*/, void *user_data);
+static void bz_drm_handle_pageflip(int /*fd*/, uint32_t /*sequence*/, uint32_t tv_sec, uint32_t tv_usec, void *user_data);
 static void bz_drm_gbm_bo_destructor(struct gbm_bo *bo, void *data);
 static uint32_t bz_drm_gbm_get_bo_fb(struct bz_breezy *breezy, struct gbm_bo *bo);
 // Commit
 static int bz_drm_clear_plane(struct bz_breezy *breezy);
 static int bz_drm_atomic_commit_initial(struct bz_breezy *breezy, uint32_t fb_id);
 static int bz_drm_atomic_commit_recurring(struct bz_breezy *breezy, uint32_t fb_id);
-static void bz_graphics_process_frame_callbacks(struct bz_client *client_data);
+static void bz_graphics_process_frame_callbacks(struct bz_client *client_data, uint32_t timestamp);
 
 // -- OpenGL --
 
@@ -347,8 +347,8 @@ static uint32_t bz_drm_get_prop_id(
 void bz_drm_handle_pageflip(
 	int /*fd*/,
 	uint32_t /*sequence*/,
-	uint32_t /*tv_sec*/,
-	uint32_t /*tv_usec*/,
+	uint32_t tv_sec,
+	uint32_t tv_usec,
 	void *user_data
 ) {
 	struct bz_breezy *breezy = user_data;
@@ -362,11 +362,12 @@ void bz_drm_handle_pageflip(
 	breezy->gbm.new_bo = nullptr;
 
 	// Emit the Wayland "done" event for all active frame callbacks.
+	uint32_t timestamp = (uint32_t)((uint64_t)tv_sec * 1000 + tv_usec / 1000);
 	struct bz_node *curr_client = breezy->wayland.clients->head;
 	while (curr_client != nullptr) {
 		struct wl_client *client = curr_client->data;
 		struct bz_client *client_data = wl_client_get_user_data(client);
-		bz_graphics_process_frame_callbacks(client_data);
+		bz_graphics_process_frame_callbacks(client_data, timestamp);
 		curr_client = curr_client->next;
 	}
 
@@ -510,10 +511,9 @@ static int bz_drm_atomic_commit_recurring(struct bz_breezy *breezy, const uint32
  * submitting the "done" request for all surfaces that have active frame requests and are visible,
  * and then cleans up those callbacks.
  */
-static void bz_graphics_process_frame_callbacks(struct bz_client *client_data)
+static void bz_graphics_process_frame_callbacks(struct bz_client *client_data, uint32_t timestamp)
 {
 	struct bz_node *curr_surf = client_data->surfaces->head;
-	static uint32_t time = 0;
 
 	// TODO: Only emit for surfaces that are visible.
 	while (curr_surf != nullptr) {
@@ -521,7 +521,7 @@ static void bz_graphics_process_frame_callbacks(struct bz_client *client_data)
 		struct bz_node *curr_callback = bzsurf->active_state->frame_callbacks->head;
 
 		while (curr_callback != nullptr) {
-			wl_callback_send_done(curr_callback->data, time++); // TODO-dl9: timestamp
+			wl_callback_send_done(curr_callback->data, timestamp);
 			wl_resource_destroy(curr_callback->data);
 			curr_callback = curr_callback->next;
 		}

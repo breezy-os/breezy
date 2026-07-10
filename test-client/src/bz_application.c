@@ -77,8 +77,12 @@ struct bz_application_window *bz_create_app_window(struct bz_client_globals *glo
 	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Creating application window.");
 
 	struct bz_application_window *window = calloc(1, sizeof(*window));
+	// Visual / application state
 	window->bg_color = bz_random_color();
 	window->fg_color = bz_random_color();
+	window->circle_speed_x = randInt(2, 20) * 0.1f;
+	window->circle_speed_y = randInt(2, 20) * 0.1f;
+	// Wayland state
 	window->wlsurface = wl_compositor_create_surface(globals->compositor);
 	window->xdgsurface = bz_xdg_surface_constructor(globals, window->wlsurface);
 	window->xdgtoplevel = bz_xdg_toplevel_constructor(globals, window->xdgsurface);
