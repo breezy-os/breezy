@@ -37,6 +37,10 @@ struct bz_application_window {
 	struct bz_configure_sequence *finalized;
 
 	struct bz_dimension size;
+	uint32_t bg_color;
+	uint32_t fg_color;
+
+	struct wl_callback *frame_callback; // nullptr when not active
 };
 
 struct bz_client_globals {
@@ -58,8 +62,6 @@ struct bz_client_globals {
 	// -- Application State --
 
 	int is_quitting;
-	uint32_t bg_color;
-	uint32_t fg_color;
 	struct bz_application_window *window;
 
 };

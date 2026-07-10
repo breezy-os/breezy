@@ -25,6 +25,7 @@ static void bz_compositor_create_surface(struct wl_client *client, struct wl_res
 static void bz_compositor_create_region(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 // Helpers
 static struct bz_surface_state *bz_surface_state_init(void);
+static void bz_surface_state_free(struct bz_surface_state *state);
 
 // -- wl_subcompositor --
 
@@ -139,9 +140,9 @@ static void bz_compositor_create_surface(
 	list_append_failed:
 		wl_resource_destroy(res);
 	resource_failed:
-		free(active);
+		bz_surface_state_free(active);
 	active_state_alloc_failed:
-		free(pending);
+		bz_surface_state_free(pending);
 	pending_state_alloc_failed:
 		free(surface);
 	surface_alloc_failed:
@@ -163,9 +164,31 @@ static struct bz_surface_state *bz_surface_state_init(void)
 {
 	struct bz_surface_state *state = calloc(1, sizeof(*state));
 	if (state == nullptr) {
-		return nullptr;
+		goto state_alloc_failed;
+	}
+
+	state->frame_callbacks = bz_list_create();
+	if (state->frame_callbacks == nullptr) {
+		goto callback_list_failed;
 	}
 	return state;
+
+	// Error cleanups
+	callback_list_failed:
+		free(state);
+	state_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to create empty bz_surface_state.");
+		return nullptr;
+}
+
+static void bz_surface_state_free(struct bz_surface_state *state)
+{
+	if (state == nullptr) { return; }
+
+	if (state->frame_callbacks != nullptr) {
+		bz_list_free(state->frame_callbacks, nullptr);
+	}
+	free(state);
 }
 
 
@@ -232,8 +255,8 @@ void bz_surface_dtor(struct wl_resource *data)
 {
 	struct bz_surface *bzsurf = wl_resource_get_user_data(data);
 
-	free(bzsurf->pending_state);
-	free(bzsurf->active_state);
+	bz_surface_state_free(bzsurf->pending_state);
+	bz_surface_state_free(bzsurf->active_state);
 
 	glDeleteTextures(1, &bzsurf->texture);
 
@@ -282,8 +305,27 @@ static void bz_surface_frame(
 	struct wl_resource *resource,
 	uint32_t callback
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.frame not implemented");
-	// TODO
+	// Create the resource, bound to the data
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_callback_interface,
+		BZ_CALLBACK_VERSION,
+		callback
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+
+	// Add this callback to our surface for tracking.
+	const struct bz_surface *surf_data = wl_resource_get_user_data(resource);
+	bz_list_append(surf_data->pending_state->frame_callbacks, res);
+
+	// Everything succeeded!
+	return;
+
+	resource_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new frame callback.");
 }
 
 static void bz_surface_set_opaque_region(
@@ -329,12 +371,13 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 		return;
 	}
 
-	// TODO: If a NULL value is assigned to the pending buffer, the following commit removes the
-	//   surface contents. (ie, DON'T clear pending_state->buffer unless it's explicitly set to null.)
-
 	// Copy over our other pending state into active state.
 	bzsurf->active_state->buffer = bzsurf->pending_state->buffer;
-	// TODO: other state
+	// Swap the frame_callback lists.
+	// TODO-dl9: Move pending_state items to active_state. DON'T delete existing active state callbacks.
+	bz_list_free(bzsurf->active_state->frame_callbacks, nullptr);
+	bzsurf->active_state->frame_callbacks = bzsurf->pending_state->frame_callbacks;
+	bzsurf->pending_state->frame_callbacks = bz_list_create();
 
 	if (bzsurf->active_state->buffer != nullptr) {
 		// Update our OpenGL texture

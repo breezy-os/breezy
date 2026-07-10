@@ -43,8 +43,9 @@ static const struct xdg_surface_listener bz_xdg_surface_implementation;
 static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial);
 // Helpers
 static void bz_initialize_surface_buffers(struct bz_client_globals *globals, struct bz_application_window* window);
-static void bz_draw_frame(struct bz_client_globals *globals, struct bz_application_window *window);
+static void bz_draw_frame(struct bz_application_window *window);
 static void bz_submit_frame(struct bz_application_window* window);
+static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t callback_data);
 
 // -- xdg_toplevel --
 
@@ -153,7 +154,6 @@ static const struct wl_buffer_listener bz_buffer_implementation = {
 
 static void bz_buffer_release(void *data, struct wl_buffer *buffer)
 {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Releasing buffer.");
 	struct bz_buffer *bzbuff = data;
 	bzbuff->is_released = true;
 }
@@ -211,7 +211,7 @@ static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface
 	// Build our buffer, ack our configure, and submit!
 	xdg_surface_ack_configure(window->xdgsurface, window->finalized->serial);
 	bz_initialize_surface_buffers(client_globals, window);
-	bz_draw_frame(client_globals, window);
+	bz_draw_frame(window);
 	bz_submit_frame(window);
 }
 
@@ -269,7 +269,7 @@ static void bz_initialize_surface_buffers(
 #define BZ_BORDER_WIDTH 4
 #define BZ_TITLE_WIDTH 40
 #define BZ_CIRCLE_RADIUS 50
-static void bz_draw_frame(struct bz_client_globals *globals, struct bz_application_window *window)
+static void bz_draw_frame(struct bz_application_window *window)
 {
 	const struct bz_buffer *buffer = &window->buffers[window->active_buffer];
 	if (!buffer->is_released) {
@@ -285,14 +285,12 @@ static void bz_draw_frame(struct bz_client_globals *globals, struct bz_applicati
 			} else if (y < BZ_TITLE_WIDTH) {
 				buffer->pixel_data[y * buffer->size.w + x] = 0xFFFFFFFF;
 			} else if (distance(circle_x, circle_y, x, y) < BZ_CIRCLE_RADIUS) {
-				buffer->pixel_data[y * buffer->size.w + x] = globals->fg_color;
+				buffer->pixel_data[y * buffer->size.w + x] = window->fg_color;
 			} else {
-				buffer->pixel_data[y * buffer->size.w + x] = globals->bg_color; // AARRGGBB
+				buffer->pixel_data[y * buffer->size.w + x] = window->bg_color;
 			}
 		}
 	}
-
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "First pixel color: 0x%X", buffer->pixel_data[0]);
 }
 
 static void bz_submit_frame(struct bz_application_window *window)
@@ -302,8 +300,29 @@ static void bz_submit_frame(struct bz_application_window *window)
 	bzbuffer->is_released = false;
 
 	wl_surface_attach(window->wlsurface, bzbuffer->buffer, 0, 0);
-	// wl_surface_damage(window->wlsurface, 0, 0, INT32_MAX, INT32_MAX);
+	// TODO-dl10: wl_surface_damage(window->wlsurface, 0, 0, INT32_MAX, INT32_MAX);
+
+	// Set up our frame callback to get notified when our next frame should be drawn
+	window->frame_callback = wl_surface_frame(window->wlsurface);
+	const struct wl_callback_listener frame_listener = {
+		.done = bz_render,
+	};
+	wl_callback_add_listener(window->frame_callback, &frame_listener, window);
+
 	wl_surface_commit(window->wlsurface);
+}
+
+static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t callback_data)
+{
+	// bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "RENDER CALLBACK TRIGGERED! Time: %d", callback_data); // TODO-dl9: delete
+
+	struct bz_application_window *window = data;
+
+	window->frame_callback = nullptr;
+	wl_callback_destroy(wl_callback);
+
+	bz_draw_frame(window);
+	bz_submit_frame(window);
 }
 
 

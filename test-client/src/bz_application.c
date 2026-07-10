@@ -11,28 +11,13 @@
 
 #include "breezy/bz_logger.h"
 #include "breezy/bz_client_globals.h"
+#include "breezy/bz_client_utils.h"
 #include "breezy/bz_wl_protocol.h"
 
 
 // =================================================================================================
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
-
-static void bz_sleep_ms(uint32_t ms);
-
-
-// =================================================================================================
-//  Utilities
-// -------------------------------------------------------------------------------------------------
-
-static void bz_sleep_ms(uint32_t ms)
-{
-	struct timespec ts = {
-		.tv_sec = ms / 1000,
-		.tv_nsec = (ms % 1000) * 1000000L,
-	};
-	nanosleep(&ts, nullptr);
-}
 
 
 // =================================================================================================
@@ -90,7 +75,10 @@ void bz_run_event_loop(const struct bz_client_globals *globals)
 struct bz_application_window *bz_create_app_window(struct bz_client_globals *globals)
 {
 	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Creating application window.");
+
 	struct bz_application_window *window = calloc(1, sizeof(*window));
+	window->bg_color = bz_random_color();
+	window->fg_color = bz_random_color();
 	window->wlsurface = wl_compositor_create_surface(globals->compositor);
 	window->xdgsurface = bz_xdg_surface_constructor(globals, window->wlsurface);
 	window->xdgtoplevel = bz_xdg_toplevel_constructor(globals, window->xdgsurface);

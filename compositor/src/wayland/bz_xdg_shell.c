@@ -146,7 +146,7 @@ static void bz_xdg_wm_base_get_xdg_surface(
 		free(xdgsurface);
 	surface_alloc_failed:
 	initial_checks_failed:
-		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new xdg_surface.");
+		bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "Failed to construct a new xdg_surface.");
 }
 
 static void bz_xdg_wm_base_pong(
@@ -243,7 +243,7 @@ static void bz_xdg_surface_get_toplevel(
 		free(xdgtoplevel);
 	surface_alloc_failed:
 	initial_checks_failed:
-		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new xdg_toplevel.");
+		bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "Failed to construct a new xdg_toplevel.");
 }
 
 static void bz_xdg_surface_get_popup(
@@ -265,7 +265,7 @@ static void bz_xdg_surface_get_popup(
 	//
 	// // Error cleanup
 	// initial_checks_failed:
-	// 	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new xdg_popup.");
+	// 	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "Failed to construct a new xdg_popup.");
 }
 
 static void bz_xdg_surface_set_window_geometry(
