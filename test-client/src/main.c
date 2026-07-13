@@ -2,29 +2,30 @@
 #define _POSIX_C_SOURCE 200809L // NOLINT
 
 #include <signal.h>
-#include <stdio.h>
+#include <stdlib.h>
+#include <sys/eventfd.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <wayland-client.h>
+#include <sys/mman.h>
 
-
-// =================================================================================================
-//  Structs
-// -------------------------------------------------------------------------------------------------
-
-struct bz_test_client {
-	bool terminating;
-};
+#include "breezy/bz_logger.h"
+#include "breezy/bz_application.h"
+#include "breezy/bz_wl_protocol.h"
+#include "breezy/bz_client_globals.h"
+#include "breezy/bz_client_utils.h"
 
 
 // =================================================================================================
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
 
-static struct bz_test_client globals = {0};
+static struct bz_client_globals client_globals = {0};
 
 static void bz_termint_handler(int signum);
 static void bz_add_termint_handler(int signum);
+
 
 // =================================================================================================
 //  Function Definitions
@@ -32,8 +33,9 @@ static void bz_add_termint_handler(int signum);
 
 static void bz_termint_handler(int signum)
 {
-	printf("Client: Terminated\n");
-	globals.terminating = true;
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "SIGTERM/SIGINT (%d) signal received", signum);
+	constexpr uint64_t val = 1;
+	write(client_globals.is_quitting, &val, sizeof(val));
 }
 
 static void bz_add_termint_handler(int signum)
@@ -46,41 +48,62 @@ static void bz_add_termint_handler(int signum)
 }
 
 
-static void bz_sleep_ms(uint32_t ms)
-{
-	struct timespec ts = {
-		.tv_sec = ms / 1000,
-		.tv_nsec = (ms % 1000) * 1000000L,
-	};
-	nanosleep(&ts, nullptr);
-}
-
-
 // =================================================================================================
 //  Main Program
 // -------------------------------------------------------------------------------------------------
 
 int main(void)
 {
+	// Set up our logger
+	bz_log_initialize(BZ_LOG_INFO);
+	bz_log_set_level(BZ_LOG_WAYLAND, BZ_LOG_DEBUG);
+
+	client_globals.is_quitting = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+
 	bz_add_termint_handler(SIGTERM);
 	bz_add_termint_handler(SIGINT);
 
+	// Pick some random colors for our app
+	srand(time(nullptr));
+	client_globals.bg_color = bz_random_color();
+	client_globals.fg_color = bz_random_color();
+
 	// Establish the connection
-	struct wl_display *display = wl_display_connect(nullptr);
-	if (!display) {
-		fprintf(stderr, "Client: Failed to connect to Wayland display.\n");
+	client_globals.display = wl_display_connect(nullptr);
+	if (!client_globals.display) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to connect to Wayland display.");
+		close(client_globals.is_quitting);
 		return 1;
 	}
 
-	// Run our "event loop"
-	while (!globals.terminating) {
-		printf("Client: Sleeping.\n");
-		bz_sleep_ms(1000);
+	// Set up our globals
+	bz_registry_constructor(&client_globals);
+	wl_display_roundtrip(client_globals.display);
+
+	// Make our main application window
+	client_globals.window = bz_create_app_window(&client_globals);
+
+	// Loop!
+	bz_run_event_loop(&client_globals);
+
+	// Cleanup
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Cleaning up and disconnecting.");
+	if (client_globals.window != nullptr) {
+		for (uint8_t i = 0; i < 2; i++) {
+			if (client_globals.window->buffers[i].buffer != nullptr) {
+				wl_buffer_destroy(client_globals.window->buffers[i].buffer);
+			}
+		}
+		if (client_globals.window->shm_pool != nullptr) {
+			wl_shm_pool_destroy(client_globals.window->shm_pool);
+		}
+		if (client_globals.window->pool_data != nullptr) {
+			munmap(client_globals.window->pool_data, client_globals.window->pool_size);
+		}
 	}
+	wl_display_disconnect(client_globals.display);
+	close(client_globals.is_quitting);
 
-	printf("Client: Disconnecting.\n");
-	wl_display_disconnect(display);
-
-	printf("Client: Clean exit.\n");
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Clean exit.");
 	return 0;
 }

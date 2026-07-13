@@ -1,4 +1,7 @@
 
+#include <stdlib.h>
+#include <time.h>
+
 #include "breezy/bz_breezy.h"
 
 #include <wayland-server.h>
@@ -14,6 +17,8 @@
 int main(void)
 {
 	int retval = 0;
+
+	srand(time(NULL));
 
 	// Set up our logger
 	bz_log_initialize(BZ_LOG_INFO);

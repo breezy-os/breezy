@@ -1,7 +1,7 @@
 
 #include <stdlib.h>
 
-#include "unity/unity.h"
+#include "unity.h"
 
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"

@@ -6,7 +6,7 @@
 #include <sys/wait.h>
 
 #include <wayland-server.h>
-#include <wayland/xdg-shell-server-protocol.h>
+#include <xdg-shell-server-protocol.h>
 
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
@@ -57,58 +57,11 @@ static int bz_wayland_sigchld_handler(int /*signal_number*/, void * /*data*/)
 	return 0;
 }
 
-// TODO: Temporary -- will be replaced/moved to surface functionality when that's implemented.
-static void bz_wayland_add_opengl_objects(struct bz_client *client_data)
-{
-	static float x = -0.9f;
-	static float y = 0.9f;
-	const float w = 0.2f;
-	const float h = 0.2f;
-
-	float left = x; float right  = x + w;
-	float top  = y; float bottom = y - h;
-	float vertices[] = {
-		// Position (xy)  // Color (rgb)
-		right, top,       1.0f, 0.0f, 0.0f,
-		right, bottom,    1.0f, 1.0f, 1.0f,
-		left,  bottom,    0.0f, 0.0f, 1.0f,
-		left,  top,       1.0f, 1.0f, 1.0f,
-	};
-	uint32_t indices[] = {
-		0, 1, 3, // Triangle 1 (red)
-		1, 2, 3, // Triangle 2 (blue)
-	};
-	x += w;
-	y -= h;
-
-	glGenVertexArrays(1, &client_data->vao);
-	glBindVertexArray(client_data->vao);
-
-	glGenBuffers(1, &client_data->vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, client_data->vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-	glGenBuffers(1, &client_data->ebo);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, client_data->ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
-	glEnableVertexAttribArray(0);
-
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(2 * sizeof(float)));
-	glEnableVertexAttribArray(1);
-
-	glBindVertexArray(0);
-}
-
 static void bz_wayland_client_dtor(void *data)
 {
 	struct bz_client *client_data = data;
 
-	// TODO: This deletion/cleanup will be moved when we implement surfaces:
-	glDeleteVertexArrays(1, &client_data->vao);
-	glDeleteBuffers(1, &client_data->vbo);
-	glDeleteBuffers(1, &client_data->ebo);
+	bz_list_free(client_data->surfaces, nullptr);
 
 	free(client_data);
 }
@@ -129,13 +82,13 @@ static void bz_wayland_handle_client_connection(struct wl_listener *listener, vo
 	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Client with pid %d connected!", pid);
 
 	// Set up our custom data for the client
-	struct bz_client *client_data = malloc(sizeof(*client_data));
+	struct bz_client *client_data = calloc(1, sizeof(*client_data));
 	if (client_data == nullptr) {
 		return;
 	}
 	client_data->breezy = breezy;
 	client_data->pid = pid;
-	bz_wayland_add_opengl_objects(client_data);
+	client_data->surfaces = bz_list_create();
 	wl_client_set_user_data(client, client_data, bz_wayland_client_dtor);
 
 	// Add the client to our "clients" list.
@@ -144,10 +97,6 @@ static void bz_wayland_handle_client_connection(struct wl_listener *listener, vo
 	// Set up a listener to clean up the client.
 	client_data->client_disconnect_listener.notify = bz_wayland_handle_client_disconnect;
 	wl_client_add_destroy_listener(client, &client_data->client_disconnect_listener);
-
-	// Make sure the client gets drawn
-	// TODO: This is temporary, and will be (re)moved when we set up surfaces.
-	bz_graphics_schedule_render(breezy);
 }
 
 /** Handles client disconnects by removing the client from our global tracking list. */
@@ -159,10 +108,6 @@ static void bz_wayland_handle_client_disconnect(struct wl_listener * /*listener*
 	struct bz_client *client_data = wl_client_get_user_data(client);
 	bz_list_remove(client_data->breezy->wayland.clients, client, nullptr);
 	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Client with pid %d disconnected!", client_data->pid);
-
-	// Make sure the client gets undrawn
-	// TODO: This is temporary, and will be (re)moved when we set up surfaces.
-	bz_graphics_schedule_render(client_data->breezy);
 }
 
 /** Creates the wl_compositor global. */
@@ -341,7 +286,7 @@ void bz_wayland_cleanup(struct bz_breezy *breezy)
 		bz_list_free(breezy->wayland.event_sources, bz_wayland_destroy_event_source);
 	}
 	if (breezy->wayland.clients != nullptr) {
-		// This is a list of "wl_clients" which should be cleaned up by other means.
+		// The actual wl_clients (and resources) are destroyed through wl_display_destroy_clients()
 		bz_list_free(breezy->wayland.clients, nullptr);
 	}
 	if (breezy->wayland.display != nullptr) {

@@ -109,10 +109,12 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	// Now handle all Breezy keycombos (ie, those with "super")
 	if (super_held && press_state == XKB_KEY_DOWN) {
 		switch (xkb_keysym) {
+
 		// Quit Compositor
 		case XKB_KEY_Escape:
 			wl_display_terminate(breezy->wayland.display);
 			break;
+
 		// Start / Stop Applications
 		case XKB_KEY_t:
 			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/git/breezy/build/test-client/test-client");
@@ -120,6 +122,7 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 		case XKB_KEY_q:
 			bz_input_terminate_client(breezy);
 			break;
+
 		// Change Colors
 		case XKB_KEY_1:
 			bz_graphics_set_color_index(0);
@@ -136,6 +139,7 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 		case XKB_KEY_Down:
 			bz_graphics_change_color(breezy, -20.0f/255);
 			break;
+
 		default:
 			break; // Does nothing, but shuts up clang-tidy
 		}
@@ -210,6 +214,10 @@ static void bz_input_spawn_child(const char *socket_name, const char *program_pa
  */
 static void bz_input_terminate_client(struct bz_breezy *breezy)
 {
+	if (breezy->wayland.clients->length == 0) {
+		bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "No clients to terminate.");
+		return;
+	}
 	struct wl_client *client = breezy->wayland.clients->head->data;
 	const struct bz_client *client_data = wl_client_get_user_data(client);
 

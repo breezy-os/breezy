@@ -78,6 +78,7 @@ static void bz_log(
 
 	if (level >= BZ_LOG_ERROR) {
 		(void) fprintf(err_stream, "[%s:%d]\t%s\n", file, line, message);
+		fflush(err_stream);
 	}
 
 	const char *level_string = level == BZ_LOG_DEBUG ? "DEBUG"
@@ -86,6 +87,7 @@ static void bz_log(
 		: level == BZ_LOG_ERROR ? "ERROR"
 		: "UNKNO";
 	const int result = fprintf(out_stream, "%s [%s:%d]\t%s\n", level_string, file, line, message);
+	fflush(out_stream);
 	if (result < 0) {
 		(void) fputs("Failed to write log message.\n", err_stream);
 	}

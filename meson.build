@@ -1,12 +1,15 @@
 
-project('breezy-os', 'c', default_options: [
-    'c_std=c23',
-    'warning_level=3',
-    #    'buildtype=debugoptimized', # SETS -O2, which breaks some leak detections
-    'buildtype=debug',
-    'b_sanitize=address,undefined',
-    'b_lundef=false',
-])
+project('breezy-os', 'c',
+        meson_version: '>=1.8.0',
+        default_options: [
+            'c_std=c23',
+            'warning_level=3',
+            #    'buildtype=debugoptimized', # SETS -O2, which breaks some leak detections
+            'buildtype=debug',
+            'b_sanitize=address,undefined',
+            'b_lundef=false',
+        ]
+)
 
 # Set a bunch of compiler build flags for code analysis
 cc = meson.get_compiler('c')
@@ -24,5 +27,7 @@ extra_warnings = cc.get_supported_arguments([
 ])
 add_project_arguments(extra_warnings, language: 'c')
 
+subdir('test-frameworks')
+subdir('utilities')
 subdir('compositor')
 subdir('test-client')
