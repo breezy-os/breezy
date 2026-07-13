@@ -5,11 +5,8 @@
 
 #include "unity.h"
 #include "fff.h"
-#include "../include/breezy/bz_wl_display.h"
-#include "breezy/bz_breezy.h"
-#include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
-#include "breezy/bz_wayland.h"
+#include "helpers/bz_test_resources.c"
 
 
 // =================================================================================================
@@ -36,23 +33,6 @@ void tearDown(void) {}
 // -------------------------------------------------------------------------------------------------
 
 extern const struct wl_surface_interface bz_surface_implementation;
-
-struct bz_surface *bz_create_surface_data(void)
-{
-	struct bz_surface *data = calloc(1, sizeof(*data));
-	data->pending_state = calloc(1, sizeof(data->pending_state));
-	data->active_state = calloc(1, sizeof(data->active_state));
-	return data;
-}
-
-void bz_free_surface_data(struct bz_surface *data)
-{
-	if (data) {
-		if (data->pending_state) { free(data->pending_state); }
-		if (data->active_state) { free(data->active_state); }
-		free(data);
-	}
-}
 
 
 // =================================================================================================
@@ -252,7 +232,7 @@ int main(void) {
 	RUN_TEST(test_surface_destroy__with_role_sends_error); // TODO
 
 	// Test bz_surface_attach()
-	RUN_TEST(test_surface_attach__contents_are_double_buffered); // TODO: today
+	RUN_TEST(test_surface_attach__contents_are_double_buffered);
 	RUN_TEST(test_surface_attach__size_is_properly_calculated); // TODO
 	RUN_TEST(test_surface_attach__x_y_are_relative); // TODO
 	RUN_TEST(test_surface_attach__x_y_for_v5_raises_an_error); // TODO

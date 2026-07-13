@@ -17,7 +17,7 @@
 
 // -- xdg_wm_base --
 
-static const struct xdg_wm_base_interface bz_xdg_wm_base_implementation;
+const struct xdg_wm_base_interface bz_xdg_wm_base_implementation;
 static void bz_xdg_wm_base_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_xdg_wm_base_create_positioner(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_xdg_wm_base_get_xdg_surface(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface);
@@ -25,7 +25,7 @@ static void bz_xdg_wm_base_pong(struct wl_client *client, struct wl_resource *re
 
 // -- xdg_surface --
 
-static const struct xdg_surface_interface bz_xdg_surface_implementation;
+const struct xdg_surface_interface bz_xdg_surface_implementation;
 static void bz_xdg_surface_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_xdg_surface_get_toplevel(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_xdg_surface_get_popup(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *parent, struct wl_resource *positioner);
@@ -72,7 +72,7 @@ void bz_xdg_wm_base_constructor(struct wl_client *client, void *data, uint32_t v
 	wl_resource_set_implementation(res, &bz_xdg_wm_base_implementation, nullptr, nullptr);
 }
 
-static const struct xdg_wm_base_interface bz_xdg_wm_base_implementation = {
+const struct xdg_wm_base_interface bz_xdg_wm_base_implementation = {
 	.destroy = bz_xdg_wm_base_destroy,
 	.create_positioner = bz_xdg_wm_base_create_positioner,
 	.get_xdg_surface = bz_xdg_wm_base_get_xdg_surface,
@@ -134,7 +134,7 @@ static void bz_xdg_wm_base_get_xdg_surface(
 
 	// Populate the surface's user data
 	xdgsurface->resource = res;
-	xdgsurface->wlsurface = wl_resource_get_user_data(surface);
+	xdgsurface->wlsurface = bzsurf;
 	xdgsurface->pending_configures = bz_list_create();
 	// ...and add our back-references.
 	bzsurf->xdgsurface = xdgsurface;
@@ -163,7 +163,7 @@ static void bz_xdg_wm_base_pong(
 //  xdg_surface
 // -------------------------------------------------------------------------------------------------
 
-static const struct xdg_surface_interface bz_xdg_surface_implementation = {
+const struct xdg_surface_interface bz_xdg_surface_implementation = {
 	.destroy = bz_xdg_surface_destroy,
 	.get_toplevel = bz_xdg_surface_get_toplevel,
 	.get_popup = bz_xdg_surface_get_popup,
