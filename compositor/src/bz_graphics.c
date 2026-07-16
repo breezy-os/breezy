@@ -44,7 +44,6 @@ static uint32_t bz_drm_gbm_get_bo_fb(struct bz_breezy *breezy, struct gbm_bo *bo
 static int bz_drm_clear_plane(struct bz_breezy *breezy);
 static int bz_drm_atomic_commit_initial(struct bz_breezy *breezy, uint32_t fb_id);
 static int bz_drm_atomic_commit_recurring(struct bz_breezy *breezy, uint32_t fb_id);
-static void bz_graphics_process_frame_callbacks(struct bz_client *client_data, uint32_t timestamp);
 
 // -- OpenGL --
 
@@ -504,30 +503,6 @@ static int bz_drm_atomic_commit_recurring(struct bz_breezy *breezy, const uint32
 	drmModeAtomicFree(req);
 
 	return retVal;
-}
-
-/**
- * Processes all frame callbacks for the given client by iterating over all the client's surfaces,
- * submitting the "done" request for all surfaces that have active frame requests and are visible,
- * and then cleans up those callbacks.
- */
-static void bz_graphics_process_frame_callbacks(struct bz_client *client_data, uint32_t timestamp)
-{
-	struct bz_node *curr_surf = client_data->surfaces->head;
-
-	// TODO: Only emit for surfaces that are visible.
-	while (curr_surf != nullptr) {
-		struct bz_surface *bzsurf = curr_surf->data;
-		struct bz_node *curr_callback = bzsurf->active_state->frame_callbacks->head;
-
-		while (curr_callback != nullptr) {
-			wl_callback_send_done(curr_callback->data, timestamp);
-			wl_resource_destroy(curr_callback->data);
-			curr_callback = curr_callback->next;
-		}
-		bz_list_clear(bzsurf->active_state->frame_callbacks, nullptr);
-		curr_surf = curr_surf->next;
-	}
 }
 
 
@@ -1067,4 +1042,30 @@ int bz_graphics_deactivate(struct bz_breezy *breezy)
 	drmModeAtomicFree(req);
 
 	return retVal;
+}
+
+/**
+ * Processes all frame callbacks for the given client by iterating over all the client's surfaces,
+ * submitting the "done" request for all surfaces that have active frame requests and are visible,
+ * and then cleans up those callbacks.
+ *
+ * (Exposed as "public" for testing purposes only.)
+ */
+void bz_graphics_process_frame_callbacks(struct bz_client *client_data, uint32_t timestamp)
+{
+	struct bz_node *curr_surf = client_data->surfaces->head;
+
+	// TODO: Only emit for surfaces that are visible.
+	while (curr_surf != nullptr) {
+		struct bz_surface *bzsurf = curr_surf->data;
+		struct bz_node *curr_callback = bzsurf->active_state->frame_callbacks->head;
+
+		while (curr_callback != nullptr) {
+			wl_callback_send_done(curr_callback->data, timestamp);
+			wl_resource_destroy(curr_callback->data);
+			curr_callback = curr_callback->next;
+		}
+		bz_list_clear(bzsurf->active_state->frame_callbacks, nullptr);
+		curr_surf = curr_surf->next;
+	}
 }

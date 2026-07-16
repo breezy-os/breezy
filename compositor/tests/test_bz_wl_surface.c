@@ -5,6 +5,7 @@
 
 #include "unity.h"
 #include "fff.h"
+#include "breezy/bz_graphics.h"
 #include "breezy/bz_logger.h"
 #include "helpers/bz_test_resources.c"
 
@@ -14,12 +15,22 @@
 // -------------------------------------------------------------------------------------------------
 
 DEFINE_FFF_GLOBALS
+// -- wl_client --
+FAKE_VOID_FUNC(wl_client_post_no_memory, struct wl_client *)
 // -- wl_resource --
 FAKE_VALUE_FUNC(void *, wl_resource_get_user_data, struct wl_resource *)
+FAKE_VALUE_FUNC(struct wl_resource *, wl_resource_create, struct wl_client *, const struct wl_interface *, int, uint32_t)
+FAKE_VOID_FUNC_VARARG(wl_resource_post_event, struct wl_resource *, uint32_t, ...)
+FAKE_VOID_FUNC(wl_resource_destroy, struct wl_resource *)
+// -- wl_callback --
 
 void setUp(void)
 {
+	RESET_FAKE(wl_client_post_no_memory);
 	RESET_FAKE(wl_resource_get_user_data);
+	RESET_FAKE(wl_resource_create);
+	RESET_FAKE(wl_resource_post_event);
+	RESET_FAKE(wl_resource_destroy);
 	FFF_RESET_HISTORY();
 
 	bz_log_initialize(BZ_LOG_OFF);
@@ -147,6 +158,121 @@ void test_surface_damage__starts_out_no_damage()
 //  Test bz_surface_frame()
 // -------------------------------------------------------------------------------------------------
 
+/** Frame requests are double-buffered. They don't become active until after a commit. */
+void test_surface_frame__requests_are_double_buffered(void)
+{
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surf_data;
+	struct wl_resource *callback_res = calloc(1, sizeof(*callback_res));
+	wl_resource_create_fake.return_val = callback_res;
+
+	// Run our test
+	TEST_ASSERT_EQUAL_INT(0, surf_data->active_state->frame_callbacks->length);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->frame_callbacks->length);
+	bz_surface_implementation.frame(nullptr, nullptr, 0);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->active_state->frame_callbacks->length);
+	TEST_ASSERT_EQUAL_INT(1, surf_data->pending_state->frame_callbacks->length);
+	TEST_ASSERT_EQUAL(callback_res, surf_data->pending_state->frame_callbacks->head->data);
+
+	// Cleanup
+	free(callback_res);
+	bz_free_surface_data(surf_data);
+}
+
+/** The server should not send frame callbacks if the client is not visible. */
+void test_surface_frame__client_not_visible(void)
+{
+	// TODO
+	// Tie into bz_graphics_process_frame_callbacks() for this..?
+}
+
+/** Multiple frame requests can all be submitted for a single commit. They should all fire. */
+void test_surface_frame__multiple_frame_requests(void)
+{
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surf_data;
+	struct wl_resource *callback_res = calloc(1, sizeof(*callback_res));
+	wl_resource_create_fake.return_val = callback_res;
+	struct bz_client *client_data = bz_create_client_data();
+	bz_list_append(client_data->surfaces, surf_data);
+
+	// Create multiple frame requests
+	bz_surface_implementation.frame(nullptr, nullptr, 0);
+	bz_surface_implementation.frame(nullptr, nullptr, 0);
+	TEST_ASSERT_EQUAL_INT(2, surf_data->pending_state->frame_callbacks->length);
+
+	// Promote to active state. (Not doing a commit because that does a lot more things.)
+	bz_list_move_to_end(
+		surf_data->active_state->frame_callbacks,
+		surf_data->pending_state->frame_callbacks
+	);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->frame_callbacks->length);
+	TEST_ASSERT_EQUAL_INT(2, surf_data->active_state->frame_callbacks->length);
+
+	// Trigger the callbacks to run
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_event_fake.call_count);
+	bz_graphics_process_frame_callbacks(client_data, 0);
+	TEST_ASSERT_EQUAL_INT(2, wl_resource_post_event_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(WL_CALLBACK_DONE, wl_resource_post_event_fake.arg1_history[0]);
+	TEST_ASSERT_EQUAL_INT(WL_CALLBACK_DONE, wl_resource_post_event_fake.arg1_history[1]);
+
+	// Cleanup
+	bz_free_client_data(client_data);
+	free(callback_res);
+	bz_free_surface_data(surf_data);
+}
+
+/** The compositor should destroy the callback immediately after firing the "done". */
+void test_surface_frame__callback_is_destroyed_immediately(void)
+{
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surf_data;
+	struct wl_resource *callback_res = calloc(1, sizeof(*callback_res));
+	wl_resource_create_fake.return_val = callback_res;
+	struct bz_client *client_data = bz_create_client_data();
+	bz_list_append(client_data->surfaces, surf_data);
+
+	// Create a frame request
+	bz_surface_implementation.frame(nullptr, nullptr, 0);
+	TEST_ASSERT_EQUAL_INT(1, surf_data->pending_state->frame_callbacks->length);
+
+	// Promote to active state. (Not doing a commit because that does a lot more things.)
+	bz_list_move_to_end(
+		surf_data->active_state->frame_callbacks,
+		surf_data->pending_state->frame_callbacks
+	);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->frame_callbacks->length);
+	TEST_ASSERT_EQUAL_INT(1, surf_data->active_state->frame_callbacks->length);
+
+	// Trigger the callback to run
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_event_fake.call_count);
+	bz_graphics_process_frame_callbacks(client_data, 0);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_event_fake.call_count);
+
+	// Verify the thing being tested
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_destroy_fake.call_count);
+	TEST_ASSERT_EQUAL(callback_res, wl_resource_destroy_fake.arg0_val);
+
+	// Cleanup
+	bz_free_client_data(client_data);
+	free(callback_res);
+	bz_free_surface_data(surf_data);
+}
+
+/** A no memory error is posted for failed Wayland resource creation. */
+void test_surface_frame__posts_no_mem_for_failed_resource(void)
+{
+	// Prep our mocks
+	wl_resource_create_fake.return_val = nullptr;
+
+	// Run our test
+	bz_surface_implementation.frame(nullptr, nullptr, 0);
+	TEST_ASSERT_EQUAL_INT(1, wl_client_post_no_memory_fake.call_count);
+}
+
 
 // =================================================================================================
 //  Test bz_surface_set_opaque_region()
@@ -245,8 +371,11 @@ int main(void) {
 	RUN_TEST(test_surface_damage__starts_out_no_damage); // TODO
 
 	// Test bz_surface_frame()
-	// RUN_TEST(test_surface_frame_...);
-	// TODO
+	RUN_TEST(test_surface_frame__requests_are_double_buffered);
+	RUN_TEST(test_surface_frame__client_not_visible); // TODO
+	RUN_TEST(test_surface_frame__multiple_frame_requests);
+	RUN_TEST(test_surface_frame__callback_is_destroyed_immediately);
+	RUN_TEST(test_surface_frame__posts_no_mem_for_failed_resource);
 
 	// Test bz_surface_set_opaque_region()
 	// RUN_TEST(test_surface_set_opaque_region_...);

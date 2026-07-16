@@ -1,6 +1,7 @@
 
 #include <stdlib.h>
 
+#include "breezy/bz_wayland.h"
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_list.h"
@@ -9,6 +10,10 @@
 // =================================================================================================
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
+
+// -- bz_client --
+struct bz_client *bz_create_client_data(void);
+void bz_free_client_data(struct bz_client *data);
 
 // -- bz_surface --
 struct bz_surface *bz_create_surface_data(void);
@@ -25,6 +30,28 @@ void bz_free_xdg_toplevel_data(struct bz_xdg_toplevel *data);
 // -- bz_xdg_surface_configure --
 struct bz_xdg_surface_configure *bz_create_xdg_surface_configure(uint32_t serial);
 void bz_free_xdg_surface_configure(struct bz_xdg_surface_configure *data);
+
+
+// =================================================================================================
+//  bz_client
+// -------------------------------------------------------------------------------------------------
+
+struct bz_client *bz_create_client_data(void)
+{
+	struct bz_client *data = calloc(1, sizeof(*data));
+
+	data->surfaces = bz_list_create();
+
+	return data;
+}
+
+void bz_free_client_data(struct bz_client *data)
+{
+	if (data) {
+		if (data->surfaces) { bz_list_free(data->surfaces, nullptr); }
+		free(data);
+	}
+}
 
 
 // =================================================================================================
