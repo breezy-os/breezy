@@ -23,13 +23,14 @@ struct bz_drm {
 	uint32_t mode_blob_id;
 	uint32_t plane_id;
 	bz_mat3 output_projection;
+	bool retry_render_on_page_flip;
 };
 
 struct bz_gbm {
 	struct gbm_device *device;
 	struct gbm_surface *surface;
-	struct gbm_bo *prev_bo;
-	struct gbm_bo *new_bo; // Only set temporarily during page flip events.
+	struct gbm_bo *prev_bo; // The currently displayed buffer.
+	struct gbm_bo *new_bo;  // The recently committed, but not yet displayed, buffer.
 };
 
 struct bz_gl {

@@ -38,6 +38,7 @@ enum bz_surface_role {
 
 struct bz_surface_state {
 	struct wl_resource *buffer;
+	struct bz_list *frame_callbacks; // List of "struct wl_resource *" (wl_callback objects)
 };
 
 struct bz_surface {

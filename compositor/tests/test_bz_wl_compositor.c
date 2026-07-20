@@ -10,6 +10,8 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wayland.h"
 
+#include "helpers/bz_test_resources.c"
+
 
 // =================================================================================================
 //  Set up / tear down / globals
@@ -110,11 +112,7 @@ void bz_cleanup_create_surface_test(
 	struct bz_create_surface_test_data *test_data,
 	struct bz_surface *user_data
 ) {
-	if (user_data) {
-		free(user_data->pending_state);
-		free(user_data->active_state);
-		free(user_data);
-	}
+	bz_free_surface_data(user_data);
 	if (test_data) {
 		if (test_data->client_data) { bz_client_free_data(test_data->client_data); }
 		if (test_data->surface)     { free(test_data->surface); }

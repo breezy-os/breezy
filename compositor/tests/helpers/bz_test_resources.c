@@ -1,6 +1,7 @@
 
 #include <stdlib.h>
 
+#include "breezy/bz_wayland.h"
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_list.h"
@@ -9,6 +10,10 @@
 // =================================================================================================
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
+
+// -- bz_client --
+struct bz_client *bz_create_client_data(void);
+void bz_free_client_data(struct bz_client *data);
 
 // -- bz_surface --
 struct bz_surface *bz_create_surface_data(void);
@@ -28,22 +33,55 @@ void bz_free_xdg_surface_configure(struct bz_xdg_surface_configure *data);
 
 
 // =================================================================================================
+//  bz_client
+// -------------------------------------------------------------------------------------------------
+
+struct bz_client *bz_create_client_data(void)
+{
+	struct bz_client *data = calloc(1, sizeof(*data));
+
+	data->surfaces = bz_list_create();
+
+	return data;
+}
+
+void bz_free_client_data(struct bz_client *data)
+{
+	if (data) {
+		if (data->surfaces) { bz_list_free(data->surfaces, nullptr); }
+		free(data);
+	}
+}
+
+
+// =================================================================================================
 //  bz_surface
 // -------------------------------------------------------------------------------------------------
 
 struct bz_surface *bz_create_surface_data(void)
 {
 	struct bz_surface *data = calloc(1, sizeof(*data));
-	data->pending_state = calloc(1, sizeof(data->pending_state));
-	data->active_state  = calloc(1, sizeof(data->active_state));
+
+	data->pending_state = calloc(1, sizeof(*data->pending_state));
+	data->pending_state->frame_callbacks = bz_list_create();
+
+	data->active_state  = calloc(1, sizeof(*data->active_state));
+	data->active_state->frame_callbacks = bz_list_create();
+
 	return data;
 }
 
 void bz_free_surface_data(struct bz_surface *data)
 {
 	if (data) {
-		if (data->pending_state) { free(data->pending_state); }
-		if (data->active_state)  { free(data->active_state); }
+		if (data->pending_state) {
+			bz_list_free(data->pending_state->frame_callbacks, nullptr);
+			free(data->pending_state);
+		}
+		if (data->active_state) {
+			bz_list_free(data->active_state->frame_callbacks, nullptr);
+			free(data->active_state);
+		}
 		free(data);
 	}
 }

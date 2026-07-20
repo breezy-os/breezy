@@ -681,6 +681,93 @@ void test_list_get_neighbor_returns_next_item_when_needed(void)
 
 
 // =================================================================================================
+//  Test bz_list_move_to_end()
+// -------------------------------------------------------------------------------------------------
+
+void test_list_move_to_end__fails_for_uninitialized(void)
+{
+	// Set up initial data
+	struct bz_list *src = bz_list_create();
+	struct bz_list *dest = bz_list_create();
+
+	// Run our test
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_to_end(nullptr, src));
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_to_end(dest, nullptr));
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_to_end(nullptr, nullptr));
+
+	// Cleanup
+	bz_list_free(src, nullptr);
+	bz_list_free(dest, nullptr);
+}
+
+void test_list_move_to_end__empty_src_list(void)
+{
+	// Create our lists...
+	struct bz_list *src = bz_list_create();
+	struct bz_list *dest = bz_list_create();
+	// ...and add some initial values
+	int dest_val = 1; bz_list_append(dest, &dest_val);
+
+	// Run our test
+	int ret_val = bz_list_move_to_end(dest, src);
+	TEST_ASSERT_EQUAL_INT(0, ret_val);
+	TEST_ASSERT_EQUAL_INT(0, src->length);
+	TEST_ASSERT_EQUAL_INT(1, dest->length);
+	TEST_ASSERT_EQUAL_INT(&dest_val, dest->head->data);
+
+	// Cleanup
+	bz_list_free(src, nullptr);
+	bz_list_free(dest, nullptr);
+}
+
+void test_list_move_to_end__empty_dest_list(void)
+{
+	// Create our lists...
+	struct bz_list *src = bz_list_create();
+	struct bz_list *dest = bz_list_create();
+	// ...and add some initial values
+	int src_val = 1; bz_list_append(src, &src_val);
+
+	// Run our test
+	int ret_val = bz_list_move_to_end(dest, src);
+	TEST_ASSERT_EQUAL_INT(1, ret_val);
+	TEST_ASSERT_EQUAL_INT(0, src->length);
+	TEST_ASSERT_EQUAL_INT(1, dest->length);
+	TEST_ASSERT_EQUAL_INT(&src_val, dest->head->data);
+
+	// Cleanup
+	bz_list_free(src, nullptr);
+	bz_list_free(dest, nullptr);
+}
+
+void test_list_move_to_end__both_lists_populated(void)
+{
+	// Create our lists...
+	struct bz_list *src = bz_list_create();
+	struct bz_list *dest = bz_list_create();
+	// ...and add some initial values
+	int src_val_1  = 1; bz_list_append(src, &src_val_1);
+	int src_val_2  = 2; bz_list_append(src, &src_val_2);
+	int dest_val_1 = 3; bz_list_append(dest, &dest_val_1);
+	int dest_val_2 = 4; bz_list_append(dest, &dest_val_2);
+
+	// Run our test
+	int ret_val = bz_list_move_to_end(dest, src);
+	TEST_ASSERT_EQUAL_INT(2, ret_val);
+	TEST_ASSERT_EQUAL_INT(0, src->length);
+	TEST_ASSERT_EQUAL_INT(4, dest->length);
+	TEST_ASSERT_EQUAL_INT(&dest_val_1, dest->head->data);
+	TEST_ASSERT_EQUAL_INT(&dest_val_2, dest->head->next->data);
+	TEST_ASSERT_EQUAL_INT(&src_val_1,  dest->head->next->next->data);
+	TEST_ASSERT_EQUAL_INT(&src_val_2,  dest->head->next->next->next->data);
+
+	// Cleanup
+	bz_list_free(src, nullptr);
+	bz_list_free(dest, nullptr);
+}
+
+
+// =================================================================================================
 //  Test bz_list_clone()
 // -------------------------------------------------------------------------------------------------
 
@@ -796,6 +883,12 @@ int main(void) {
 	RUN_TEST(test_list_get_neighbor_returns_null_for_no_neighbor);
 	RUN_TEST(test_list_get_neighbor_returns_prior_item_when_able);
 	RUN_TEST(test_list_get_neighbor_returns_next_item_when_needed);
+
+	// Test bz_list_move_to_end()
+	RUN_TEST(test_list_move_to_end__fails_for_uninitialized);
+	RUN_TEST(test_list_move_to_end__empty_src_list);
+	RUN_TEST(test_list_move_to_end__empty_dest_list);
+	RUN_TEST(test_list_move_to_end__both_lists_populated);
 
 	// Test bz_list_clone()
 	RUN_TEST(test_list_clone_returns_null_for_uninitialized);

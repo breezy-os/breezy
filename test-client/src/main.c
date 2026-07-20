@@ -63,10 +63,7 @@ int main(void)
 	bz_add_termint_handler(SIGTERM);
 	bz_add_termint_handler(SIGINT);
 
-	// Pick some random colors for our app
 	srand(time(nullptr));
-	client_globals.bg_color = bz_random_color();
-	client_globals.fg_color = bz_random_color();
 
 	// Establish the connection
 	client_globals.display = wl_display_connect(nullptr);
@@ -99,6 +96,10 @@ int main(void)
 		}
 		if (client_globals.window->pool_data != nullptr) {
 			munmap(client_globals.window->pool_data, client_globals.window->pool_size);
+		}
+		if (client_globals.window->frame_callback != nullptr) {
+			wl_callback_destroy(client_globals.window->frame_callback);
+			client_globals.window->frame_callback = nullptr;
 		}
 	}
 	wl_display_disconnect(client_globals.display);

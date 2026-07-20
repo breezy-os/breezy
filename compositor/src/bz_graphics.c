@@ -37,7 +37,7 @@ static uint32_t bz_drm_find_valid_crtc(int drm_fd, const drmModeRes *resources, 
 static uint32_t bz_drm_find_valid_plane(int drm_fd, int crtc_index);
 static uint32_t bz_drm_get_prop_id(int drm_fd, uint32_t object_type, uint32_t object_id, char *prop_name);
 // GBM / buffer
-static void bz_drm_handle_pageflip(int /*fd*/, uint32_t /*sequence*/, uint32_t /*tv_sec*/, uint32_t /*tv_usec*/, void *user_data);
+static void bz_drm_handle_pageflip(int /*fd*/, uint32_t /*sequence*/, uint32_t tv_sec, uint32_t tv_usec, void *user_data);
 static void bz_drm_gbm_bo_destructor(struct gbm_bo *bo, void *data);
 static uint32_t bz_drm_gbm_get_bo_fb(struct bz_breezy *breezy, struct gbm_bo *bo);
 // Commit
@@ -346,15 +346,36 @@ static uint32_t bz_drm_get_prop_id(
 void bz_drm_handle_pageflip(
 	int /*fd*/,
 	uint32_t /*sequence*/,
-	uint32_t /*tv_sec*/,
-	uint32_t /*tv_usec*/,
+	uint32_t tv_sec,
+	uint32_t tv_usec,
 	void *user_data
 ) {
 	struct bz_breezy *breezy = user_data;
-	// Release the previous buffer, and record the new one for the next iteration.
-	gbm_surface_release_buffer(breezy->gbm.surface, breezy->gbm.prev_bo);
+
+	// Release the previously-displayed buffer (if applicable)
+	if (breezy->gbm.prev_bo) {
+		gbm_surface_release_buffer(breezy->gbm.surface, breezy->gbm.prev_bo);
+	}
+	// Record the just-applied buffer for the next iteration.
 	breezy->gbm.prev_bo = breezy->gbm.new_bo;
 	breezy->gbm.new_bo = nullptr;
+
+	// Emit the Wayland "done" event for all active frame callbacks.
+	uint32_t timestamp = (uint32_t)((uint64_t)tv_sec * 1000 + tv_usec / 1000);
+	struct bz_node *curr_client = breezy->wayland.clients->head;
+	while (curr_client != nullptr) {
+		struct wl_client *client = curr_client->data;
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		bz_graphics_process_frame_callbacks(client_data, timestamp);
+		curr_client = curr_client->next;
+	}
+
+	// Occasionally, a render will fail due to both GBM buffers being unreleased. When that happens,
+	//   this flag gets set to true, prompting us to retry during this "release" step.
+	if (breezy->drm.retry_render_on_page_flip) {
+		breezy->drm.retry_render_on_page_flip = false;
+		bz_graphics_schedule_render(breezy);
+	}
 }
 
 /**
@@ -461,7 +482,7 @@ static int bz_drm_atomic_commit_initial(struct bz_breezy *breezy, const uint32_t
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_crtc_w, width);
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_crtc_h, height);
 
-	const int retVal = drmModeAtomicCommit(breezy->drm.fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, breezy);
+	const int retVal = drmModeAtomicCommit(breezy->drm.fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_PAGE_FLIP_EVENT, breezy);
 	drmModeAtomicFree(req);
 
 	return retVal;
@@ -701,9 +722,21 @@ static void bz_gles_render_and_commit(void *data) {
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Rendering!");
 	struct bz_breezy *breezy = data;
 
+	// No point in trying this render. We don't have any GBM buffers ready. This flag gets cleared
+	//   when a buffer gets released.
+	if (breezy->drm.retry_render_on_page_flip) {
+		return;
+	}
+
 	// Only redraw if our buffer changed.
 	if (!breezy->gl.is_dirty) { return; }
 	breezy->gl.is_dirty = false;
+
+	if (!gbm_surface_has_free_buffers(breezy->gbm.surface)) {
+		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GBM surface has no free buffers.");
+		breezy->drm.retry_render_on_page_flip = true;
+		return;
+	}
 
 	// Render time! First, clear the screen
 	// glViewport(0, 0, output->width, output->height);
@@ -756,27 +789,19 @@ static void bz_gles_render_and_commit(void *data) {
 	}
 
 	// Buffer switcheroo
-	if (!gbm_surface_has_free_buffers(breezy->gbm.surface)) {
-		bz_warn(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GBM surface has no free buffers.");
-		return;
-	}
 	eglSwapBuffers(breezy->gl.display, breezy->gl.surface);
 	struct gbm_bo *bo = gbm_surface_lock_front_buffer(breezy->gbm.surface);
 	const uint32_t fb_id = bz_drm_gbm_get_bo_fb(breezy, bo);
 
 	// Scanout!
 	int retval = 0;
-	if (breezy->gbm.prev_bo == nullptr) {
-		// Initial modeset is a blocking operation
-		retval = bz_drm_atomic_commit_initial(breezy, fb_id);
-		breezy->gbm.prev_bo = bo;
-	} else {
-		// Recurring commits are non-blocking, so wait for it to finish before releasing the old bo.
-		breezy->gbm.new_bo = bo;
-		retval = bz_drm_atomic_commit_recurring(breezy, fb_id);
-		// (When the DRM page flip completes, "bz_drm_handle_pageflip()" is called, which releases
-		// the old buffer object.)
-	}
+	breezy->gbm.new_bo = bo;
+	retval = (breezy->gbm.prev_bo == nullptr)
+		? bz_drm_atomic_commit_initial(breezy, fb_id)
+		: bz_drm_atomic_commit_recurring(breezy, fb_id);
+	// (When the DRM page flip completes, "bz_drm_handle_pageflip()" is called, which releases
+	//   the old buffer object.)
+
 	if (retval != 0) {
 		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to make an atomic commit.");
 	}
@@ -894,7 +919,7 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
 void bz_graphics_schedule_render(struct bz_breezy *breezy)
 {
 	// Only schedule if we're not already scheduled
-	if (breezy->wayland.display && !breezy->gl.is_dirty) {
+	if (breezy->wayland.display && !breezy->drm.retry_render_on_page_flip && !breezy->gl.is_dirty) {
 		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Scheduling render.");
 		breezy->gl.is_dirty = true;
 		struct wl_event_loop *evt_loop = wl_display_get_event_loop(breezy->wayland.display);
@@ -980,6 +1005,7 @@ int bz_graphics_handle_drm_event(int /*fd*/, uint32_t /*mask*/, void *data)
 		.page_flip_handler = bz_drm_handle_pageflip,
 	};
 	drmHandleEvent(breezy->drm.fd, &drm_event_context);
+
 	return 0;
 }
 
@@ -1016,4 +1042,30 @@ int bz_graphics_deactivate(struct bz_breezy *breezy)
 	drmModeAtomicFree(req);
 
 	return retVal;
+}
+
+/**
+ * Processes all frame callbacks for the given client by iterating over all the client's surfaces,
+ * submitting the "done" request for all surfaces that have active frame requests and are visible,
+ * and then cleans up those callbacks.
+ *
+ * (Exposed as "public" for testing purposes only.)
+ */
+void bz_graphics_process_frame_callbacks(struct bz_client *client_data, uint32_t timestamp)
+{
+	struct bz_node *curr_surf = client_data->surfaces->head;
+
+	// TODO: Only emit for surfaces that are visible.
+	while (curr_surf != nullptr) {
+		struct bz_surface *bzsurf = curr_surf->data;
+		struct bz_node *curr_callback = bzsurf->active_state->frame_callbacks->head;
+
+		while (curr_callback != nullptr) {
+			wl_callback_send_done(curr_callback->data, timestamp);
+			wl_resource_destroy(curr_callback->data);
+			curr_callback = curr_callback->next;
+		}
+		bz_list_clear(bzsurf->active_state->frame_callbacks, nullptr);
+		curr_surf = curr_surf->next;
+	}
 }
