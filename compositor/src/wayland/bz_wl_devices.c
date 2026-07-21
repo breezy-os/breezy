@@ -6,6 +6,7 @@
 #include <wayland-server.h>
 
 #include "breezy/bz_logger.h"
+#include "breezy/bz_wayland.h"
 
 
 // =================================================================================================
@@ -39,15 +40,25 @@ static void bz_data_device_manager_get_data_device(struct wl_client *client, str
 /** Gets executed whenever a client binds to wl_seat. */
 void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Binding a client to wl_seat.");
+	bz_debug(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Binding a client to wl_seat.");
 
+	// Set up the wl_seat resource
 	struct wl_resource *res = wl_resource_create(client, &wl_seat_interface, version, id);
 	if (res == nullptr) {
 		wl_client_post_no_memory(client);
 		return;
 	}
-
 	wl_resource_set_implementation(res, &bz_seat_implementation, nullptr, nullptr);
+
+	// Track the client's seat
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	client_data->seat = res;
+
+	// Send the seat's initial capabilities to the client
+	uint32_t capabilities =
+		(client_data->breezy->input.keyboard_count > 0 ? WL_SEAT_CAPABILITY_KEYBOARD : 0) |
+		(client_data->breezy->input.pointer_count  > 0 ? WL_SEAT_CAPABILITY_POINTER  : 0);
+	wl_seat_send_capabilities(client_data->seat, capabilities);
 }
 
 static const struct wl_seat_interface bz_seat_implementation = {
@@ -62,7 +73,7 @@ static void bz_seat_get_pointer(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_seat.get_pointer not implemented");
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_seat.get_pointer not implemented");
 	// TODO
 }
 
@@ -71,20 +82,19 @@ static void bz_seat_get_keyboard(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_debug(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Getting a seat's keyboard device.");
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_seat.get_keyboard not implemented");
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_seat.get_keyboard not implemented");
 	// TODO
 }
 
 static void bz_seat_get_touch(struct wl_client *client, struct wl_resource *resource, uint32_t id)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_seat.get_touch not implemented");
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_seat.get_touch not implemented");
 	// TODO
 }
 
 static void bz_seat_release(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_seat.release not implemented");
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_seat.release not implemented");
 	// TODO
 }
 
@@ -96,7 +106,7 @@ static void bz_seat_release(struct wl_client *client, struct wl_resource *resour
 /** Gets executed whenever a client binds to wl_output. */
 void bz_output_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Binding a client to wl_output.");
+	bz_debug(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Binding a client to wl_output.");
 
 	struct wl_resource *res = wl_resource_create(client, &wl_output_interface, version, id);
 	if (res == nullptr) {
@@ -112,7 +122,7 @@ static const struct wl_output_interface bz_output_implementation = {
 };
 
 static void bz_output_release(struct wl_client *client, struct wl_resource *resource) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_output.release not implemented");
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_output.release not implemented");
 	// TODO
 }
 
@@ -124,7 +134,7 @@ static void bz_output_release(struct wl_client *client, struct wl_resource *reso
 /** Gets executed whenever a client binds to wl_data_device_manager. */
 void bz_data_device_manager_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Binding a client to wl_data_device_manager.");
+	bz_debug(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Binding a client to wl_data_device_manager.");
 
 	struct wl_resource *res = wl_resource_create(
 		client,
@@ -152,7 +162,7 @@ static void bz_data_device_manager_create_data_source(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__,
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__,
 		"wl_data_device_manager.create_data_source not implemented");
 	// TODO
 }
@@ -163,7 +173,7 @@ static void bz_data_device_manager_get_data_device(
 	uint32_t id,
 	struct wl_resource *seat
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__,
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__,
 		"wl_data_device_manager.get_data_device not implemented");
 	// TODO
 }

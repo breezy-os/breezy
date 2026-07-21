@@ -32,6 +32,12 @@ static void bz_shm_format(void *data, struct wl_shm *shm, uint32_t format);
 static const struct wl_buffer_listener bz_buffer_implementation;
 static void bz_buffer_release(void *data, struct wl_buffer *buffer);
 
+// -- wl_seat --
+
+static const struct wl_seat_listener bz_seat_implementation;
+static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t capabilities);
+static void bz_seat_name(void *data, struct wl_seat *wl_seat, const char *name);
+
 // -- xdg_wm_base --
 
 static const struct xdg_wm_base_listener bz_xdg_wm_base_implementation;
@@ -106,7 +112,9 @@ static void bz_registry_global(
 		// Version 3
 	}
 	else if (strcmp(interface, wl_seat_interface.name) == 0) {
-		// Version 10
+		globals->seat = wl_registry_bind(registry, name, &wl_seat_interface, 10);
+		globals->seat_name = name;
+		wl_seat_add_listener(globals->seat, &bz_seat_implementation, data);
 	}
 	else if (strcmp(interface, wl_output_interface.name) == 0) {
 		// Version 4
@@ -157,6 +165,29 @@ static void bz_buffer_release(void *data, struct wl_buffer *buffer)
 {
 	struct bz_buffer *bzbuff = data;
 	bzbuff->is_released = true;
+}
+
+
+// =================================================================================================
+//  wl_seat
+// -------------------------------------------------------------------------------------------------
+
+static const struct wl_seat_listener bz_seat_implementation = {
+	.capabilities = bz_seat_capabilities,
+	.name = bz_seat_name,
+};
+
+static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t capabilities)
+{
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_seat.close not implemented");
+	// TODO
+	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Capabilities: %d", capabilities);
+}
+
+static void bz_seat_name(void *data, struct wl_seat *wl_seat, const char *name)
+{
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_seat.close not implemented");
+	// TODO
 }
 
 

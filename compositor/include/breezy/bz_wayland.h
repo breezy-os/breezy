@@ -13,6 +13,7 @@ struct bz_client {
 	pid_t pid;
 
 	struct bz_list *surfaces; // Stores a list of "struct bz_surface *"
+	struct wl_resource *seat;
 };
 
 

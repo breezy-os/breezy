@@ -60,6 +60,9 @@ struct bz_client_globals {
 	struct wl_shm *shm;
 	uint32_t shm_name;
 
+	struct wl_seat *seat;
+	uint32_t seat_name;
+
 	struct xdg_wm_base *xdg_wm_base;
 	uint32_t xdg_wm_base_name;
 

@@ -86,12 +86,36 @@ static bool bz_input_device_fd_matches(void *fd, void *device)
 
 static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status)
 {
+	// Record our initial capabilities so we know if they've changed.
+	bool had_keyboard = breezy->input.keyboard_count > 0;
+	bool had_pointer  = breezy->input.pointer_count  > 0;
+
+	// Update our plugged in keyboard/pointer counts
 	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_KEYBOARD)) {
 		breezy->input.keyboard_count += new_plugged_status ? 1 : -1;
 	}
 	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_POINTER)) {
 		breezy->input.pointer_count += new_plugged_status ? 1 : -1;
 	}
+
+	// If the capabilities have changed, broadcast the new capabilities to each client.
+	bool has_keyboard = breezy->input.keyboard_count > 0;
+	bool has_pointer  = breezy->input.pointer_count  > 0;
+	if (had_keyboard != has_keyboard || had_pointer != has_pointer) {
+		uint32_t capabilities =
+			(has_keyboard ? WL_SEAT_CAPABILITY_KEYBOARD : 0) |
+			(has_pointer ? WL_SEAT_CAPABILITY_POINTER : 0);
+		struct bz_node *node = breezy->wayland.clients->head;
+		while (node != nullptr) {
+			struct wl_client *client = node->data;
+			struct bz_client *client_data = wl_client_get_user_data(client);
+			if (client_data->seat != nullptr) {
+				wl_seat_send_capabilities(client_data->seat, capabilities);
+			}
+			node = node->next;
+		}
+	}
+
 	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__,
 		"Device %s. New counts: [keyboards: %d], [pointers: %d]",
 		new_plugged_status ? "plugged in" : "unplugged",
