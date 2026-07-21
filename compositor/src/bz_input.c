@@ -28,6 +28,7 @@
 static int bz_input_open_restricted(const char *path, int flags, void *data);
 static void bz_input_close_restricted(int fd, void *data);
 static bool bz_input_device_fd_matches(void *fd, void *device);
+static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
@@ -43,7 +44,8 @@ static const struct libinput_interface bz_libinput_interface = {
 	.close_restricted = bz_input_close_restricted,
 };
 
-static int bz_input_open_restricted(const char *path, int /*flags*/, void *data) {
+static int bz_input_open_restricted(const char *path, int /*flags*/, void *data)
+{
 	struct bz_breezy *breezy = data;
 
 	// Open the device
@@ -59,7 +61,8 @@ static int bz_input_open_restricted(const char *path, int /*flags*/, void *data)
 	return fd;
 }
 
-static void bz_input_close_restricted(int fd, void *data) {
+static void bz_input_close_restricted(int fd, void *data)
+{
 	struct bz_breezy *breezy = data;
 
 	// Look up and close the device
@@ -81,6 +84,21 @@ static bool bz_input_device_fd_matches(void *fd, void *device)
 	return _device->fd == *_fd;
 }
 
+static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status)
+{
+	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_KEYBOARD)) {
+		breezy->input.keyboard_count += new_plugged_status ? 1 : -1;
+	}
+	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_POINTER)) {
+		breezy->input.pointer_count += new_plugged_status ? 1 : -1;
+	}
+	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__,
+		"Device %s. New counts: [keyboards: %d], [pointers: %d]",
+		new_plugged_status ? "plugged in" : "unplugged",
+		breezy->input.keyboard_count,
+		breezy->input.pointer_count);
+}
+
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event)
 {
 	// Parse the libinput event
@@ -96,7 +114,7 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	// Figure out our modifier keys
 	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE);
 	const bool ctrl_held  = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE);
-	const bool alt_held   = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE);
+	const bool alt_held   = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_ALT,  XKB_STATE_MODS_EFFECTIVE);
 	// const bool shift_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE);
 
 	// First, check for a VT switch. (The only hotkey that doesn't use "super".)
@@ -345,6 +363,10 @@ int bz_input_process_events(int /*fd*/, uint32_t /*mask*/, void *data)
 	while ((event = libinput_get_event(breezy->input.libinput)) != nullptr) {
 		if (libinput_event_get_type(event) == LIBINPUT_EVENT_KEYBOARD_KEY) {
 			bz_input_process_kb_event(breezy, libinput_event_get_keyboard_event(event));
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_DEVICE_ADDED) {
+			bz_input_process_hotplug_event(breezy, libinput_event_get_device(event), 1);
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_DEVICE_REMOVED) {
+			bz_input_process_hotplug_event(breezy, libinput_event_get_device(event), 0);
 		}
 		libinput_event_destroy(event);
 	}

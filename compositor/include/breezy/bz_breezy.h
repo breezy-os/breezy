@@ -62,6 +62,8 @@ struct bz_input {
 	struct xkb_keymap *xkb_keymap;
 	struct xkb_state *xkb_state;
 	struct bz_list *device_lookup; // Each item is of type "struct bz_input_device *"
+	_Atomic int keyboard_count;
+	_Atomic int pointer_count;
 };
 
 struct bz_wayland {

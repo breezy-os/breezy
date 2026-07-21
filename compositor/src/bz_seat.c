@@ -92,7 +92,6 @@ int bz_seat_initialize(struct bz_breezy *breezy) {
 }
 
 /** Dispatches a pending libseat event. This should only be called when there are events pending. */
-
 int bz_seat_handle_libseat_event(int /*fd*/, uint32_t /*mask*/, void *data)
 {
 	struct bz_breezy *breezy = data;
