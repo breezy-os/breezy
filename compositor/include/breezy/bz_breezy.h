@@ -64,6 +64,8 @@ struct bz_input {
 	struct bz_list *device_lookup; // Each item is of type "struct bz_input_device *"
 	_Atomic int keyboard_count;
 	_Atomic int pointer_count;
+	bool ever_had_keyboard;
+	bool ever_had_pointer;
 };
 
 struct bz_wayland {

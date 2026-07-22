@@ -116,6 +116,10 @@ static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libi
 		}
 	}
 
+	// We need to track if our seat *ever* had these things, so toggle them to true if able.
+	if (has_keyboard) { breezy->input.ever_had_keyboard = true; }
+	if (has_pointer)  { breezy->input.ever_had_pointer  = true; }
+
 	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__,
 		"Device %s. New counts: [keyboards: %d], [pointers: %d]",
 		new_plugged_status ? "plugged in" : "unplugged",

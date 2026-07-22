@@ -2,6 +2,7 @@
 #include "breezy/bz_wl_devices.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 
 #include <wayland-server.h>
 
@@ -20,6 +21,16 @@ static void bz_seat_get_pointer(struct wl_client *client, struct wl_resource *re
 static void bz_seat_get_keyboard(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_seat_get_touch(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_seat_release(struct wl_client *client, struct wl_resource *resource);
+
+// -- wl_pointer --
+
+static const struct wl_pointer_interface bz_pointer_implementation;
+static void bz_pointer_release(struct wl_client *client, struct wl_resource *resource);
+
+// -- wl_keyboard --
+
+static const struct wl_keyboard_interface bz_keyboard_implementation;
+static void bz_keyboard_release(struct wl_client *client, struct wl_resource *resource);
 
 // -- wl_output --
 
@@ -58,6 +69,7 @@ void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version,
 	uint32_t capabilities =
 		(client_data->breezy->input.keyboard_count > 0 ? WL_SEAT_CAPABILITY_KEYBOARD : 0) |
 		(client_data->breezy->input.pointer_count  > 0 ? WL_SEAT_CAPABILITY_POINTER  : 0);
+	wl_seat_send_name(client_data->seat, "breezy-seat"); // We only support 1 seat for now, hence a hardcoded name
 	wl_seat_send_capabilities(client_data->seat, capabilities);
 }
 
@@ -73,8 +85,40 @@ static void bz_seat_get_pointer(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_seat.get_pointer not implemented");
-	// TODO
+	struct bz_client *client_data = wl_client_get_user_data(client);
+
+	// Prechecks
+	if (!client_data->breezy->input.ever_had_pointer) {
+		bz_warn(BZ_LOG_WL_DEVICES, __FILE__, __LINE__,
+			"Cannot get pointer. Seat has never had the pointer capability.");
+		wl_resource_post_error(resource, WL_SEAT_ERROR_MISSING_CAPABILITY,
+			"Cannot get pointer. Seat has never had the pointer capability.");
+		return;
+	}
+
+	// Create the resource
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_pointer_interface,
+		BZ_POINTER_VERSION,
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_pointer_implementation,
+		nullptr,
+		nullptr
+	);
+
+	// Everything succeeded!
+	return;
+
+	resource_failed:
+		bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Failed to construct a new wl_pointer.");
 }
 
 static void bz_seat_get_keyboard(
@@ -82,8 +126,40 @@ static void bz_seat_get_keyboard(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_seat.get_keyboard not implemented");
-	// TODO
+	struct bz_client *client_data = wl_client_get_user_data(client);
+
+	// Prechecks
+	if (!client_data->breezy->input.ever_had_keyboard) {
+		bz_warn(BZ_LOG_WL_DEVICES, __FILE__, __LINE__,
+			"Cannot get keyboard. Seat has never had the keyboard capability.");
+		wl_resource_post_error(resource, WL_SEAT_ERROR_MISSING_CAPABILITY,
+			"Cannot get keyboard. Seat has never had the keyboard capability.");
+		return;
+	}
+
+	// Create the resource
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_keyboard_interface,
+		BZ_KEYBOARD_VERSION,
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_keyboard_implementation,
+		nullptr,
+		nullptr
+	);
+
+	// Everything succeeded!
+	return;
+
+	resource_failed:
+		bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Failed to construct a new wl_keyboard.");
 }
 
 static void bz_seat_get_touch(struct wl_client *client, struct wl_resource *resource, uint32_t id)
@@ -94,7 +170,38 @@ static void bz_seat_get_touch(struct wl_client *client, struct wl_resource *reso
 
 static void bz_seat_release(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_seat.release not implemented");
+	// Clear our reference to the seat since it's about to be destroyed.
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	client_data->seat = nullptr;
+}
+
+
+// =================================================================================================
+//  wl_pointer
+// -------------------------------------------------------------------------------------------------
+
+static const struct wl_pointer_interface bz_pointer_implementation = {
+	.release = bz_pointer_release,
+};
+
+static void bz_pointer_release(struct wl_client *client, struct wl_resource *resource)
+{
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_pointer.release not implemented");
+	// TODO
+}
+
+
+// =================================================================================================
+//  wl_keyboard
+// -------------------------------------------------------------------------------------------------
+
+static const struct wl_keyboard_interface bz_keyboard_implementation = {
+	.release = bz_keyboard_release,
+};
+
+static void bz_keyboard_release(struct wl_client *client, struct wl_resource *resource)
+{
+	bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "wl_keyboard.release not implemented");
 	// TODO
 }
 

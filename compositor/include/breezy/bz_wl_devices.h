@@ -10,6 +10,12 @@
 #define BZ_SEAT_VERSION 10
 void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
+// -- wl_pointer --
+#define BZ_POINTER_VERSION 10
+
+// -- wl_keyboard --
+#define BZ_KEYBOARD_VERSION 10
+
 // -- wl_output --
 #define BZ_OUTPUT_VERSION 4
 void bz_output_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
