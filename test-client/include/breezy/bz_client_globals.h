@@ -47,6 +47,12 @@ struct bz_application_window {
 	struct wl_callback *frame_callback; // nullptr when not active
 };
 
+struct bz_seat {
+	struct wl_seat *resource;
+	struct wl_keyboard *keyboard;
+	struct wl_pointer *pointer;
+};
+
 struct bz_client_globals {
 
 	// -- Globals --

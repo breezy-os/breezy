@@ -1,10 +1,16 @@
 
+#define _GNU_SOURCE
+
 #include "breezy/bz_wl_devices.h"
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include <wayland-server.h>
+#include <sys/mman.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wayland.h"
@@ -127,6 +133,7 @@ static void bz_seat_get_keyboard(
 	uint32_t id
 ) {
 	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_breezy *breezy = client_data->breezy;
 
 	// Prechecks
 	if (!client_data->breezy->input.ever_had_keyboard) {
@@ -154,6 +161,21 @@ static void bz_seat_get_keyboard(
 		nullptr,
 		nullptr
 	);
+
+	// Send the "keymap" event
+	char *keymap = xkb_keymap_get_as_string(breezy->input.xkb_keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
+	size_t size = strlen(keymap) + 1;
+	int keymap_fd = memfd_create("breezy-xkb-keymap", MFD_CLOEXEC);
+	ftruncate(keymap_fd, size);
+	void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, keymap_fd, 0);
+	memcpy(ptr, keymap, size);
+	munmap(ptr, size);
+	wl_keyboard_send_keymap(res, 1, keymap_fd, size);
+	close(keymap_fd);
+	free(keymap);
+
+	// Send the initial "repeat_info" event. Just sane defaults for now: 25Hz rate, 600ms delay
+	wl_keyboard_send_repeat_info(res, 25, 600);
 
 	// Everything succeeded!
 	return;

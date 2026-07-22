@@ -73,6 +73,8 @@ struct bz_wayland {
 	const char *socket_name;
 	struct wl_listener new_client_listener;
 	struct bz_list *event_sources; // Each item is of type "struct wl_event_source *"
+
+	// The "active" client is the one at the start of the list.
 	struct bz_list *clients; // Each item is of type "struct wl_client *"
 };
 

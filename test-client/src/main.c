@@ -102,6 +102,15 @@ int main(void)
 			client_globals.window->frame_callback = nullptr;
 		}
 	}
+	if (client_globals.seat != nullptr) {
+		struct bz_seat *seat_data = wl_seat_get_user_data(client_globals.seat);
+		if (seat_data != nullptr) {
+			if (seat_data->keyboard != nullptr) { wl_keyboard_release(seat_data->keyboard); }
+			if (seat_data->pointer != nullptr)  { wl_pointer_release(seat_data->pointer); }
+			free(seat_data);
+		}
+	}
+
 	wl_display_disconnect(client_globals.display);
 	close(client_globals.is_quitting);
 

@@ -38,6 +38,31 @@ static const struct wl_seat_listener bz_seat_implementation;
 static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t capabilities);
 static void bz_seat_name(void *data, struct wl_seat *wl_seat, const char *name);
 
+// -- wl_keyboard --
+
+static const struct wl_keyboard_listener bz_keyboard_implementation;
+static void bz_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard, uint32_t format, int32_t fd, uint32_t size);
+static void bz_keyboard_enter(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, struct wl_surface *surface, struct wl_array *keys);
+static void bz_keyboard_leave(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, struct wl_surface *surface);
+static void bz_keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, uint32_t time, uint32_t key, uint32_t state);
+static void bz_keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group);
+static void bz_keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard, int32_t rate, int32_t delay);
+
+// -- wl_pointer --
+
+static const struct wl_pointer_listener bz_pointer_implementation;
+static void bz_pointer_enter(void *data, struct wl_pointer *wl_pointer, uint32_t serial, struct wl_surface *surface, wl_fixed_t surface_x, wl_fixed_t surface_y);
+static void bz_pointer_leave(void *data, struct wl_pointer *wl_pointer, uint32_t serial, struct wl_surface *surface);
+static void bz_pointer_motion(void *data, struct wl_pointer *wl_pointer, uint32_t time, wl_fixed_t surface_x, wl_fixed_t surface_y);
+static void bz_pointer_button(void *data, struct wl_pointer *wl_pointer, uint32_t serial, uint32_t time, uint32_t button, uint32_t state);
+static void bz_pointer_axis(void *data, struct wl_pointer *wl_pointer, uint32_t time, uint32_t axis, wl_fixed_t value);
+static void bz_pointer_frame(void *data, struct wl_pointer *wl_pointer);
+static void bz_pointer_axis_source(void *data, struct wl_pointer *wl_pointer, uint32_t axis_source);
+static void bz_pointer_axis_stop(void *data, struct wl_pointer *wl_pointer, uint32_t time, uint32_t axis);
+static void bz_pointer_axis_discrete(void *data, struct wl_pointer *wl_pointer, uint32_t axis, int32_t discrete);
+static void bz_pointer_axis_value120(void *data, struct wl_pointer *wl_pointer, uint32_t axis, int32_t value120);
+static void bz_pointer_axis_relative_direction(void *data, struct wl_pointer *wl_pointer, uint32_t axis, uint32_t direction);
+
 // -- xdg_wm_base --
 
 static const struct xdg_wm_base_listener bz_xdg_wm_base_implementation;
@@ -115,6 +140,10 @@ static void bz_registry_global(
 		globals->seat = wl_registry_bind(registry, name, &wl_seat_interface, 10);
 		globals->seat_name = name;
 		wl_seat_add_listener(globals->seat, &bz_seat_implementation, data);
+		// Create the user data
+		struct bz_seat *data = calloc(1, sizeof(*data));
+		data->resource = globals->seat;
+		wl_seat_set_user_data(globals->seat, data);
 	}
 	else if (strcmp(interface, wl_output_interface.name) == 0) {
 		// Version 4
@@ -134,6 +163,14 @@ static void bz_registry_global_remove(void *data, struct wl_registry * /*registr
 		wl_shm_destroy(globals->shm);
 		globals->shm = nullptr;
 		globals->shm_name = 0;
+	} else if (name == globals->seat_name) {
+		// First, free the data
+		struct bz_seat *seat_data = wl_seat_get_user_data(globals->seat);
+		if (seat_data != nullptr) { free(seat_data); }
+		// Then destroy the seat
+		wl_seat_destroy(globals->seat);
+		globals->seat = nullptr;
+		globals->seat_name = 0;
 	}
 	// TODO: Remember to clean up other global types, such as outputs for hotplug events, etc.
 }
@@ -179,16 +216,242 @@ static const struct wl_seat_listener bz_seat_implementation = {
 
 static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t capabilities)
 {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_seat.close not implemented");
-	// TODO
 	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Capabilities: %d", capabilities);
+	struct bz_seat *seat_data = wl_seat_get_user_data(wl_seat);
+
+	// Add / remove keyboard resource
+	if (seat_data->keyboard == nullptr && capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
+		seat_data->keyboard = wl_seat_get_keyboard(wl_seat);
+		wl_keyboard_add_listener(seat_data->keyboard, &bz_keyboard_implementation, nullptr);
+	} else if (seat_data->keyboard != nullptr && (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) == 0) {
+		wl_keyboard_release(seat_data->keyboard);
+	}
+
+	// Add / remove pointer resource
+	if (seat_data->pointer == nullptr && capabilities & WL_SEAT_CAPABILITY_POINTER) {
+		seat_data->pointer = wl_seat_get_pointer(wl_seat);
+		wl_pointer_add_listener(seat_data->pointer, &bz_pointer_implementation, nullptr);
+	} else if (seat_data->pointer != nullptr && (capabilities & WL_SEAT_CAPABILITY_POINTER) == 0) {
+		wl_pointer_release(seat_data->pointer);
+	}
 }
 
 static void bz_seat_name(void *data, struct wl_seat *wl_seat, const char *name)
 {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_seat.close not implemented");
+	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Received seat name: %s", name);
+}
+
+
+// =================================================================================================
+//  wl_keyboard
+// -------------------------------------------------------------------------------------------------
+
+static const struct wl_keyboard_listener bz_keyboard_implementation = {
+	.keymap = bz_keyboard_keymap,
+	.enter = bz_keyboard_enter,
+	.leave = bz_keyboard_leave,
+	.key = bz_keyboard_key,
+	.modifiers = bz_keyboard_modifiers,
+	.repeat_info = bz_keyboard_repeat_info,
+};
+
+static void bz_keyboard_keymap(
+	void *data,
+	struct wl_keyboard *wl_keyboard,
+	uint32_t format,
+	int32_t fd,
+	uint32_t size
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.keymap not implemented");
 	// TODO
 }
+
+static void bz_keyboard_enter(
+	void *data,
+	struct wl_keyboard *wl_keyboard,
+	uint32_t serial,
+	struct wl_surface *surface,
+	struct wl_array *keys
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.enter not implemented");
+	// TODO
+}
+
+static void bz_keyboard_leave(
+	void *data,
+	struct wl_keyboard *wl_keyboard,
+	uint32_t serial,
+	struct wl_surface *surface
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.leave not implemented");
+	// TODO
+}
+
+static void bz_keyboard_key(
+	void *data,
+	struct wl_keyboard *wl_keyboard,
+	uint32_t serial,
+	uint32_t time,
+	uint32_t key,
+	uint32_t state
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.key not implemented");
+	// TODO
+}
+
+static void bz_keyboard_modifiers(
+	void *data,
+	struct wl_keyboard *wl_keyboard,
+	uint32_t serial,
+	uint32_t mods_depressed,
+	uint32_t mods_latched,
+	uint32_t mods_locked,
+	uint32_t group
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.modifiers not implemented");
+	// TODO
+}
+
+static void bz_keyboard_repeat_info(
+	void *data,
+	struct wl_keyboard *wl_keyboard,
+	int32_t rate,
+	int32_t delay
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.repeat_info not implemented");
+	// TODO
+}
+
+
+// =================================================================================================
+//  wl_pointer
+// -------------------------------------------------------------------------------------------------
+
+static const struct wl_pointer_listener bz_pointer_implementation = {
+	.enter = bz_pointer_enter,
+	.leave = bz_pointer_leave,
+	.motion = bz_pointer_motion,
+	.button = bz_pointer_button,
+	.axis = bz_pointer_axis,
+	.frame = bz_pointer_frame,
+	.axis_source = bz_pointer_axis_source,
+	.axis_stop = bz_pointer_axis_stop,
+	.axis_discrete = bz_pointer_axis_discrete,
+	.axis_value120 = bz_pointer_axis_value120,
+	.axis_relative_direction = bz_pointer_axis_relative_direction,
+};
+
+
+static void bz_pointer_enter(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t serial,
+	struct wl_surface *surface,
+	wl_fixed_t surface_x,
+	wl_fixed_t surface_y
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.enter not implemented");
+	// TODO
+}
+
+static void bz_pointer_leave(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t serial,
+	struct wl_surface *surface
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.leave not implemented");
+	// TODO
+}
+
+static void bz_pointer_motion(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t time,
+	wl_fixed_t surface_x,
+	wl_fixed_t surface_y
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.motion not implemented");
+	// TODO
+}
+
+static void bz_pointer_button(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t serial,
+	uint32_t time,
+	uint32_t button,
+	uint32_t state
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.button not implemented");
+	// TODO
+}
+
+static void bz_pointer_axis(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t time,
+	uint32_t axis,
+	wl_fixed_t value
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis not implemented");
+	// TODO
+}
+
+static void bz_pointer_frame(void *data, struct wl_pointer *wl_pointer) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.frame not implemented");
+	// TODO
+}
+
+static void bz_pointer_axis_source(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t axis_source
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_source not implemented");
+	// TODO
+}
+
+static void bz_pointer_axis_stop(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t time,
+	uint32_t axis
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_stop not implemented");
+	// TODO
+}
+
+static void bz_pointer_axis_discrete(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t axis,
+	int32_t discrete
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_discrete not implemented");
+	// TODO
+}
+
+static void bz_pointer_axis_value120(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t axis,
+	int32_t value120
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_value120 not implemented");
+	// TODO
+}
+
+static void bz_pointer_axis_relative_direction(
+	void *data,
+	struct wl_pointer *wl_pointer,
+	uint32_t axis,
+	uint32_t direction
+) {
+	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_relative_direction not implemented");
+	// TODO
+}
+
 
 
 // =================================================================================================
