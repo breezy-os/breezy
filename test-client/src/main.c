@@ -85,6 +85,7 @@ int main(void)
 
 	// Cleanup
 	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Cleaning up and disconnecting.");
+	// TODO-dl10: Call *surface.destroy methods
 	if (client_globals.window != nullptr) {
 		for (uint8_t i = 0; i < 2; i++) {
 			if (client_globals.window->buffers[i].buffer != nullptr) {

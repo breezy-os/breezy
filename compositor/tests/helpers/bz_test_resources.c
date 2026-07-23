@@ -11,6 +11,10 @@
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
 
+// -- bz_breezy --
+struct bz_breezy *bz_create_breezy_data(void);
+void bz_free_breezy_data(struct bz_breezy *data);
+
 // -- bz_client --
 struct bz_client *bz_create_client_data(void);
 void bz_free_client_data(struct bz_client *data);
@@ -33,6 +37,30 @@ void bz_free_xdg_surface_configure(struct bz_xdg_surface_configure *data);
 
 
 // =================================================================================================
+//  bz_breezy
+// -------------------------------------------------------------------------------------------------
+
+struct bz_breezy *bz_create_breezy_data(void)
+{
+	struct bz_breezy *data = calloc(1, sizeof(*data));
+
+	data->wayland.activable_surfaces = bz_list_create();
+
+	return data;
+}
+
+void bz_free_breezy_data(struct bz_breezy *data)
+{
+	if (data) {
+		if (data->wayland.activable_surfaces != nullptr) {
+			bz_list_free(data->wayland.activable_surfaces, nullptr);
+		}
+		free(data);
+	}
+}
+
+
+// =================================================================================================
 //  bz_client
 // -------------------------------------------------------------------------------------------------
 
@@ -40,7 +68,7 @@ struct bz_client *bz_create_client_data(void)
 {
 	struct bz_client *data = calloc(1, sizeof(*data));
 
-	data->surfaces = bz_list_create();
+	data->breezy = bz_create_breezy_data();
 
 	return data;
 }
@@ -48,7 +76,7 @@ struct bz_client *bz_create_client_data(void)
 void bz_free_client_data(struct bz_client *data)
 {
 	if (data) {
-		if (data->surfaces) { bz_list_free(data->surfaces, nullptr); }
+		if (data->breezy != nullptr) { bz_free_breezy_data(data->breezy); }
 		free(data);
 	}
 }

@@ -74,8 +74,8 @@ struct bz_wayland {
 	struct wl_listener new_client_listener;
 	struct bz_list *event_sources; // Each item is of type "struct wl_event_source *"
 
-	// The "active" client is the one at the start of the list.
 	struct bz_list *clients; // Each item is of type "struct wl_client *"
+	struct bz_list *activable_surfaces; // Each item is of type "struct bz_surface *"
 };
 
 
@@ -86,6 +86,7 @@ struct bz_breezy {
 	struct bz_seat seat;
 	struct bz_input input;
 	struct bz_wayland wayland;
+	bool is_terminating;
 };
 
 

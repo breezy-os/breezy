@@ -20,19 +20,23 @@
 DEFINE_FFF_GLOBALS
 // -- wl_client --
 FAKE_VOID_FUNC(wl_client_post_no_memory, struct wl_client *)
+FAKE_VALUE_FUNC(void *, wl_client_get_user_data, struct wl_client *)
 // -- wl_resource --
 FAKE_VOID_FUNC(wl_resource_set_implementation, struct wl_resource *, const void *, void *, wl_resource_destroy_func_t)
 FAKE_VALUE_FUNC(struct wl_resource *, wl_resource_create, struct wl_client *, const struct wl_interface *, int, uint32_t)
 FAKE_VALUE_FUNC(void *, wl_resource_get_user_data, struct wl_resource *)
 FAKE_VOID_FUNC_VARARG(wl_resource_post_error, struct wl_resource *, uint32_t, const char *, ...)
+FAKE_VOID_FUNC(wl_resource_add_destroy_listener, struct wl_resource *, struct wl_listener *)
 
 void setUp(void)
 {
 	RESET_FAKE(wl_client_post_no_memory);
+	RESET_FAKE(wl_client_get_user_data);
 	RESET_FAKE(wl_resource_set_implementation);
 	RESET_FAKE(wl_resource_create);
 	RESET_FAKE(wl_resource_get_user_data);
 	RESET_FAKE(wl_resource_post_error);
+	RESET_FAKE(wl_resource_add_destroy_listener);
 	FFF_RESET_HISTORY();
 
 	bz_log_initialize(BZ_LOG_OFF);
@@ -56,6 +60,8 @@ extern const struct xdg_surface_interface bz_xdg_surface_implementation;
 void test_xdg_surface_get_toplevel__initializes_properly(void)
 {
 	// Set up our mocks
+	struct bz_client *client_data = bz_create_client_data();
+	wl_client_get_user_data_fake.return_val = client_data;
 	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
 	wl_resource_get_user_data_fake.return_val = xdgsurf_data;
 	struct wl_resource *xdgtoplevel_res = calloc(1, sizeof(*xdgtoplevel_res));
@@ -82,12 +88,15 @@ void test_xdg_surface_get_toplevel__initializes_properly(void)
 	bz_free_xdg_surface_data(xdgsurf_data);
 	bz_free_xdg_toplevel_data(xdgtoplevel_data);
 	free(xdgtoplevel_res);
+	bz_free_client_data(client_data);
 }
 
 /** The associated surface holds the "toplevel" role after this call. */
 void test_xdg_surface_get_toplevel__assigns_toplevel_role(void)
 {
 	// Set up our mocks
+	struct bz_client *client_data = bz_create_client_data();
+	wl_client_get_user_data_fake.return_val = client_data;
 	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
 	wl_resource_get_user_data_fake.return_val = xdgsurf_data;
 	struct wl_resource *xdgtoplevel_res = calloc(1, sizeof(*xdgtoplevel_res));
@@ -102,6 +111,7 @@ void test_xdg_surface_get_toplevel__assigns_toplevel_role(void)
 	bz_free_xdg_surface_data(xdgsurf_data);
 	bz_free_xdg_toplevel_data(wl_resource_set_implementation_fake.arg2_val);
 	free(xdgtoplevel_res);
+	bz_free_client_data(client_data);
 }
 
 /** If the surface already held a non-toplevel role, a role error is sent. */
@@ -136,6 +146,8 @@ void test_xdg_surface_get_toplevel__cannot_change_existing_role(void)
 void test_xdg_surface_get_toplevel__can_reassign_same_role(void)
 {
 	// Set up our mocks
+	struct bz_client *client_data = bz_create_client_data();
+	wl_client_get_user_data_fake.return_val = client_data;
 	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
 	wl_resource_get_user_data_fake.return_val = xdgsurf_data;
 	struct wl_resource *xdgtoplevel_res = calloc(1, sizeof(*xdgtoplevel_res));
@@ -157,6 +169,7 @@ void test_xdg_surface_get_toplevel__can_reassign_same_role(void)
 	bz_free_xdg_surface_data(xdgsurf_data);
 	bz_free_xdg_toplevel_data(wl_resource_set_implementation_fake.arg2_val);
 	free(xdgtoplevel_res);
+	bz_free_client_data(client_data);
 }
 
 /** A "no memory" error is posted for failed Wayland resource creation. */

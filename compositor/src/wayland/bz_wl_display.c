@@ -115,17 +115,8 @@ static void bz_compositor_create_surface(
 		bz_surface_dtor
 	);
 
-	// Track this surface on the client
-	const struct bz_client *client_data = wl_client_get_user_data(client);
-	const int append_status = bz_list_append(client_data->surfaces, surface);
-	if (append_status != 0) {
-		if (append_status == -2) {
-			wl_client_post_no_memory(client);
-		}
-		goto list_append_failed;
-	}
-
 	// Populate the surface's user data
+	const struct bz_client *client_data = wl_client_get_user_data(client);
 	surface->resource = res;
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
@@ -137,8 +128,6 @@ static void bz_compositor_create_surface(
 	return;
 
 	// Error cleanups
-	list_append_failed:
-		wl_resource_destroy(res);
 	resource_failed:
 		bz_surface_state_free(active);
 	active_state_alloc_failed:
@@ -483,4 +472,17 @@ static void bz_apply_damage(struct bz_surface *bzsurf)
 
 	// --- Buffer Access End -----------------------------------------------------------------------
 	wl_shm_buffer_end_access(shmbuf);
+}
+
+/** Handles surfaces closing by removing the surface from our global tracking list. */
+void bz_display_untrack_surface_on_destroy(struct wl_listener *listener, void *resource)
+{
+	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Handling surface destroy.");
+
+	// Remove the bz_surface from our globally-tracked list of activable surfaces
+	struct bz_surface *surface_data = wl_container_of(listener, surface_data, disable_on_destroy);
+	struct wl_client *client = wl_resource_get_client(resource);
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_breezy *breezy = client_data->breezy;
+	bz_list_remove(breezy->wayland.activable_surfaces, surface_data, nullptr);
 }

@@ -694,10 +694,12 @@ static void bz_xdg_toplevel_configure(
 	window->pending->states = states;
 }
 
-static void bz_xdg_toplevel_close(void * /*data*/, struct xdg_toplevel *xdg_toplevel)
+static void bz_xdg_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
 {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "xdg_toplevel.close not implemented");
-	// TODO
+	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Closing xdg_toplevel surface.");
+	const struct bz_client_globals *client_globals = data;
+	constexpr uint64_t val = 1;
+	write(client_globals->is_quitting, &val, sizeof(val));
 }
 
 static void bz_xdg_toplevel_configure_bounds(void *data, struct xdg_toplevel *xdg_toplevel, int32_t width, int32_t height)

@@ -13,12 +13,15 @@
 #include <wayland-server.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "../../build/compositor/tests/xdg-shell-server-protocol.h"
 #include "breezy/bz_breezy.h"
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_wl_display.h"
+#include "breezy/bz_xdg_shell.h"
 
 
 // =================================================================================================
@@ -32,7 +35,7 @@ static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libi
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
-static void bz_input_terminate_client(struct bz_breezy *breezy);
+static void bz_input_close_surface(struct bz_breezy *breezy);
 
 
 // =================================================================================================
@@ -158,6 +161,7 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 
 		// Quit Compositor
 		case XKB_KEY_Escape:
+			breezy->is_terminating = true;
 			wl_display_terminate(breezy->wayland.display);
 			break;
 
@@ -166,7 +170,7 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/git/breezy/build/test-client/test-client");
 			break;
 		case XKB_KEY_q:
-			bz_input_terminate_client(breezy);
+			bz_input_close_surface(breezy);
 			break;
 
 		// Change Colors
@@ -253,25 +257,20 @@ static void bz_input_spawn_child(const char *socket_name, const char *program_pa
 	// Nothing to do!
 }
 
-/**
- * Terminates the first client in our list of connected clients. This will eventually be improved
- * to terminate whichever client is "active", but at the time of writing, we don't have any concept
- * of an "active client".
- */
-static void bz_input_terminate_client(struct bz_breezy *breezy)
+/** Closes the first surface in our list of activable surfaces. */
+static void bz_input_close_surface(struct bz_breezy *breezy)
 {
-	if (breezy->wayland.clients->length == 0) {
-		bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "No clients to terminate.");
+	if (breezy->wayland.activable_surfaces->length == 0) {
+		bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "No surfaces to terminate.");
 		return;
 	}
-	struct wl_client *client = breezy->wayland.clients->head->data;
-	const struct bz_client *client_data = wl_client_get_user_data(client);
-
-	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "Terminating client with pid %d.", client_data->pid);
-	kill(client_data->pid, SIGTERM);
-	// TODO: After a few seconds, if it still exists: kill(client_data->pid, SIGKILL);
-
-	// (Data cleanup is handled in the client disconnect handlers.)
+	struct bz_surface *surf_data = breezy->wayland.activable_surfaces->tail->data;
+	if (surf_data->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+		xdg_toplevel_send_close(surf_data->xdgtoplevel->resource);
+	} else {
+		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Unrecognized surface role when closing.");
+		return;
+	}
 }
 
 

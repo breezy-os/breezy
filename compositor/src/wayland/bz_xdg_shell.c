@@ -226,6 +226,21 @@ static void bz_xdg_surface_get_toplevel(
 		bz_xdg_toplevel_dtor
 	);
 
+	// Track this surface as "activatable"
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_breezy *breezy = client_data->breezy;
+	// Remove it when the surface is destroyed.
+	bzsurf->disable_on_destroy.notify = bz_display_untrack_surface_on_destroy;
+	wl_resource_add_destroy_listener(res, &bzsurf->disable_on_destroy);
+	// Add it to our list of activable surfaces
+	const int append_status = bz_list_append(breezy->wayland.activable_surfaces, bzsurf);
+	if (append_status != 0) {
+		if (append_status == -2) {
+			wl_client_post_no_memory(client);
+		}
+		goto list_append_failed;
+	}
+
 	// Populate the surface's user data
 	xdgtoplevel->resource = res;
 	xdgtoplevel->xdgsurface = xdgsurf;
@@ -239,6 +254,8 @@ static void bz_xdg_surface_get_toplevel(
 	return;
 
 	// Error cleanup
+	list_append_failed:
+		wl_resource_destroy(resource);
 	resource_failed:
 		free(xdgtoplevel);
 	surface_alloc_failed:

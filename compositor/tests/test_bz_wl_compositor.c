@@ -66,14 +66,12 @@ struct bz_client *bz_client_create_data(struct bz_breezy *breezy)
 {
 	struct bz_client *client_data = calloc(1, sizeof(*client_data));
 	client_data->breezy = breezy;
-	client_data->surfaces = bz_list_create();
 	return client_data;
 }
 
 /** Frees the memory allocated as part of bz_client_create_data(). */
 void bz_client_free_data(struct bz_client *data)
 {
-	bz_list_free(data->surfaces, nullptr);
 	free(data);
 }
 
@@ -180,7 +178,6 @@ void test_create_surface__initializes_properly(void)
 	TEST_ASSERT_EQUAL(surface, wl_resource_set_implementation_fake.arg0_val); // Resource
 	TEST_ASSERT_NOT_NULL(wl_resource_set_implementation_fake.arg1_val);       // Interface
 	TEST_ASSERT_NOT_NULL(wl_resource_set_implementation_fake.arg2_val);       // User Data
-	TEST_ASSERT_EQUAL_INT(1, client_data->surfaces->length);
 
 	// Also verify some of our (more important) user data
 	struct bz_surface *user_data = wl_resource_set_implementation_fake.arg2_val;
@@ -199,7 +196,6 @@ void test_create_surface__resource_failed(void)
 	// Set up our mocks and data
 	struct bz_create_surface_test_data *test_data = bz_bootstrap_create_surface_test();
 	struct wl_compositor_interface *compositor_impl = test_data->compositor_impl;
-	struct bz_client *client_data = test_data->client_data;
 	wl_resource_create_fake.return_val = nullptr;
 
 	// Run our test!
@@ -209,7 +205,6 @@ void test_create_surface__resource_failed(void)
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_client_post_no_memory_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_set_implementation_fake.call_count);
-	TEST_ASSERT_EQUAL_INT(0, client_data->surfaces->length);
 
 	// Cleanup
 	bz_cleanup_create_surface_test(test_data, nullptr);

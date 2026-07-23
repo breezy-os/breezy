@@ -1,8 +1,10 @@
-
-#include <stdlib.h>
-#include <time.h>
+#define _POSIX_C_SOURCE 200809L // NOLINT
 
 #include "breezy/bz_breezy.h"
+
+#include <signal.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include <wayland-server.h>
 
@@ -36,6 +38,7 @@ int main(void)
 	breezy.input.device_lookup = bz_list_create();
 	breezy.wayland.event_sources = bz_list_create();
 	breezy.wayland.clients = bz_list_create();
+	breezy.wayland.activable_surfaces = bz_list_create();
 	if (breezy.input.device_lookup == nullptr) {
 		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__, "Failed to initialize device lookup list.");
 		return -1; // If we're already failing to malloc this early, let's just exit.
