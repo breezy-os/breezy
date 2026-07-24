@@ -27,6 +27,8 @@ FAKE_VALUE_FUNC(struct wl_resource *, wl_resource_create, struct wl_client *, co
 FAKE_VALUE_FUNC(void *, wl_resource_get_user_data, struct wl_resource *)
 FAKE_VOID_FUNC_VARARG(wl_resource_post_error, struct wl_resource *, uint32_t, const char *, ...)
 FAKE_VOID_FUNC(wl_resource_add_destroy_listener, struct wl_resource *, struct wl_listener *)
+// -- bz_* things --
+FAKE_VALUE_FUNC(int, bz_mgmt_open_window, struct bz_window_mgmt *, struct bz_surface *)
 
 void setUp(void)
 {
@@ -37,6 +39,7 @@ void setUp(void)
 	RESET_FAKE(wl_resource_get_user_data);
 	RESET_FAKE(wl_resource_post_error);
 	RESET_FAKE(wl_resource_add_destroy_listener);
+	RESET_FAKE(bz_mgmt_open_window);
 	FFF_RESET_HISTORY();
 
 	bz_log_initialize(BZ_LOG_OFF);
@@ -60,6 +63,7 @@ extern const struct xdg_surface_interface bz_xdg_surface_implementation;
 void test_xdg_surface_get_toplevel__initializes_properly(void)
 {
 	// Set up our mocks
+	bz_mgmt_open_window_fake.return_val = 0;
 	struct bz_client *client_data = bz_create_client_data();
 	wl_client_get_user_data_fake.return_val = client_data;
 	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();

@@ -137,13 +137,15 @@ static void bz_registry_global(
 		// Version 3
 	}
 	else if (strcmp(interface, wl_seat_interface.name) == 0) {
+		// Bind to the seat
 		globals->seat = wl_registry_bind(registry, name, &wl_seat_interface, 10);
 		globals->seat_name = name;
-		wl_seat_add_listener(globals->seat, &bz_seat_implementation, data);
 		// Create the user data
 		struct bz_seat *data = calloc(1, sizeof(*data));
 		data->resource = globals->seat;
-		wl_seat_set_user_data(globals->seat, data);
+		data->globals = globals;
+		// Attach our listener
+		wl_seat_add_listener(globals->seat, &bz_seat_implementation, data);
 	}
 	else if (strcmp(interface, wl_output_interface.name) == 0) {
 		// Version 4
@@ -222,7 +224,7 @@ static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t c
 	// Add / remove keyboard resource
 	if (seat_data->keyboard == nullptr && capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
 		seat_data->keyboard = wl_seat_get_keyboard(wl_seat);
-		wl_keyboard_add_listener(seat_data->keyboard, &bz_keyboard_implementation, nullptr);
+		wl_keyboard_add_listener(seat_data->keyboard, &bz_keyboard_implementation, seat_data);
 	} else if (seat_data->keyboard != nullptr && (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) == 0) {
 		wl_keyboard_release(seat_data->keyboard);
 	}
@@ -230,7 +232,7 @@ static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t c
 	// Add / remove pointer resource
 	if (seat_data->pointer == nullptr && capabilities & WL_SEAT_CAPABILITY_POINTER) {
 		seat_data->pointer = wl_seat_get_pointer(wl_seat);
-		wl_pointer_add_listener(seat_data->pointer, &bz_pointer_implementation, nullptr);
+		wl_pointer_add_listener(seat_data->pointer, &bz_pointer_implementation, seat_data);
 	} else if (seat_data->pointer != nullptr && (capabilities & WL_SEAT_CAPABILITY_POINTER) == 0) {
 		wl_pointer_release(seat_data->pointer);
 	}
@@ -273,8 +275,10 @@ static void bz_keyboard_enter(
 	struct wl_surface *surface,
 	struct wl_array *keys
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.enter not implemented");
-	// TODO
+	struct bz_seat *seat_data = data;
+	if (seat_data->globals != nullptr && seat_data->globals->window != nullptr) {
+		seat_data->globals->window->is_focused = true;
+	}
 }
 
 static void bz_keyboard_leave(
@@ -283,8 +287,10 @@ static void bz_keyboard_leave(
 	uint32_t serial,
 	struct wl_surface *surface
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.leave not implemented");
-	// TODO
+	struct bz_seat *seat_data = data;
+	if (seat_data->globals != nullptr && seat_data->globals->window != nullptr) {
+		seat_data->globals->window->is_focused = false;
+	}
 }
 
 static void bz_keyboard_key(
@@ -608,7 +614,11 @@ static void bz_draw_frame(struct bz_application_window *window)
 
 	for (int y = 0; y < buffer->size.h; y++) {
 		for (int x = 0; x < buffer->size.w; x++) {
-			if (x < BZ_BORDER_WIDTH || x > (buffer->size.w - BZ_BORDER_WIDTH) || y > (buffer->size.h - BZ_BORDER_WIDTH)) {
+			if (window->is_focused && (
+				x < BZ_BORDER_WIDTH ||
+				x > (buffer->size.w - BZ_BORDER_WIDTH) ||
+				y > (buffer->size.h - BZ_BORDER_WIDTH))
+			) {
 				buffer->pixel_data[y * buffer->size.w + x] = 0xFFFFFFFF;
 			} else if (y < BZ_TITLE_WIDTH) {
 				buffer->pixel_data[y * buffer->size.w + x] = 0xFFFFFFFF;

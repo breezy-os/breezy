@@ -286,9 +286,6 @@ void bz_wayland_cleanup(struct bz_breezy *breezy)
 		wl_display_destroy_clients(breezy->wayland.display);
 		wl_display_destroy(breezy->wayland.display);
 	}
-	if (breezy->wayland.activable_surfaces != nullptr) {
-		bz_list_free(breezy->wayland.activable_surfaces, nullptr);
-	}
 	if (breezy->wayland.clients != nullptr) {
 		// The actual wl_clients (and resources) are destroyed through wl_display_destroy_clients()
 		bz_list_free(breezy->wayland.clients, nullptr);

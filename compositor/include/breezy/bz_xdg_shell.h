@@ -48,7 +48,6 @@ struct bz_xdg_surface {
 	struct bz_surface *wlsurface;
 
 	// Configure event tracking
-	uint32_t serial;
 	struct bz_list *pending_configures; // List of "struct bz_xdg_surface_configure *"
 	struct bz_xdg_surface_configure *last_acked_configure; // nullptr before first ack
 };

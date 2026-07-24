@@ -44,7 +44,7 @@ struct bz_breezy *bz_create_breezy_data(void)
 {
 	struct bz_breezy *data = calloc(1, sizeof(*data));
 
-	data->wayland.activable_surfaces = bz_list_create();
+	data->window_mgmt.activable_surfaces = bz_list_create();
 
 	return data;
 }
@@ -52,8 +52,8 @@ struct bz_breezy *bz_create_breezy_data(void)
 void bz_free_breezy_data(struct bz_breezy *data)
 {
 	if (data) {
-		if (data->wayland.activable_surfaces != nullptr) {
-			bz_list_free(data->wayland.activable_surfaces, nullptr);
+		if (data->window_mgmt.activable_surfaces != nullptr) {
+			bz_list_free(data->window_mgmt.activable_surfaces, nullptr);
 		}
 		free(data);
 	}

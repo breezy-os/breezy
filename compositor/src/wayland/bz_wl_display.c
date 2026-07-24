@@ -473,16 +473,3 @@ static void bz_apply_damage(struct bz_surface *bzsurf)
 	// --- Buffer Access End -----------------------------------------------------------------------
 	wl_shm_buffer_end_access(shmbuf);
 }
-
-/** Handles surfaces closing by removing the surface from our global tracking list. */
-void bz_display_untrack_surface_on_destroy(struct wl_listener *listener, void *resource)
-{
-	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Handling surface destroy.");
-
-	// Remove the bz_surface from our globally-tracked list of activable surfaces
-	struct bz_surface *surface_data = wl_container_of(listener, surface_data, disable_on_destroy);
-	struct wl_client *client = wl_resource_get_client(resource);
-	struct bz_client *client_data = wl_client_get_user_data(client);
-	struct bz_breezy *breezy = client_data->breezy;
-	bz_list_remove(breezy->wayland.activable_surfaces, surface_data, nullptr);
-}

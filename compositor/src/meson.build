@@ -17,6 +17,7 @@ bz_main_lib = static_library(
         './bz_graphics.c',
         './bz_input.c',
         './bz_wayland.c',
+        './bz_window_management.c',
         './gles2.c',
         './wayland/bz_wl_display.c',
         './wayland/bz_wl_devices.c',

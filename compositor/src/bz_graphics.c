@@ -362,7 +362,7 @@ void bz_drm_handle_pageflip(
 
 	// Emit the Wayland "done" event for all active frame callbacks.
 	uint32_t timestamp = (uint32_t)((uint64_t)tv_sec * 1000 + tv_usec / 1000);
-	bz_graphics_process_frame_callbacks(breezy->wayland.activable_surfaces, timestamp);
+	bz_graphics_process_frame_callbacks(breezy->window_mgmt.activable_surfaces, timestamp);
 
 	// Occasionally, a render will fail due to both GBM buffers being unreleased. When that happens,
 	//   this flag gets set to true, prompting us to retry during this "release" step.
@@ -750,7 +750,7 @@ static void bz_gles_render_and_commit(void *data) {
 		glEnableVertexAttribArray(1);
 
 		// ...then render each activable surface
-		struct bz_node *curr_surf = breezy->wayland.activable_surfaces->head;
+		struct bz_node *curr_surf = breezy->window_mgmt.activable_surfaces->head;
 		while (curr_surf != nullptr) {
 			struct bz_surface *bzsurf = curr_surf->data;
 			if (bzsurf->texture != 0 && bzsurf->active_state->buffer != nullptr) {

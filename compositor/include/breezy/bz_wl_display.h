@@ -66,7 +66,6 @@ struct bz_surface {
 };
 
 void bz_surface_dtor(struct wl_resource *data);
-void bz_display_untrack_surface_on_destroy(struct wl_listener *listener, void *data);
 
 // #################################################################################################
 #endif

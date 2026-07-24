@@ -12,7 +12,7 @@ struct bz_client {
 	struct wl_listener client_disconnect_listener;
 	pid_t pid;
 
-	struct wl_resource *seat;
+	struct bz_wl_seat *seat;
 };
 
 

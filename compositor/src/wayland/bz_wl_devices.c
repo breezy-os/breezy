@@ -54,29 +54,71 @@ static void bz_data_device_manager_get_data_device(struct wl_client *client, str
 //  wl_seat
 // -------------------------------------------------------------------------------------------------
 
+void bz_seat_dtor(struct wl_resource *data)
+{
+	struct bz_wl_seat *seat_data = wl_resource_get_user_data(data);
+
+	bz_list_free(seat_data->keyboards, nullptr);
+	bz_list_free(seat_data->pointers, nullptr);
+
+	free(seat_data);
+}
+
 /** Gets executed whenever a client binds to wl_seat. */
 void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
 	bz_debug(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Binding a client to wl_seat.");
 
+	// Allocate our user data
+	struct bz_wl_seat *seat_data = calloc(1, sizeof(*seat_data));
+	if (seat_data == nullptr) {
+		wl_client_post_no_memory(client);
+		goto user_data_alloc_failed;
+	}
+	seat_data->keyboards = bz_list_create();
+	if (seat_data->keyboards == nullptr) {
+		wl_client_post_no_memory(client);
+		goto keyboard_alloc_failed;
+	}
+	seat_data->pointers = bz_list_create();
+	if (seat_data->pointers == nullptr) {
+		wl_client_post_no_memory(client);
+		goto pointer_alloc_failed;
+	}
+
 	// Set up the wl_seat resource
 	struct wl_resource *res = wl_resource_create(client, &wl_seat_interface, version, id);
 	if (res == nullptr) {
 		wl_client_post_no_memory(client);
-		return;
+		goto resource_failed;
 	}
-	wl_resource_set_implementation(res, &bz_seat_implementation, nullptr, nullptr);
+	wl_resource_set_implementation(res, &bz_seat_implementation, seat_data, bz_seat_dtor);
+
+	// Populate the user data
+	seat_data->resource = res;
 
 	// Track the client's seat
 	struct bz_client *client_data = wl_client_get_user_data(client);
-	client_data->seat = res;
+	client_data->seat = seat_data;
 
 	// Send the seat's initial capabilities to the client
 	uint32_t capabilities =
 		(client_data->breezy->input.keyboard_count > 0 ? WL_SEAT_CAPABILITY_KEYBOARD : 0) |
 		(client_data->breezy->input.pointer_count  > 0 ? WL_SEAT_CAPABILITY_POINTER  : 0);
-	wl_seat_send_name(client_data->seat, "breezy-seat"); // We only support 1 seat for now, hence a hardcoded name
-	wl_seat_send_capabilities(client_data->seat, capabilities);
+	wl_seat_send_name(res, "breezy-seat"); // We only support 1 seat for now, hence a hardcoded name
+	wl_seat_send_capabilities(res, capabilities);
+
+	// Success!
+	return;
+
+	resource_failed:
+		bz_list_free(seat_data->pointers, nullptr);
+	pointer_alloc_failed:
+		bz_list_free(seat_data->keyboards, nullptr);
+	keyboard_alloc_failed:
+		free(seat_data);
+	user_data_alloc_failed:
+		bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Failed to construct a new Wayland seat.");
 }
 
 static const struct wl_seat_interface bz_seat_implementation = {
@@ -120,9 +162,18 @@ static void bz_seat_get_pointer(
 		nullptr
 	);
 
+	// Add it to our seat's user data
+	struct bz_wl_seat *seat_data = client_data->seat;
+	if (bz_list_append(seat_data->pointers, res) != 0) {
+		wl_client_post_no_memory(client);
+		goto append_pointer_failed;
+	}
+
 	// Everything succeeded!
 	return;
 
+	append_pointer_failed:
+		wl_resource_destroy(res);
 	resource_failed:
 		bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Failed to construct a new wl_pointer.");
 }
@@ -162,6 +213,13 @@ static void bz_seat_get_keyboard(
 		nullptr
 	);
 
+	// Add it to our seat's user data
+	struct bz_wl_seat *seat_data = client_data->seat;
+	if (bz_list_append(seat_data->keyboards, res) != 0) {
+		wl_client_post_no_memory(client);
+		goto append_keyboard_failed;
+	}
+
 	// Send the "keymap" event
 	char *keymap = xkb_keymap_get_as_string(breezy->input.xkb_keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
 	size_t size = strlen(keymap) + 1;
@@ -177,9 +235,18 @@ static void bz_seat_get_keyboard(
 	// Send the initial "repeat_info" event. Just sane defaults for now: 25Hz rate, 600ms delay
 	wl_keyboard_send_repeat_info(res, 25, 600);
 
+	// If the active/focused surface belongs to the current client, then we should also send it the
+	//   keyboard "enter + modifiers" events.
+	struct bz_surface *active_surf = bz_mgmt_get_active_surface(&breezy->window_mgmt);
+	if (active_surf != nullptr && wl_resource_get_client(active_surf->resource) == client) {
+		bz_mgmt_notify_enter(&breezy->window_mgmt, res, active_surf->resource);
+	}
+
 	// Everything succeeded!
 	return;
 
+	append_keyboard_failed:
+		wl_resource_destroy(res);
 	resource_failed:
 		bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Failed to construct a new wl_keyboard.");
 }

@@ -226,21 +226,6 @@ static void bz_xdg_surface_get_toplevel(
 		bz_xdg_toplevel_dtor
 	);
 
-	// Track this surface as "activatable"
-	struct bz_client *client_data = wl_client_get_user_data(client);
-	struct bz_breezy *breezy = client_data->breezy;
-	// Remove it when the surface is destroyed.
-	bzsurf->disable_on_destroy.notify = bz_display_untrack_surface_on_destroy;
-	wl_resource_add_destroy_listener(res, &bzsurf->disable_on_destroy);
-	// Add it to our list of activable surfaces
-	const int append_status = bz_list_append(breezy->wayland.activable_surfaces, bzsurf);
-	if (append_status != 0) {
-		if (append_status == -2) {
-			wl_client_post_no_memory(client);
-		}
-		goto list_append_failed;
-	}
-
 	// Populate the surface's user data
 	xdgtoplevel->resource = res;
 	xdgtoplevel->xdgsurface = xdgsurf;
@@ -250,11 +235,20 @@ static void bz_xdg_surface_get_toplevel(
 	bzsurf->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
 	bzsurf->xdgtoplevel = xdgtoplevel;
 
+	// Track this surface as "activatable"
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_breezy *breezy = client_data->breezy;
+	int open_status = bz_mgmt_open_window(&breezy->window_mgmt, bzsurf);
+	if (open_status != 0) {
+		goto window_open_failed;
+	}
+
 	// Everything succeeded!
 	return;
 
 	// Error cleanup
-	list_append_failed:
+	window_open_failed:
+		bzsurf->xdgtoplevel = nullptr;
 		wl_resource_destroy(resource);
 	resource_failed:
 		free(xdgtoplevel);
@@ -360,7 +354,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		}
 
 		// Assign our initial state
-		configevt->serial = xdgsurface->serial;
+		configevt->serial = wl_display_next_serial(wl_client_get_display(client));
 		configevt->type = BZ_XDG_SURF_TOPLEVEL;
 		wl_array_init(&configevt->toplevel.states);
 		configevt->toplevel.max_size.w = globals->drm.mode_info.hdisplay;
@@ -389,7 +383,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 	}
 
 	bz_list_append(xdgsurface->pending_configures, configevt);
-	xdg_surface_send_configure(xdgsurface->resource, xdgsurface->serial++);
+	xdg_surface_send_configure(xdgsurface->resource, configevt->serial);
 	return;
 
 	null_toplevel:
