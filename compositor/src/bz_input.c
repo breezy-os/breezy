@@ -138,7 +138,7 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	// Feed into xkbcommon
 	const uint32_t xkb_keycode = keycode + 8; // xkb keycode is offset by 8 from evdev
 	enum xkb_key_direction press_state = keystate ? XKB_KEY_DOWN : XKB_KEY_UP;
-	xkb_state_update_key(breezy->input.xkb_state, xkb_keycode, press_state);
+	enum xkb_state_component changes = xkb_state_update_key(breezy->input.xkb_state, xkb_keycode, press_state);
 	const uint32_t xkb_keysym = xkb_state_key_get_one_sym(breezy->input.xkb_state, xkb_keycode);
 
 	// Figure out our modifier keys
@@ -162,35 +162,68 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 		case XKB_KEY_Escape:
 			breezy->is_terminating = true;
 			wl_display_terminate(breezy->wayland.display);
-			break;
+			return;
 
 		// Start / Stop Applications
 		case XKB_KEY_t:
 			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/git/breezy/build/test-client/test-client");
-			break;
+			return;
 		case XKB_KEY_q:
 			bz_mgmt_close_active_window(&breezy->window_mgmt);
-			break;
+			return;
 
 		// Change Colors
 		case XKB_KEY_1:
 			bz_graphics_set_color_index(0);
-			break;
+			return;
 		case XKB_KEY_2:
 			bz_graphics_set_color_index(1);
-			break;
+			return;
 		case XKB_KEY_3:
 			bz_graphics_set_color_index(2);
-			break;
+			return;
 		case XKB_KEY_Up:
 			bz_graphics_change_color(breezy, 20.0f/255);
-			break;
+			return;
 		case XKB_KEY_Down:
 			bz_graphics_change_color(breezy, -20.0f/255);
-			break;
+			return;
 
 		default:
 			break; // Does nothing, but shuts up clang-tidy
+		}
+	}
+
+	// Any that weren't caught, send onwards to the active surface.
+	if (changes) {
+		struct xkb_state *xkbstate = breezy->input.xkb_state;
+		struct bz_surface *active_surface = bz_mgmt_get_active_surface(&breezy->window_mgmt);
+		if (active_surface != nullptr) {
+			struct wl_client *client = wl_resource_get_client(active_surface->resource);
+			struct bz_client *client_data = wl_client_get_user_data(client);
+			struct bz_node *kb_node = client_data->seat->keyboards->head;
+			while (kb_node != nullptr) {
+				struct wl_resource *keyboard = kb_node->data;
+				wl_keyboard_send_key(
+					keyboard,
+					wl_display_next_serial(breezy->wayland.display),
+					libinput_event_keyboard_get_time(kb_event),
+					keycode,
+					keystate ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED
+				);
+				if (changes & (XKB_STATE_MODS_EFFECTIVE | XKB_STATE_LAYOUT_EFFECTIVE)) {
+					// A modifier changed, so re-send the full modifiers event.
+					wl_keyboard_send_modifiers(
+						keyboard,
+						wl_display_next_serial(breezy->wayland.display),
+						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_DEPRESSED),
+						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LATCHED),
+						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LOCKED),
+						xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
+					);
+				}
+				kb_node = kb_node->next;
+			}
 		}
 	}
 }

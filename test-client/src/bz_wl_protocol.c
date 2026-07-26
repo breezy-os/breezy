@@ -301,7 +301,7 @@ static void bz_keyboard_key(
 	uint32_t key,
 	uint32_t state
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.key not implemented");
+	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Key received! %d, %d, %d, %d", serial, time, key, state);
 	// TODO
 }
 
@@ -314,7 +314,7 @@ static void bz_keyboard_modifiers(
 	uint32_t mods_locked,
 	uint32_t group
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.modifiers not implemented");
+	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Modifiers received! %d, %d, %d, %d, %d", serial, mods_depressed, mods_latched, mods_locked, group);
 	// TODO
 }
 
@@ -659,7 +659,9 @@ static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t call
 	window->frame_callback = nullptr;
 	wl_callback_destroy(wl_callback);
 
-	bz_update_circle(window, callback_data);
+	if (!window->is_focused) {
+		bz_update_circle(window, callback_data);
+	}
 	bz_draw_frame(window);
 	bz_submit_frame(window);
 }

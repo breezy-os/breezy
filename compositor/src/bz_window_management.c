@@ -3,6 +3,7 @@
 
 #include <wayland-server.h>
 #include <xdg-shell-server-protocol.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_list.h"
@@ -83,7 +84,7 @@ int bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface)
 	struct bz_node *node = client_data->seat->keyboards->head;
 	while (node != nullptr) {
 		struct wl_resource *keyboard = node->data;
-		bz_mgmt_notify_enter(mgmt, keyboard, surface->resource);
+		bz_mgmt_notify_enter(client_data->breezy->input.xkb_state, keyboard, surface->resource);
 		node = node->next;
 	}
 
@@ -130,7 +131,7 @@ static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, voi
 		struct bz_node *node = new_client_data->seat->keyboards->head;
 		while (node != nullptr) {
 			struct wl_resource *keyboard = node->data;
-			bz_mgmt_notify_enter(&breezy->window_mgmt, keyboard, new_surf_data->resource);
+			bz_mgmt_notify_enter(breezy->input.xkb_state, keyboard, new_surf_data->resource);
 			node = node->next;
 		}
 	}
@@ -144,7 +145,7 @@ struct bz_surface *bz_mgmt_get_active_surface(struct bz_window_mgmt *mgmt)
 }
 
 void bz_mgmt_notify_enter(
-	struct bz_window_mgmt *mgmt, // TODO-dl10: Maybe replace with "struct bz_input *"?
+	struct xkb_state *xkbstate,
 	struct wl_resource *keyboard,
 	struct wl_resource *surface
 ) {
@@ -154,6 +155,13 @@ void bz_mgmt_notify_enter(
 	struct wl_array keys;
 	wl_array_init(&keys);
 	wl_keyboard_send_enter(keyboard, wl_display_next_serial(display), surface, &keys);
-	wl_keyboard_send_modifiers(keyboard, wl_display_next_serial(display), 0,0,0,0); // TODO-dl10
+	wl_keyboard_send_modifiers(
+		keyboard,
+		wl_display_next_serial(display),
+		xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_DEPRESSED),
+		xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LATCHED),
+		xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LOCKED),
+		xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
+	);
 	wl_array_release(&keys);
 }

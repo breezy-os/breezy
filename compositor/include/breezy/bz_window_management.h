@@ -2,6 +2,8 @@
 #define BZ_WINDOW_MANAGEMENT_H
 // #################################################################################################
 
+#include <xkbcommon/xkbcommon.h>
+
 #include "breezy/bz_list.h"
 #include "breezy/bz_wl_display.h"
 
@@ -21,7 +23,7 @@ void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt);
 int bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface);
 int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt);
 struct bz_surface *bz_mgmt_get_active_surface(struct bz_window_mgmt *mgmt);
-void bz_mgmt_notify_enter(struct bz_window_mgmt *mgmt, struct wl_resource *keyboard, struct wl_resource *surface);
+void bz_mgmt_notify_enter(struct xkb_state *xkbstate, struct wl_resource *keyboard, struct wl_resource *surface);
 
 // #################################################################################################
 #endif
