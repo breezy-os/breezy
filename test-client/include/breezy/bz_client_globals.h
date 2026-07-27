@@ -44,6 +44,10 @@ struct bz_application_window {
 	float circle_speed_x;
 	float circle_speed_y;
 	bool is_focused;
+	bool shift;   // true if held
+	bool wasd[4]; // true if held, false otherwise
+	uint32_t konami_count; // number of konami code keys pressed.
+	bool konami_active; // When switched to true, circle becomes square
 
 	struct wl_callback *frame_callback; // nullptr when not active
 };
@@ -53,6 +57,11 @@ struct bz_seat {
 	struct wl_keyboard *keyboard;
 	struct wl_pointer *pointer;
 	struct bz_client_globals *globals;
+
+	// xkb data
+	struct xkb_context *xkbcontext;
+	struct xkb_keymap *xkbkeymap;
+	struct xkb_state *xkbstate;
 };
 
 struct bz_client_globals {

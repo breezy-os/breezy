@@ -145,7 +145,6 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE);
 	const bool ctrl_held  = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE);
 	const bool alt_held   = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_ALT,  XKB_STATE_MODS_EFFECTIVE);
-	// const bool shift_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE);
 
 	// First, check for a VT switch. (The only hotkey that doesn't use "super".)
 	const int target_vt = bz_input_check_vt_change(ctrl_held, alt_held, xkb_keysym);
@@ -195,35 +194,33 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	}
 
 	// Any that weren't caught, send onwards to the active surface.
-	if (changes) {
-		struct xkb_state *xkbstate = breezy->input.xkb_state;
-		struct bz_surface *active_surface = bz_mgmt_get_active_surface(&breezy->window_mgmt);
-		if (active_surface != nullptr) {
-			struct wl_client *client = wl_resource_get_client(active_surface->resource);
-			struct bz_client *client_data = wl_client_get_user_data(client);
-			struct bz_node *kb_node = client_data->seat->keyboards->head;
-			while (kb_node != nullptr) {
-				struct wl_resource *keyboard = kb_node->data;
-				wl_keyboard_send_key(
+	struct xkb_state *xkbstate = breezy->input.xkb_state;
+	struct bz_surface *active_surface = bz_mgmt_get_active_surface(&breezy->window_mgmt);
+	if (active_surface != nullptr) {
+		struct wl_client *client = wl_resource_get_client(active_surface->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		struct bz_node *kb_node = client_data->seat->keyboards->head;
+		while (kb_node != nullptr) {
+			struct wl_resource *keyboard = kb_node->data;
+			wl_keyboard_send_key(
+				keyboard,
+				wl_display_next_serial(breezy->wayland.display),
+				libinput_event_keyboard_get_time(kb_event),
+				keycode,
+				keystate ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED
+			);
+			if (changes & (XKB_STATE_MODS_EFFECTIVE | XKB_STATE_LAYOUT_EFFECTIVE)) {
+				// A modifier changed, so re-send the full modifiers event.
+				wl_keyboard_send_modifiers(
 					keyboard,
 					wl_display_next_serial(breezy->wayland.display),
-					libinput_event_keyboard_get_time(kb_event),
-					keycode,
-					keystate ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED
+					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_DEPRESSED),
+					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LATCHED),
+					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LOCKED),
+					xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
 				);
-				if (changes & (XKB_STATE_MODS_EFFECTIVE | XKB_STATE_LAYOUT_EFFECTIVE)) {
-					// A modifier changed, so re-send the full modifiers event.
-					wl_keyboard_send_modifiers(
-						keyboard,
-						wl_display_next_serial(breezy->wayland.display),
-						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_DEPRESSED),
-						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LATCHED),
-						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LOCKED),
-						xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
-					);
-				}
-				kb_node = kb_node->next;
 			}
+			kb_node = kb_node->next;
 		}
 	}
 }

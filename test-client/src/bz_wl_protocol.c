@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 
 #include <xdg-shell-client-protocol.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "breezy/bz_client_utils.h"
 #include "breezy/bz_logger.h"
@@ -75,6 +76,7 @@ static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface
 // Helpers
 static void bz_initialize_surface_buffers(struct bz_client_globals *globals, struct bz_application_window* window);
 static void bz_update_circle(struct bz_application_window *window, uint32_t new_time);
+static void bz_control_circle(struct bz_application_window *window, uint32_t new_time);
 static void bz_draw_frame(struct bz_application_window *window);
 static void bz_submit_frame(struct bz_application_window* window);
 static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t callback_data);
@@ -225,8 +227,13 @@ static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t c
 	if (seat_data->keyboard == nullptr && capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
 		seat_data->keyboard = wl_seat_get_keyboard(wl_seat);
 		wl_keyboard_add_listener(seat_data->keyboard, &bz_keyboard_implementation, seat_data);
+		seat_data->xkbcontext = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	} else if (seat_data->keyboard != nullptr && (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) == 0) {
 		wl_keyboard_release(seat_data->keyboard);
+		// Destroy xkb state
+		if (seat_data->xkbstate   != nullptr) { xkb_state_unref(seat_data->xkbstate); }
+		if (seat_data->xkbkeymap  != nullptr) { xkb_keymap_unref(seat_data->xkbkeymap); }
+		if (seat_data->xkbcontext != nullptr) { xkb_context_unref(seat_data->xkbcontext); }
 	}
 
 	// Add / remove pointer resource
@@ -264,8 +271,25 @@ static void bz_keyboard_keymap(
 	int32_t fd,
 	uint32_t size
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.keymap not implemented");
-	// TODO
+	struct bz_seat *seat_data = data;
+
+	// Make sure it's in xkb format
+	if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Unsupported keyboard keymap format.");
+		return;
+	}
+
+	// Initialize the rest of our xkb data
+	void *map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+	seat_data->xkbkeymap = xkb_keymap_new_from_string(
+		seat_data->xkbcontext,
+		map,
+		XKB_KEYMAP_FORMAT_TEXT_V1,
+		XKB_KEYMAP_COMPILE_NO_FLAGS
+	);
+	munmap(map, size);
+	close(fd);
+	seat_data->xkbstate = xkb_state_new(seat_data->xkbkeymap);
 }
 
 static void bz_keyboard_enter(
@@ -293,6 +317,19 @@ static void bz_keyboard_leave(
 	}
 }
 
+const uint32_t KONAMI_CODE_KEYSYMS[] = {
+	XKB_KEY_Up,
+	XKB_KEY_Up,
+	XKB_KEY_Down,
+	XKB_KEY_Down,
+	XKB_KEY_Left,
+	XKB_KEY_Right,
+	XKB_KEY_Left,
+	XKB_KEY_Right,
+	XKB_KEY_b,
+	XKB_KEY_a,
+};
+
 static void bz_keyboard_key(
 	void *data,
 	struct wl_keyboard *wl_keyboard,
@@ -301,8 +338,58 @@ static void bz_keyboard_key(
 	uint32_t key,
 	uint32_t state
 ) {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Key received! %d, %d, %d, %d", serial, time, key, state);
-	// TODO
+	struct bz_seat *seat_data = data;
+
+	const uint32_t xkb_keycode = key + 8; // xkb keycode is offset by 8
+	if (state == WL_KEYBOARD_KEY_STATE_REPEATED) {
+		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Unsupported key state: 'repeated'.");
+		return;
+	}
+	enum xkb_key_direction press_state = state == WL_KEYBOARD_KEY_STATE_PRESSED
+		? XKB_KEY_DOWN
+		: XKB_KEY_UP;
+	xkb_state_update_key(seat_data->xkbstate, xkb_keycode, press_state);
+
+	const uint32_t xkb_keysym = xkb_state_key_get_one_sym(seat_data->xkbstate, xkb_keycode);
+
+	// Update our konami code progress
+	if (press_state == XKB_KEY_DOWN && !seat_data->globals->window->konami_active) {
+		if (xkb_keysym == KONAMI_CODE_KEYSYMS[seat_data->globals->window->konami_count]) {
+			seat_data->globals->window->konami_count++;
+		} else {
+			seat_data->globals->window->konami_count = 0;
+		}
+		if (seat_data->globals->window->konami_count == 10) {
+			seat_data->globals->window->konami_active = true;
+		}
+	}
+
+	switch (xkb_keysym) {
+	case XKB_KEY_w:
+	case XKB_KEY_W:
+	case XKB_KEY_Up:
+		seat_data->globals->window->wasd[0] = press_state == XKB_KEY_DOWN;
+		break;
+	case XKB_KEY_a:
+	case XKB_KEY_A:
+	case XKB_KEY_Left:
+		seat_data->globals->window->wasd[1] = press_state == XKB_KEY_DOWN;
+		break;
+	case XKB_KEY_s:
+	case XKB_KEY_S:
+	case XKB_KEY_Down:
+		seat_data->globals->window->wasd[2] = press_state == XKB_KEY_DOWN;
+		break;
+	case XKB_KEY_d:
+	case XKB_KEY_D:
+	case XKB_KEY_Right:
+		seat_data->globals->window->wasd[3] = press_state == XKB_KEY_DOWN;
+		break;
+	case XKB_KEY_Shift_L:
+	case XKB_KEY_Shift_R:
+		seat_data->globals->window->shift = press_state == XKB_KEY_DOWN;
+		break;
+	}
 }
 
 static void bz_keyboard_modifiers(
@@ -594,6 +681,41 @@ static void bz_update_circle(struct bz_application_window *window, uint32_t new_
 	window->circle_center.y %= (2 * window->size.h);
 }
 
+static void bz_control_circle(struct bz_application_window *window, uint32_t new_time)
+{
+	// Don't bother updating if this is our first frame.
+	if (window->prev_time == 0) {
+		window->prev_time = new_time;
+		return;
+	}
+
+	const uint32_t elapsed_ms = (new_time - window->prev_time);
+	window->prev_time = new_time;
+
+	// Calculate the distance the circle should move
+	struct bz_position delta = { .x = 0, .y = 0 };
+	float speed = window->shift ? 2.0f : 1.0f;
+	if (window->wasd[0]) { delta.y -= (speed * elapsed_ms); } // w (up)
+	if (window->wasd[1]) { delta.x -= (speed * elapsed_ms); } // a (left)
+	if (window->wasd[2]) { delta.y += (speed * elapsed_ms); } // s (down)
+	if (window->wasd[3]) { delta.x += (speed * elapsed_ms); } // d (right)
+
+	if (delta.x < 0 && -delta.x > window->circle_center.x) {
+		window->circle_center.x = 0; // Prevents uint from going negative and wrapping.
+	} else {
+		window->circle_center.x += delta.x;
+	}
+	if (delta.y < 0 && -delta.y > window->circle_center.y) {
+		window->circle_center.y = 0; // Prevents uint from going negative and wrapping.
+	} else {
+		window->circle_center.y += delta.y;
+	}
+
+	// Clamp to the window's bounds
+	window->circle_center.x = clamp(window->circle_center.x, 0, window->size.w);
+	window->circle_center.y = clamp(window->circle_center.y, 0, window->size.h);
+}
+
 #define BZ_BORDER_WIDTH 4
 #define BZ_TITLE_WIDTH 40
 #define BZ_CIRCLE_RADIUS 50
@@ -622,6 +744,11 @@ static void bz_draw_frame(struct bz_application_window *window)
 				buffer->pixel_data[y * buffer->size.w + x] = 0xFFFFFFFF;
 			} else if (y < BZ_TITLE_WIDTH) {
 				buffer->pixel_data[y * buffer->size.w + x] = 0xFFFFFFFF;
+			} else if (window->konami_active &&
+				abs(circle_x - x) < BZ_CIRCLE_RADIUS &&
+				abs(circle_y - y) < BZ_CIRCLE_RADIUS
+			) {
+				buffer->pixel_data[y * buffer->size.w + x] = window->fg_color;
 			} else if (distance(circle_x, circle_y, x, y) < BZ_CIRCLE_RADIUS) {
 				buffer->pixel_data[y * buffer->size.w + x] = window->fg_color;
 			} else {
@@ -661,6 +788,8 @@ static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t call
 
 	if (!window->is_focused) {
 		bz_update_circle(window, callback_data);
+	} else {
+		bz_control_circle(window, callback_data);
 	}
 	bz_draw_frame(window);
 	bz_submit_frame(window);
