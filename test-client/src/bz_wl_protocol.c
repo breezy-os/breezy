@@ -712,11 +712,11 @@ static void bz_control_circle(struct bz_application_window *window, uint32_t new
 	}
 
 	// Clamp to the window's bounds
-	window->circle_center.x = clamp(window->circle_center.x, 0, window->size.w);
-	window->circle_center.y = clamp(window->circle_center.y, 0, window->size.h);
+	window->circle_center.x = bz_clamp(window->circle_center.x, 0, window->size.w);
+	window->circle_center.y = bz_clamp(window->circle_center.y, 0, window->size.h);
 }
 
-#define BZ_BORDER_WIDTH 4
+#define BZ_BORDER_WIDTH 8
 #define BZ_TITLE_WIDTH 40
 #define BZ_CIRCLE_RADIUS 50
 static void bz_draw_frame(struct bz_application_window *window)
@@ -749,7 +749,7 @@ static void bz_draw_frame(struct bz_application_window *window)
 				abs(circle_y - y) < BZ_CIRCLE_RADIUS
 			) {
 				buffer->pixel_data[y * buffer->size.w + x] = window->fg_color;
-			} else if (distance(circle_x, circle_y, x, y) < BZ_CIRCLE_RADIUS) {
+			} else if (bz_distance(circle_x, circle_y, x, y) < BZ_CIRCLE_RADIUS) {
 				buffer->pixel_data[y * buffer->size.w + x] = window->fg_color;
 			} else {
 				buffer->pixel_data[y * buffer->size.w + x] = window->bg_color;

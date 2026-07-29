@@ -3,6 +3,7 @@
 foreach t : [
     'bz_list',
     'bz_logger',
+    'bz_math',
 ]
     exe = executable('test_' + t,
         'test_' + t + '.c',
@@ -10,6 +11,7 @@ foreach t : [
             bz_utils_dep,
             unity_dep,
             fff_dep,
+            math_dep,
         ],
         include_directories: utilities_inc)
     test(t, exe)

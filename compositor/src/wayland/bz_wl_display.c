@@ -121,8 +121,8 @@ static void bz_compositor_create_surface(
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
-	surface->position.x = randInt(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
-	surface->position.y = randInt(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
+	surface->position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
+	surface->position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
 
 	// Everything succeeded!
 	return;

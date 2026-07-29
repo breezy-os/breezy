@@ -27,6 +27,8 @@ extra_warnings = cc.get_supported_arguments([
 ])
 add_project_arguments(extra_warnings, language: 'c')
 
+math_dep = cc.find_library('m', required : false)
+
 subdir('test-frameworks')
 subdir('utilities')
 subdir('compositor')

@@ -15,6 +15,7 @@ executable('breezy', './src/main.c',
         dependency('libinput'),
         dependency('xkbcommon'),
         dependency('wayland-server'),
+        math_dep,
         bz_main_dep,
         bz_utils_dep,
     ]

@@ -80,8 +80,8 @@ struct bz_application_window *bz_create_app_window(struct bz_client_globals *glo
 	// Visual / application state
 	window->bg_color = bz_random_color();
 	window->fg_color = bz_random_color();
-	window->circle_speed_x = randInt(2, 20) * 0.1f;
-	window->circle_speed_y = randInt(2, 20) * 0.1f;
+	window->circle_speed_x = bz_rand_int(2, 20) * 0.1f;
+	window->circle_speed_y = bz_rand_int(2, 20) * 0.1f;
 	// Wayland state
 	window->wlsurface = wl_compositor_create_surface(globals->compositor);
 	window->xdgsurface = bz_xdg_surface_constructor(globals, window->wlsurface);

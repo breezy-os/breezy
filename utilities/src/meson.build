@@ -6,6 +6,7 @@ bz_utils_lib = static_library(
         'bz_list.c',
         'bz_math.c',
     ],
-    include_directories: utilities_inc)
+    include_directories: utilities_inc,
+)
 
 bz_utils_dep = declare_dependency(link_with: bz_utils_lib, include_directories: utilities_inc)
