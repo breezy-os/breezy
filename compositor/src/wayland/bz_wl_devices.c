@@ -22,7 +22,7 @@
 
 // -- wl_seat --
 
-static const struct wl_seat_interface bz_seat_implementation;
+const struct wl_seat_interface bz_seat_implementation;
 static void bz_seat_get_pointer(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_seat_get_keyboard(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_seat_get_touch(struct wl_client *client, struct wl_resource *resource, uint32_t id);
@@ -121,7 +121,7 @@ void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version,
 		bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Failed to construct a new Wayland seat.");
 }
 
-static const struct wl_seat_interface bz_seat_implementation = {
+const struct wl_seat_interface bz_seat_implementation = {
 	.get_pointer = bz_seat_get_pointer,
 	.get_keyboard = bz_seat_get_keyboard,
 	.get_touch = bz_seat_get_touch,

@@ -88,17 +88,28 @@ static bool bz_input_device_fd_matches(void *fd, void *device)
 
 static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status)
 {
+	// Update our plugged in keyboard/pointer counts
+	int keyboard_delta = 0;
+	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_KEYBOARD)) {
+		breezy->input.keyboard_count += new_plugged_status ? 1 : -1;
+	}
+	int pointer_delta = 0;
+	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_POINTER)) {
+		breezy->input.pointer_count += new_plugged_status ? 1 : -1;
+	}
+
+	bz_input_change_device_counts(breezy, keyboard_delta, pointer_delta);
+}
+
+void bz_input_change_device_counts(struct bz_breezy *breezy, int keyboard_delta, int pointer_delta)
+{
 	// Record our initial capabilities so we know if they've changed.
 	bool had_keyboard = breezy->input.keyboard_count > 0;
 	bool had_pointer  = breezy->input.pointer_count  > 0;
 
-	// Update our plugged in keyboard/pointer counts
-	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_KEYBOARD)) {
-		breezy->input.keyboard_count += new_plugged_status ? 1 : -1;
-	}
-	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_POINTER)) {
-		breezy->input.pointer_count += new_plugged_status ? 1 : -1;
-	}
+	// Update our counts
+	breezy->input.keyboard_count += keyboard_delta;
+	breezy->input.pointer_count  += pointer_delta;
 
 	// If the capabilities have changed, broadcast the new capabilities to each client.
 	bool has_keyboard = breezy->input.keyboard_count > 0;
@@ -123,8 +134,7 @@ static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libi
 	if (has_pointer)  { breezy->input.ever_had_pointer  = true; }
 
 	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__,
-		"Device %s. New counts: [keyboards: %d], [pointers: %d]",
-		new_plugged_status ? "plugged in" : "unplugged",
+		"Device hotplugged. New counts: [keyboards: %d], [pointers: %d]",
 		breezy->input.keyboard_count,
 		breezy->input.pointer_count);
 }

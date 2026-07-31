@@ -28,6 +28,7 @@ foreach t : [
     # Wayland interfaces
     'bz_wl_compositor',
     'bz_wl_surface',
+    'bz_wl_seat',
     'bz_xdg_wm_base',
     'bz_xdg_surface',
 ]
