@@ -358,6 +358,33 @@ void test_seat_get_keyboard__creates_new_keyboard(void)
 	bz_free_client_data(client_data);
 }
 
+/** Keymap and repeat info should be sent when the keyboard is created. */
+void test_seat_get_keyboard__sends_keymap_and_repeat_info(void)
+{
+	// Set up our mocks
+	struct bz_client *client_data = bz_create_client_data();
+	client_data->breezy->input.ever_had_keyboard = true;
+	wl_client_get_user_data_fake.return_val = client_data;
+	struct wl_resource *keyboard_res = calloc(1, sizeof(*keyboard_res));
+	wl_resource_create_fake.return_val = keyboard_res;
+	// Since our code frees keymap, we can't use a stack-allocated string constant...
+	char *keymap = calloc(strlen("keymap") + 1, sizeof(char));
+	strcpy(keymap, "keymap");
+	xkb_keymap_get_as_string_fake.return_val = keymap;
+
+	// Run our test
+	bz_seat_implementation.get_keyboard(nullptr, nullptr, 0);
+
+	// Make our assertions
+	TEST_ASSERT_EQUAL_INT(2, wl_resource_post_event_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(WL_KEYBOARD_KEYMAP, wl_resource_post_event_fake.arg1_history[0]);
+	TEST_ASSERT_EQUAL_INT(WL_KEYBOARD_REPEAT_INFO, wl_resource_post_event_fake.arg1_history[1]);
+
+	// Clean up
+	free(keyboard_res);
+	bz_free_client_data(client_data);
+}
+
 /**
  * It is a protocol violation (`missing_capability`) to issue this request on a seat that has never
  * had this capability.
@@ -495,6 +522,7 @@ int main(void) {
 
 	// Test bz_seat_get_keyboard()
 	RUN_TEST(test_seat_get_keyboard__creates_new_keyboard);
+	RUN_TEST(test_seat_get_keyboard__sends_keymap_and_repeat_info);
 	RUN_TEST(test_seat_get_keyboard__posts_missing_capability);
 	RUN_TEST(test_seat_get_keyboard__succeeds_if_ever_had_capability);
 
