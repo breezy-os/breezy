@@ -461,11 +461,11 @@ static void bz_apply_damage(struct bz_surface *bzsurf)
 	glTexImage2D(
 		GL_TEXTURE_2D,
 		0,                // mipmap level
-		GL_RGBA,          // format
+		GL_BGRA_EXT,      // format
 		width,
 		height,
 		0,                // border
-		GL_RGBA,          // format
+		GL_BGRA_EXT,      // format
 		GL_UNSIGNED_BYTE, // type
 		data              // pointer to new data
 	);

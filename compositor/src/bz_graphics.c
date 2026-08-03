@@ -50,6 +50,7 @@ static int bz_drm_atomic_commit_recurring(struct bz_breezy *breezy, uint32_t fb_
 // Init
 static int bz_gles_init(struct bz_breezy *breezy);
 static int bz_gles_load_egl_extensions(void);
+static int bz_gles_load_gles_extensions(void);
 static void bz_gles_create_unit_quad(struct bz_breezy *breezy);
 // Helpers
 static int bz_gles_assert_extension(const char *extensionList, const char *extensionName);
@@ -643,7 +644,7 @@ void bz_graphics_change_color(struct bz_breezy *breezy, float amount) {
 static int bz_gles_load_egl_extensions(void)
 {
 	const char *extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Extensions: %s", extensions);
+	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "EGL Extensions: %s", extensions);
 
 	// Make sure the necessary extension(s) exist
 	int failure = 0;
@@ -651,6 +652,28 @@ static int bz_gles_load_egl_extensions(void)
 	if (failure) return -1;
 
 	return 0;
+}
+
+/**
+ * Verifies all necessary GLES extensions are installed and available. Returns 0 on success, or a
+ * negative value on failure.
+ */
+static int bz_gles_load_gles_extensions(void)
+{
+	GLint num_ext = 0;
+	glGetIntegerv(GL_NUM_EXTENSIONS, &num_ext);
+	for (uint32_t i = 0; i < num_ext; i++) {
+		const GLubyte *extension = glGetStringi(GL_EXTENSIONS, i);
+		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GLES Extension: %s", extension);
+		// We only care about this one extension for now, so to keep this logic simple, just return
+		//   when it's found.
+		if (strstr((const char *)extension, "GL_EXT_texture_format_BGRA8888")) {
+			return 0;
+		}
+	}
+
+	// If we didn't return from the above loop, then we must be missing the extension we need.
+	return -1;
 }
 
 static void bz_gles_create_unit_quad(struct bz_breezy *breezy)
@@ -776,6 +799,8 @@ static void bz_gles_render_and_commit(void *data) {
 		}
 	}
 
+	// TODO-dl11: render the cursor
+
 	// Buffer switcheroo
 	eglSwapBuffers(breezy->gl.display, breezy->gl.surface);
 	struct gbm_bo *bo = gbm_surface_lock_front_buffer(breezy->gbm.surface);
@@ -896,6 +921,13 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
 		return -5;
 	}
 	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized EGL/GLES.");
+
+	retval = bz_gles_load_gles_extensions();
+	if (retval != 0) {
+		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
+			"Failed to load GLES extensions. Code: %d", retval);
+		return -6;
+	}
 
 	bz_info(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized our graphics system.");
 	return 0;
