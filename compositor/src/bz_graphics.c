@@ -52,6 +52,7 @@ static int bz_gles_init(struct bz_breezy *breezy);
 static int bz_gles_load_egl_extensions(void);
 static int bz_gles_load_gles_extensions(void);
 static void bz_gles_create_unit_quad(struct bz_breezy *breezy);
+static void bz_gles_init_client_cursor(struct bz_breezy *breezy);
 // Helpers
 static int bz_gles_assert_extension(const char *extensionList, const char *extensionName);
 static char *bz_get_egl_error_text(EGLint error);
@@ -611,6 +612,7 @@ static int bz_gles_init(struct bz_breezy *breezy)
 	// Define some GLES configs
 	glClearColor(0.16f, 0.164f, 0.196f, 1.0f);
 	bz_gles_create_unit_quad(breezy);
+	bz_gles_init_client_cursor(breezy);
 
 	// Create our "client shader program" for drawing connected clients
 	GLuint program = bz_gles_create_client_shader_program();
@@ -690,6 +692,38 @@ static void bz_gles_create_unit_quad(struct bz_breezy *breezy)
 	glGenBuffers(1, &breezy->gl.vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+}
+
+static void bz_gles_init_client_cursor(struct bz_breezy *breezy)
+{
+	uint32_t pixels[BZ_CURSOR_W * BZ_CURSOR_H];
+	for (uint32_t row = 0; row < BZ_CURSOR_H; row++) {
+		for (uint32_t col = 0; col < BZ_CURSOR_W; col++) {
+			pixels[row*BZ_CURSOR_W + col] = 0xffff0000; // red
+		}
+	}
+	breezy->gl.cursor.position.x = 20;
+	breezy->gl.cursor.position.y = 20;
+	breezy->gl.cursor.hotspot.x = BZ_CURSOR_W / 2;
+	breezy->gl.cursor.hotspot.y = BZ_CURSOR_H / 2;
+
+	glGenTextures(1, &breezy->gl.cursor.texture);
+	glBindTexture(GL_TEXTURE_2D, breezy->gl.cursor.texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(
+		GL_TEXTURE_2D,
+		0,
+		GL_BGRA_EXT,
+		BZ_CURSOR_W,
+		BZ_CURSOR_H,
+		0,
+		GL_BGRA_EXT,
+		GL_UNSIGNED_BYTE,
+		pixels
+	);
 }
 
 /**
@@ -799,7 +833,40 @@ static void bz_gles_render_and_commit(void *data) {
 		}
 	}
 
-	// TODO-dl11: render the cursor
+	// Render the cursor
+	struct bz_cursor_img cursor = breezy->gl.cursor;
+	if (cursor.texture != 0) {
+		// Load our program
+		GLuint client_program = breezy->gl.client_shader_program;
+		glUseProgram(client_program);
+		// ...our projection matrix
+		GLint outputProj = glGetUniformLocation(client_program, "u_outputProj");
+		glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.output_projection);
+		// ...and our unit quad vbo
+		glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+
+		// Load our surface projection matrix
+		bz_mat3 projection = {0};
+		bz_fill_projection_matrix(projection,
+			0, 0, 1, 1,
+			cursor.position.x, cursor.position.y, BZ_CURSOR_W, BZ_CURSOR_H
+		);
+		GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+
+		// Prep the texture
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, cursor.texture);
+		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+		// Render!
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	}
 
 	// Buffer switcheroo
 	eglSwapBuffers(breezy->gl.display, breezy->gl.surface);

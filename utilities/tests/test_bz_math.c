@@ -60,11 +60,14 @@ void test_rand_int__stays_in_correct_range(void)
 void test_clamp__small_number_is_increased(void)
 {
 	TEST_ASSERT_EQUAL_INT(2, bz_clamp(1, 2, 5));
+	TEST_ASSERT_EQUAL_INT(2, bz_clamp(-3, 2, 5));
+	TEST_ASSERT_EQUAL_INT(-5, bz_clamp(-8, -5, -2));
 }
 
 void test_clamp__big_number_is_reduced(void)
 {
 	TEST_ASSERT_EQUAL_INT(5, bz_clamp(8, 2, 5));
+	TEST_ASSERT_EQUAL_INT(-5, bz_clamp(-1, -8, -5));
 }
 
 void test_clamp__valid_number_is_unchanged(void)
@@ -72,6 +75,7 @@ void test_clamp__valid_number_is_unchanged(void)
 	TEST_ASSERT_EQUAL_INT(2, bz_clamp(2, 2, 5));
 	TEST_ASSERT_EQUAL_INT(3, bz_clamp(3, 2, 5));
 	TEST_ASSERT_EQUAL_INT(5, bz_clamp(5, 2, 5));
+	TEST_ASSERT_EQUAL_INT(-5, bz_clamp(-5, -8, -2));
 }
 
 

@@ -32,6 +32,7 @@ static int bz_input_open_restricted(const char *path, int flags, void *data);
 static void bz_input_close_restricted(int fd, void *data);
 static bool bz_input_device_fd_matches(void *fd, void *device);
 static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status);
+static void bz_input_process_pointer_motion_event(struct bz_breezy *breezy, struct libinput_event_pointer *pt_event);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
@@ -139,8 +140,25 @@ void bz_input_change_device_counts(struct bz_breezy *breezy, int keyboard_delta,
 		breezy->input.pointer_count);
 }
 
-static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event)
-{
+static void bz_input_process_pointer_motion_event(
+	struct bz_breezy *breezy,
+	struct libinput_event_pointer *pt_event
+) {
+	int32_t start_x = breezy->gl.cursor.position.x + breezy->gl.cursor.hotspot.x;
+	int32_t start_y = breezy->gl.cursor.position.y + breezy->gl.cursor.hotspot.y;
+	double delta_x = libinput_event_pointer_get_dx_unaccelerated(pt_event);
+	double delta_y = libinput_event_pointer_get_dy_unaccelerated(pt_event);
+
+	breezy->gl.cursor.position.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay) - breezy->gl.cursor.hotspot.x;
+	breezy->gl.cursor.position.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay) - breezy->gl.cursor.hotspot.y;
+
+	bz_graphics_schedule_render(breezy);
+}
+
+static void bz_input_process_kb_event(
+	struct bz_breezy *breezy,
+	struct libinput_event_keyboard *kb_event
+) {
 	// Parse the libinput event
 	enum libinput_key_state keystate = libinput_event_keyboard_get_key_state(kb_event);
 	const uint32_t keycode = libinput_event_keyboard_get_key(kb_event);
@@ -411,7 +429,9 @@ int bz_input_process_events(int /*fd*/, uint32_t /*mask*/, void *data)
 
 	struct libinput_event *event;
 	while ((event = libinput_get_event(breezy->input.libinput)) != nullptr) {
-		if (libinput_event_get_type(event) == LIBINPUT_EVENT_KEYBOARD_KEY) {
+		if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_MOTION) {
+			bz_input_process_pointer_motion_event(breezy, libinput_event_get_pointer_event(event));
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_KEYBOARD_KEY) {
 			bz_input_process_kb_event(breezy, libinput_event_get_keyboard_event(event));
 		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_DEVICE_ADDED) {
 			bz_input_process_hotplug_event(breezy, libinput_event_get_device(event), 1);
