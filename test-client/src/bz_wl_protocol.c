@@ -445,6 +445,7 @@ static void bz_pointer_enter(
 ) {
 	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.enter not implemented");
 	// TODO
+	// TODO-dl11: Clients should call "set_cursor()" in response to this enter event.
 }
 
 static void bz_pointer_leave(

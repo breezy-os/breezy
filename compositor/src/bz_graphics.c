@@ -702,8 +702,6 @@ static void bz_gles_init_client_cursor(struct bz_breezy *breezy)
 			pixels[row*BZ_CURSOR_W + col] = 0xffff0000; // red
 		}
 	}
-	breezy->gl.cursor.position.x = 20;
-	breezy->gl.cursor.position.y = 20;
 	breezy->gl.cursor.hotspot.x = BZ_CURSOR_W / 2;
 	breezy->gl.cursor.hotspot.y = BZ_CURSOR_H / 2;
 

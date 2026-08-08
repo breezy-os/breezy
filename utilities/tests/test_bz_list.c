@@ -85,6 +85,9 @@ void test_list_append_adds_to_end(void)
 	// Last item is "two"
 	TEST_ASSERT_NOT_NULL(list->tail);
 	TEST_ASSERT_EQUAL_PTR(list->tail->data, two);
+	// They point to each other
+	TEST_ASSERT_EQUAL_PTR(list->head->next->data, two);
+	TEST_ASSERT_EQUAL_PTR(list->tail->prev->data, one);
 
 	bz_list_free(list, nullptr);
 }
@@ -117,6 +120,9 @@ void test_list_insert_adds_to_beginning_with_nullptr(void)
 	// Second item is "one"
 	TEST_ASSERT_NOT_NULL(list->tail);
 	TEST_ASSERT_EQUAL_PTR(list->tail->data, one);
+	// They point to each other
+	TEST_ASSERT_EQUAL_PTR(list->head->next->data, one);
+	TEST_ASSERT_EQUAL_PTR(list->tail->prev->data, two);
 
 	bz_list_free(list, nullptr);
 }
@@ -141,6 +147,9 @@ void test_list_insert_adds_after_given_data(void)
 	// Last item is "two"
 	TEST_ASSERT_NOT_NULL(list->tail);
 	TEST_ASSERT_EQUAL_PTR(list->tail->data, two);
+	// They point to each other
+	TEST_ASSERT_EQUAL_PTR(list->head->next->data, two);
+	TEST_ASSERT_EQUAL_PTR(list->tail->prev->data, one);
 
 	bz_list_free(list, nullptr);
 }
@@ -164,6 +173,8 @@ void test_list_insert_fails_when_not_found(void)
 	TEST_ASSERT_EQUAL_PTR(list->head->data, one);
 	TEST_ASSERT_NOT_NULL(list->tail);
 	TEST_ASSERT_EQUAL_PTR(list->tail->data, one);
+	TEST_ASSERT_NULL(list->head->next);
+	TEST_ASSERT_NULL(list->head->prev);
 
 	// The returned error code indicates "could not find data"
 	TEST_ASSERT_EQUAL_INT(-2, actual);
@@ -203,6 +214,8 @@ void test_list_replace_fails_when_not_found(void)
 	TEST_ASSERT_EQUAL_PTR(list->head->data, one);
 	TEST_ASSERT_NOT_NULL(list->tail);
 	TEST_ASSERT_EQUAL_PTR(list->tail->data, one);
+	TEST_ASSERT_NULL(list->head->next);
+	TEST_ASSERT_NULL(list->head->prev);
 
 	bz_list_free(list, nullptr);
 }
@@ -217,18 +230,21 @@ void test_list_replace_replaces_item(void)
 	bz_list_append(list, one);
 	bz_list_append(list, too);
 
-	// Try to replace a non-existent list item
+	// Try to replace an existing list item
 	const int actual = bz_list_replace(list, too, two, nullptr);
 
-	// Make sure we got the correct error code
+	// Make sure we got the correct response code
 	TEST_ASSERT_EQUAL_INT(0, actual);
-	// Make sure the rest of our list is unchanged
+	// Make sure our list was properly updated
 	TEST_ASSERT_NOT_NULL(list);
 	TEST_ASSERT_EQUAL_INT(2, list->length);
 	TEST_ASSERT_NOT_NULL(list->head);
 	TEST_ASSERT_EQUAL_PTR(list->head->data, one);
 	TEST_ASSERT_NOT_NULL(list->tail);
 	TEST_ASSERT_EQUAL_PTR(list->tail->data, two);
+	// ...and that our nodes properly point to each other
+	TEST_ASSERT_EQUAL_PTR(list->head->next->data, two);
+	TEST_ASSERT_EQUAL_PTR(list->tail->prev->data, one);
 
 	bz_list_free(list, nullptr);
 }
@@ -246,18 +262,21 @@ void test_list_replace_frees_replaced_item(void)
 	bz_list_append(list, one);
 	bz_list_append(list, too);
 
-	// Try to replace a non-existent list item
+	// Try to replace an existing list item
 	const int actual = bz_list_replace(list, too, two, free);
 
-	// Make sure we got the correct error code
+	// Make sure we got the correct response code
 	TEST_ASSERT_EQUAL_INT(0, actual);
-	// Make sure the rest of our list is unchanged
+	// Make sure our list was properly updated
 	TEST_ASSERT_NOT_NULL(list);
 	TEST_ASSERT_EQUAL_INT(2, list->length);
 	TEST_ASSERT_NOT_NULL(list->head);
 	TEST_ASSERT_EQUAL_PTR(list->head->data, one);
 	TEST_ASSERT_NOT_NULL(list->tail);
 	TEST_ASSERT_EQUAL_PTR(list->tail->data, two);
+	// ...and that our nodes properly point to each other
+	TEST_ASSERT_EQUAL_PTR(list->head->next->data, two);
+	TEST_ASSERT_EQUAL_PTR(list->tail->prev->data, one);
 
 	// Cleanup
 	bz_list_free(list, nullptr);
@@ -313,6 +332,8 @@ void test_list_remove_with_valid_data(void)
 	// We should only remove one item per call, even if multiple would match.
 	TEST_ASSERT_EQUAL_INT(2, list->length);
 	TEST_ASSERT_EQUAL_INT(1, bz_list_remove(list, one, nullptr));
+	TEST_ASSERT_NULL(list->head->next);
+	TEST_ASSERT_NULL(list->head->prev);
 	TEST_ASSERT_EQUAL_INT(1, list->length);
 	TEST_ASSERT_EQUAL_INT(1, bz_list_remove(list, one, nullptr));
 	TEST_ASSERT_EQUAL_INT(0, list->length);
@@ -376,6 +397,9 @@ void test_list_filter_removes_proper_items(void)
 	TEST_ASSERT_EQUAL_INT(2, list->length);
 	TEST_ASSERT_EQUAL_PTR(one, list->head->data);
 	TEST_ASSERT_EQUAL_PTR(two, list->tail->data);
+	// Our remaining nodes should properly point to each other
+	TEST_ASSERT_EQUAL_PTR(list->head->next, list->tail);
+	TEST_ASSERT_EQUAL_PTR(list->tail->prev, list->head);
 
 	// Run our filter again - nothing should be removed this time, and 0 should be returned.
 	const int zero_items_removed = bz_list_filter(list, threshold, is_less_than, nullptr);
@@ -383,6 +407,9 @@ void test_list_filter_removes_proper_items(void)
 	TEST_ASSERT_EQUAL_INT(2, list->length);
 	TEST_ASSERT_EQUAL_PTR(one, list->head->data);
 	TEST_ASSERT_EQUAL_PTR(two, list->tail->data);
+	// Our remaining nodes should properly point to each other
+	TEST_ASSERT_EQUAL_PTR(list->head->next, list->tail);
+	TEST_ASSERT_EQUAL_PTR(list->tail->prev, list->head);
 
 	// Cleanup
 	bz_list_free(list, nullptr);
@@ -584,6 +611,51 @@ void test_list_find_returns_first_matching_data(void)
 
 
 // =================================================================================================
+//  Test bz_list_contains()
+// -------------------------------------------------------------------------------------------------
+
+void test_list_contains__returns_false_for_uninitialized(void)
+{
+	int one = 1;
+	TEST_ASSERT_FALSE(bz_list_contains(nullptr, &one));
+}
+
+void test_list_contains__returns_false_for_not_found(void)
+{
+	// Create our test data
+	int one = 1;
+	int two = 2;
+	struct bz_list *list = bz_list_create();
+	bz_list_append(list, &one);
+	TEST_ASSERT_EQUAL_INT(1, list->length);
+
+	// Run our test
+	TEST_ASSERT_FALSE(bz_list_contains(list, &two));
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_contains__returns_true_for_found(void)
+{
+	// Create our test data
+	int one = 1;
+	int two = 2;
+	struct bz_list *list = bz_list_create();
+	bz_list_append(list, &one);
+	bz_list_append(list, &two);
+	TEST_ASSERT_EQUAL_INT(2, list->length);
+
+	// Run our tests
+	TEST_ASSERT_TRUE(bz_list_contains(list, &one));
+	TEST_ASSERT_TRUE(bz_list_contains(list, &two));
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+
+// =================================================================================================
 //  Test bz_list_get_neighbor()
 // -------------------------------------------------------------------------------------------------
 
@@ -760,10 +832,125 @@ void test_list_move_to_end__both_lists_populated(void)
 	TEST_ASSERT_EQUAL_INT(&dest_val_2, dest->head->next->data);
 	TEST_ASSERT_EQUAL_INT(&src_val_1,  dest->head->next->next->data);
 	TEST_ASSERT_EQUAL_INT(&src_val_2,  dest->head->next->next->next->data);
+	// Also check the "prev" pointer at the mesh point
+	TEST_ASSERT_EQUAL_PTR(&dest_val_2, dest->tail->prev->prev->data);
 
 	// Cleanup
 	bz_list_free(src, nullptr);
 	bz_list_free(dest, nullptr);
+}
+
+
+// =================================================================================================
+//  Test bz_list_move_item_to_end()
+// -------------------------------------------------------------------------------------------------
+
+void test_list_move_item_to_end__returns_neg1_when_uninitialized(void)
+{
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_item_to_end(nullptr, nullptr));
+}
+
+void test_list_move_item_to_end__returns_0_already_last(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+	int val4 = 4; bz_list_append(list, &val4);
+
+	// Run our test
+	int ret_val = bz_list_move_item_to_end(list, &val4);
+	TEST_ASSERT_EQUAL_INT(0, ret_val);
+	TEST_ASSERT_EQUAL_INT(4, list->length);
+	TEST_ASSERT_EQUAL_INT(&val4, list->tail->data);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_move_item_to_end__returns_1_when_moved_weird_case(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+
+	// Run our test
+	int ret_val = bz_list_move_item_to_end(list, &val1);
+	TEST_ASSERT_EQUAL_INT(1, ret_val);
+	TEST_ASSERT_EQUAL_INT(2, list->length);
+	TEST_ASSERT_EQUAL_INT(&val1, list->tail->data);
+	// Check our list order
+	TEST_ASSERT_EQUAL_INT(&val2, list->head->data);
+	TEST_ASSERT_EQUAL_INT(&val1, list->head->next->data);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_move_item_to_end__returns_1_when_moved(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+	int val4 = 4; bz_list_append(list, &val4);
+
+	// Run our test
+	int ret_val = bz_list_move_item_to_end(list, &val3);
+	TEST_ASSERT_EQUAL_INT(1, ret_val);
+	TEST_ASSERT_EQUAL_INT(4, list->length);
+	TEST_ASSERT_EQUAL_INT(&val3, list->tail->data);
+	// Check our list order
+	TEST_ASSERT_EQUAL_INT(&val1, list->head->data);
+	TEST_ASSERT_EQUAL_INT(&val2, list->head->next->data);
+	TEST_ASSERT_EQUAL_INT(&val4, list->head->next->next->data);
+	TEST_ASSERT_EQUAL_INT(&val3, list->head->next->next->next->data);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_move_item_to_end__returns_neg2_when_not_found(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+	int val4 = 4; bz_list_append(list, &val4);
+	int val5 = 5; // Not in the list
+
+	// Run our test
+	int ret_val = bz_list_move_item_to_end(list, &val5);
+	TEST_ASSERT_EQUAL_INT(-2, ret_val);
+	TEST_ASSERT_EQUAL_INT(4, list->length);
+	TEST_ASSERT_EQUAL_INT(&val4, list->tail->data);
+	// Check our list order
+	TEST_ASSERT_EQUAL_INT(&val1, list->head->data);
+	TEST_ASSERT_EQUAL_INT(&val2, list->head->next->data);
+	TEST_ASSERT_EQUAL_INT(&val3, list->head->next->next->data);
+	TEST_ASSERT_EQUAL_INT(&val4, list->head->next->next->next->data);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_move_item_to_end__returns_neg2_when_list_empty(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val = 1;
+
+	// Run our test
+	int ret_val = bz_list_move_item_to_end(list, &val);
+	TEST_ASSERT_EQUAL_INT(-2, ret_val);
+	TEST_ASSERT_EQUAL_INT(0, list->length);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
 }
 
 
@@ -877,6 +1064,11 @@ int main(void) {
 	RUN_TEST(test_list_find_returns_null_for_not_found);
 	RUN_TEST(test_list_find_returns_first_matching_data);
 
+	// Test bz_list_contains()
+	RUN_TEST(test_list_contains__returns_false_for_uninitialized);
+	RUN_TEST(test_list_contains__returns_false_for_not_found);
+	RUN_TEST(test_list_contains__returns_true_for_found);
+
 	// Test bz_list_get_neighbor()
 	RUN_TEST(test_list_get_neighbor_returns_null_for_uninitialized);
 	RUN_TEST(test_list_get_neighbor_returns_null_for_not_found);
@@ -889,6 +1081,14 @@ int main(void) {
 	RUN_TEST(test_list_move_to_end__empty_src_list);
 	RUN_TEST(test_list_move_to_end__empty_dest_list);
 	RUN_TEST(test_list_move_to_end__both_lists_populated);
+
+	// Test bz_list_move_item_to_end()
+	RUN_TEST(test_list_move_item_to_end__returns_neg1_when_uninitialized);
+	RUN_TEST(test_list_move_item_to_end__returns_0_already_last);
+	RUN_TEST(test_list_move_item_to_end__returns_1_when_moved_weird_case);
+	RUN_TEST(test_list_move_item_to_end__returns_1_when_moved);
+	RUN_TEST(test_list_move_item_to_end__returns_neg2_when_not_found);
+	RUN_TEST(test_list_move_item_to_end__returns_neg2_when_list_empty);
 
 	// Test bz_list_clone()
 	RUN_TEST(test_list_clone_returns_null_for_uninitialized);

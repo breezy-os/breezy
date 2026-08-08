@@ -19,6 +19,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_window_management.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_xdg_shell.h"
@@ -152,6 +153,7 @@ static void bz_input_process_pointer_motion_event(
 	breezy->gl.cursor.position.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay) - breezy->gl.cursor.hotspot.x;
 	breezy->gl.cursor.position.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay) - breezy->gl.cursor.hotspot.y;
 
+	bz_mgmt_update_pointer_position(&breezy->window_mgmt, &breezy->gl.cursor);
 	bz_graphics_schedule_render(breezy);
 }
 

@@ -4,26 +4,22 @@
 
 #include <xkbcommon/xkbcommon.h>
 
-#include "breezy/bz_list.h"
 #include "breezy/bz_wl_display.h"
-
-struct bz_window_mgmt {
-	/**
-	 * These are keyboard-focusable surfaces, and include xdg_toplevel, xdg_popup, and
-	 * sometimes wlr_layer_surfaces
-	 */
-	struct bz_list *activable_surfaces; // Each item is of type "struct bz_surface *"
-};
+#include "breezy/bz_breezy.h"
 
 // -- Initialization / Teardown --
 int bz_mgmt_initialize(struct bz_window_mgmt *mgmt);
 void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt);
 
 // -- Window Lifecycle --
-int bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface);
+void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface);
 int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt);
+void bz_mgmt_notify_kb_enter(struct wl_display *display, struct xkb_state *xkbstate, struct wl_resource *keyboard, struct wl_resource *surface);
+void bz_mgmt_notify_ptr_enter(struct wl_display *display, struct bz_position *cursor_position, struct wl_resource *pointer, struct wl_resource *surface);
+
+// -- Window Focus --
 struct bz_surface *bz_mgmt_get_active_surface(struct bz_window_mgmt *mgmt);
-void bz_mgmt_notify_enter(struct xkb_state *xkbstate, struct wl_resource *keyboard, struct wl_resource *surface);
+struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_cursor_img *cursor);
 
 // #################################################################################################
 #endif

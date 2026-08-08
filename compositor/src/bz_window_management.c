@@ -10,6 +10,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_xdg_shell.h"
+#include "breezy/bz_breezy.h"
 
 
 // =================================================================================================
@@ -17,6 +18,9 @@
 // -------------------------------------------------------------------------------------------------
 
 static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, void *resource);
+
+static void bz_mgmt_change_keyboard_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
+static void bz_mgmt_change_pointer_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
 
 
 // =================================================================================================
@@ -41,54 +45,38 @@ void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt)
 //  Window Lifecycle
 // -------------------------------------------------------------------------------------------------
 
-int bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface)
+void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface)
 {
-	struct wl_client *client = wl_resource_get_client(surface->resource);
-	struct bz_client *client_data = wl_client_get_user_data(client);
-
-	// Remove it when the surface is destroyed.
+	// Make sure it's a supported surface role
 	struct wl_resource *res = nullptr;
 	if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
 		res = surface->xdgtoplevel->resource;
 	} else {
-		bz_error(BZ_LOG_WINDOW_MGMT, __FILE__, __LINE__,
+		bz_warn(BZ_LOG_WINDOW_MGMT, __FILE__, __LINE__,
 			"Unsupported surface role in window manager: %d", surface->role);
-		return -1;
+		return;
 	}
+
+	// Make sure it wasn't already mapped / is being displayed.
+	if (bz_list_contains(mgmt->activable_surfaces, surface)) {
+		return;
+	}
+
+	// Remove it when the surface is destroyed.
 	surface->disable_on_destroy.notify = bz_mgmt_untrack_surface_on_destroy;
 	wl_resource_add_destroy_listener(res, &surface->disable_on_destroy);
 
-	// Add it to our list of activable surfaces
-	struct bz_surface *last_focus = mgmt->activable_surfaces->length > 0
-		? mgmt->activable_surfaces->tail->data
-		: nullptr;
-	const int append_status = bz_list_append(mgmt->activable_surfaces, surface);
-	if (append_status == -2) {
-		wl_client_post_no_memory(client);
-	}
+	// Focus the new window
+	struct bz_surface *orig_surf = bz_mgmt_get_active_surface(mgmt);
+	bz_mgmt_change_keyboard_focus(mgmt, orig_surf, surface);
 
-	// Send our "leave" event for our previously active surface
-	if (last_focus != nullptr) {
-		struct wl_client *last_client = wl_resource_get_client(last_focus->resource);
-		struct bz_client *last_client_data = wl_client_get_user_data(last_client);
-		struct bz_node *node = last_client_data->seat->keyboards->head;
-		while (node != nullptr) {
-			struct wl_resource *keyboard = node->data;
-			uint32_t serial = wl_display_next_serial(wl_client_get_display(last_client));
-			wl_keyboard_send_leave(keyboard, serial, last_focus->resource);
-			node = node->next;
-		}
-	}
-
-	// Send our "enter" event for our new active surface
-	struct bz_node *node = client_data->seat->keyboards->head;
-	while (node != nullptr) {
-		struct wl_resource *keyboard = node->data;
-		bz_mgmt_notify_enter(client_data->breezy->input.xkb_state, keyboard, surface->resource);
-		node = node->next;
-	}
-
-	return append_status;
+	// Also update our pointer's position to be in the window (which also adjusts its focus)
+	struct wl_client *client = wl_resource_get_client(surface->resource);
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_cursor_img *cursor = &client_data->breezy->gl.cursor;
+	cursor->position.x = surface->position.x;
+	cursor->position.y = surface->position.y;
+	bz_mgmt_update_pointer_position(mgmt, cursor);
 }
 
 int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt)
@@ -120,40 +108,45 @@ static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, voi
 	struct bz_breezy *breezy = client_data->breezy;
 
 	// Remove the bz_surface from our globally-tracked list of activable surfaces
-	bool last_item = breezy->window_mgmt.activable_surfaces->tail->data == surface_data;
+	bool was_last_item = breezy->window_mgmt.activable_surfaces->tail->data == surface_data;
 	bz_list_remove(breezy->window_mgmt.activable_surfaces, surface_data, nullptr);
+	breezy->window_mgmt.pointer_focus = nullptr;
 
-	// Send our "enter" event for our new active surface
-	if (last_item && breezy->window_mgmt.activable_surfaces->length > 0) {
+	// If we removed the surface that had keyboard focus, then look for a new surface to focus.
+	if (was_last_item && breezy->window_mgmt.activable_surfaces->length > 0) {
+		// First, try the window where our mouse cursor is (if applicable)
+		struct bz_surface *new_focus = bz_mgmt_update_pointer_position(
+			&breezy->window_mgmt,
+			&breezy->gl.cursor
+		);
+		if (new_focus != nullptr) {
+			return; // Found a surface; early exit.
+		}
+
+		// If that fails, then let's just grab the last window in our list. No need to set pointer
+		//   focus because we don't want to move the user's mouse on them in this situation.
 		struct bz_surface *new_surf_data = breezy->window_mgmt.activable_surfaces->tail->data;
 		struct wl_client *new_client = wl_resource_get_client(new_surf_data->resource);
 		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
+		struct wl_display *display = new_client_data->breezy->wayland.display;
+		struct xkb_state *xkbstate = new_client_data->breezy->input.xkb_state;
 		struct bz_node *node = new_client_data->seat->keyboards->head;
 		while (node != nullptr) {
 			struct wl_resource *keyboard = node->data;
-			bz_mgmt_notify_enter(breezy->input.xkb_state, keyboard, new_surf_data->resource);
+			bz_mgmt_notify_kb_enter(display, xkbstate, keyboard, new_surf_data->resource);
 			node = node->next;
 		}
 	}
 }
 
-struct bz_surface *bz_mgmt_get_active_surface(struct bz_window_mgmt *mgmt)
-{
-	return mgmt->activable_surfaces->length > 0
-		? mgmt->activable_surfaces->tail->data
-		: nullptr;
-}
-
-void bz_mgmt_notify_enter(
+void bz_mgmt_notify_kb_enter(
+	struct wl_display *display,
 	struct xkb_state *xkbstate,
 	struct wl_resource *keyboard,
 	struct wl_resource *surface
 ) {
-	struct wl_client *client = wl_resource_get_client(keyboard);
-	struct wl_display *display = wl_client_get_display(client);
-
 	struct wl_array keys;
-	wl_array_init(&keys);
+	wl_array_init(&keys); // TODO-dl11: Populate this properly
 	wl_keyboard_send_enter(keyboard, wl_display_next_serial(display), surface, &keys);
 	wl_keyboard_send_modifiers(
 		keyboard,
@@ -164,4 +157,161 @@ void bz_mgmt_notify_enter(
 		xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
 	);
 	wl_array_release(&keys);
+}
+
+void bz_mgmt_notify_ptr_enter(
+	struct wl_display *display,
+	struct bz_position *cursor_position,
+	struct wl_resource *pointer,
+	struct wl_resource *surface
+) {
+	uint32_t serial = wl_display_next_serial(display);
+	wl_pointer_send_enter(pointer, serial, surface, cursor_position->x, cursor_position->y);
+	wl_pointer_send_frame(pointer);
+}
+
+
+// =================================================================================================
+//  Window Focus
+// -------------------------------------------------------------------------------------------------
+
+struct bz_surface *bz_mgmt_get_active_surface(struct bz_window_mgmt *mgmt)
+{
+	return mgmt->activable_surfaces->length > 0
+		? mgmt->activable_surfaces->tail->data
+		: nullptr;
+}
+
+static void bz_mgmt_change_keyboard_focus(
+	struct bz_window_mgmt *mgmt,
+	struct bz_surface *orig_surface,
+	struct bz_surface *new_surface
+) {
+	bz_info(BZ_LOG_WINDOW_MGMT, __FILE__, __LINE__,
+		"Keyboard focus changing: %p to %p", orig_surface, new_surface);
+
+	if (new_surface == nullptr) {
+		bz_error(BZ_LOG_WINDOW_MGMT, __FILE__, __LINE__,
+			"New surface must be defined when changing keyboard focus.");
+		return;
+	}
+
+	// Move the new surface to the end of our active surface list
+	const int move_result = bz_list_move_item_to_end(mgmt->activable_surfaces, new_surface);
+	if (move_result == -2) {
+		// Surface wasn't in the list -- must've just been created. Append it to the list.
+		const int append_status = bz_list_append(mgmt->activable_surfaces, new_surface);
+		if (append_status < 0) {
+			bz_error(BZ_LOG_WINDOW_MGMT, __FILE__, __LINE__,
+				"Failed appending the surface to our surface list. %d", append_status);
+			return;
+		}
+	} else if (move_result < 0) {
+		bz_error(BZ_LOG_WINDOW_MGMT, __FILE__, __LINE__,
+			"Failed moving the surface to the end of our surface list. %d", move_result);
+		return;
+	}
+
+	// Iterate over each keyboard resource of the original client, emitting "leave" events
+	if (orig_surface != nullptr) {
+		struct wl_client *orig_client = wl_resource_get_client(orig_surface->resource);
+		struct bz_client *orig_client_data = wl_client_get_user_data(orig_client);
+		struct wl_display *display = orig_client_data->breezy->wayland.display;
+		struct bz_node *curr_kb = orig_client_data->seat->keyboards->head;
+		while (curr_kb != nullptr) {
+			uint32_t serial = wl_display_next_serial(display);
+			wl_keyboard_send_leave(curr_kb->data, serial, orig_surface->resource);
+			curr_kb = curr_kb->next;
+		}
+	}
+
+	// Iterate over each keyboard resource of the new client, emitting "enter" events
+	struct wl_client *new_client = wl_resource_get_client(new_surface->resource);
+	struct bz_client *new_client_data = wl_client_get_user_data(new_client);
+	struct wl_display *display = new_client_data->breezy->wayland.display;
+	struct xkb_state *xkbstate = new_client_data->breezy->input.xkb_state;
+	struct bz_node *curr_kb = new_client_data->seat->keyboards->head;
+	while (curr_kb != nullptr) {
+		bz_mgmt_notify_kb_enter(display, xkbstate, curr_kb->data, new_surface->resource);
+		curr_kb = curr_kb->next;
+	}
+}
+
+static void bz_mgmt_change_pointer_focus(
+	struct bz_window_mgmt *mgmt,
+	struct bz_surface *orig_surface,
+	struct bz_surface *new_surface
+) {
+	bz_info(BZ_LOG_WINDOW_MGMT, __FILE__, __LINE__,
+		"Pointer focus changing: %p to %p", orig_surface, new_surface);
+
+	// Iterate over each pointer resource of the original client, emitting "leave" events
+	if (orig_surface != nullptr) {
+		struct wl_client *orig_client = wl_resource_get_client(orig_surface->resource);
+		struct bz_client *orig_client_data = wl_client_get_user_data(orig_client);
+		struct wl_display *display = orig_client_data->breezy->wayland.display;
+		struct bz_node *curr_ptr = orig_client_data->seat->pointers->head;
+		while (curr_ptr != nullptr) {
+			uint32_t serial = wl_display_next_serial(display);
+			wl_pointer_send_leave(curr_ptr->data, serial, orig_surface->resource);
+			wl_pointer_send_frame(curr_ptr->data);
+			curr_ptr = curr_ptr->next;
+		}
+	}
+
+	// Iterate over each pointer resource of the new client, emitting "enter" events
+	if (new_surface != nullptr) {
+		struct wl_client *new_client = wl_resource_get_client(new_surface->resource);
+		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
+		struct wl_display *display = new_client_data->breezy->wayland.display;
+		struct bz_position cursor_position = {
+			.x = mgmt->last_cursor_loc.x - new_surface->position.x,
+			.y = mgmt->last_cursor_loc.y - new_surface->position.y,
+		};
+		struct bz_node *curr_ptr = new_client_data->seat->pointers->head;
+		while (curr_ptr != nullptr) {
+			bz_mgmt_notify_ptr_enter(display, &cursor_position, curr_ptr->data, new_surface->resource);
+			curr_ptr = curr_ptr->next;
+		}
+	}
+
+	// Update our tracked pointer focus
+	mgmt->pointer_focus = new_surface;
+}
+
+struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_cursor_img *cursor)
+{
+	mgmt->last_cursor_loc.x = cursor->position.x + cursor->hotspot.x;
+	mgmt->last_cursor_loc.y = cursor->position.y + cursor->hotspot.y;
+
+	// Iterate over our list, BACKWARDS, until we overlap with a window (or run out of items)
+	struct bz_node *curr_window = mgmt->activable_surfaces->tail;
+	while (curr_window != nullptr) {
+		struct bz_surface *surf = curr_window->data;
+
+		// Check if cursor is overlapping
+		if (bz_contains_point(&surf->position, &surf->size, &mgmt->last_cursor_loc)) {
+			// If it doesn't already have pointer focus, send an enter event for pointers.
+			if (mgmt->pointer_focus != surf) {
+				bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, surf);
+			}
+
+			// If it doesn't have keyboard focus, send an enter event for keyboards.
+			struct bz_surface *original_focus = bz_mgmt_get_active_surface(mgmt);
+			if (original_focus != surf) {
+				bz_mgmt_change_keyboard_focus(mgmt, original_focus, surf);
+			}
+
+			return surf;
+		}
+
+		// Prep for the next iteration
+		curr_window = curr_window->prev;
+	}
+
+	// If we made it here, then our cursor is not overlapping ANY window. Let's clear its focus.
+	if (mgmt->pointer_focus != nullptr) {
+		bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, nullptr);
+	}
+	return nullptr;
 }

@@ -42,6 +42,7 @@ int bz_list_append(struct bz_list *list, void *data)
 	}
 	new_node->data = data;
 	new_node->next = nullptr;
+	new_node->prev = list->tail;
 
 	if (list->head == nullptr) {
 		list->head = new_node;
@@ -86,6 +87,7 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 		}
 		new_node->data = data;
 		new_node->next = nullptr;
+		new_node->prev = nullptr;
 
 		// Update our pointers
 		if (list->head == nullptr) {
@@ -94,6 +96,7 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 			list->tail = new_node;
 		} else {
 			// There's at least one item already in the list
+			list->head->prev = new_node;
 			new_node->next = list->head;
 			list->head = new_node;
 		}
@@ -119,10 +122,11 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 			return -4;
 		}
 		new_node->data = data;
-		new_node->next = nullptr;
+		new_node->prev = curr;
+		new_node->next = curr->next;
 
 		// Update our pointers
-		new_node->next = curr->next;
+		if (curr->next != nullptr) { curr->next->prev = new_node; }
 		curr->next = new_node;
 		if (list->tail == curr) {
 			list->tail = new_node;
@@ -177,11 +181,12 @@ int bz_list_replace(
 			return -3;
 		}
 		new_node->data = replacement;
-		new_node->next = nullptr;
+		new_node->next = curr->next;
+		new_node->prev = curr->prev;
 
 		// Do the replacement
-		new_node->next = curr->next;
 		if (curr == list->tail) list->tail = new_node;
+		else                    curr->next->prev = new_node;
 		if (curr == list->head) list->head = new_node;
 		else                    prev->next = new_node;
 
@@ -234,6 +239,7 @@ int bz_list_remove(struct bz_list *list, void *data, void (*free_data)(void *))
 	// First item matches...
 	if (list->head->data == data) {
 		struct bz_node *next = list->head->next;
+		next->prev = nullptr;
 
 		if (free_data != nullptr) {
 			free_data(list->head->data);
@@ -245,7 +251,7 @@ int bz_list_remove(struct bz_list *list, void *data, void (*free_data)(void *))
 		return 1;
 	}
 
-	// Loop through list, removing matches as needed.
+	// Loop through list, removing the first match as needed.
 	struct bz_node *prev = list->head;
 	struct bz_node *curr = prev->next;
 	while (curr != nullptr) {
@@ -259,6 +265,7 @@ int bz_list_remove(struct bz_list *list, void *data, void (*free_data)(void *))
 		// Remove current from the list
 		list->length--;
 		prev->next = curr->next;
+		if (prev->next != nullptr) prev->next->prev = prev;
 		// ...and update the list's tail if needed.
 		if (list->tail == curr) {
 			list->tail = prev;
@@ -315,6 +322,7 @@ int bz_list_filter(
 			if (list->head == curr) { list->head = next; }
 			if (list->tail == curr) { list->tail = prev; }
 			if (prev != nullptr)    { prev->next = next; }
+			if (next != nullptr)    { next->prev = prev; }
 
 			// Free up memory
 			if (free_data != nullptr) {
@@ -395,6 +403,23 @@ void *bz_list_find(struct bz_list *list, void *match_data, bool (*item_matches)(
 	return nullptr;
 }
 
+bool bz_list_contains(struct bz_list *list, void *match_data)
+{
+	if (list == nullptr) {
+		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__, "Contains failed: list was not initialized.");
+		return false;
+	}
+
+	struct bz_node *node = list->head;
+	while (node != nullptr) {
+		if (node->data == match_data) {
+			return true;
+		}
+		node = node->next;
+	}
+	return false;
+}
+
 /**
  * Returns a neighbor of item, prioritized in the following order:
  *   1. The node that comes BEFORE the item (if present)
@@ -467,13 +492,80 @@ int bz_list_move_to_end(struct bz_list *list_dest, struct bz_list *list_src)
 
 	// Move the values simply by updating the head/tail pointers
 	int moved_items = list_src->length;
+	// Update dest list
 	list_dest->tail->next = list_src->head;
+	list_dest->tail->next->prev = list_dest->tail;
 	list_dest->tail = list_src->tail;
 	list_dest->length += list_src->length;
+	// Clear src list
 	list_src->head = nullptr;
 	list_src->tail = nullptr;
 	list_src->length = 0;
 	return moved_items;
+}
+
+/**
+ * Searches for and moves the first instance of "data" to the end of the list.
+ *   If the list is unchanged, returns 0.
+ *   If the list is moved, returns 1.
+ *   If the list is not initialized, returns -1.
+ *   If the item is not found, returns -2.
+ */
+int bz_list_move_item_to_end(struct bz_list *list, void *data)
+{
+	if (list == nullptr) {
+		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__,
+			"Move item to end failed: list was not initialized.");
+		return -1;
+	}
+
+	// Base case - empty list guarantees the item will not be found.
+	if (list->length == 0) {
+		return -2;
+	}
+
+	// Base case - already the last item.
+	if (list->tail->data == data) {
+		return 0;
+	}
+
+	// Weird case - it's the first item
+	// (...and there's at least one item after it since it's not also the last).
+	struct bz_node *curr = list->head;
+	if (curr->data == data) {
+		list->head = curr->next; // Update the list head
+		list->head->prev = nullptr;
+		curr->prev = list->tail; // Update the "curr" node
+		curr->next = nullptr;    // Update the "curr" node
+		list->tail->next = curr; // Update the last node
+		list->tail = curr;       // Update the list tail
+		return 1;
+	}
+
+	// Search for "item", keeping track of the previous node to return.
+	struct bz_node *prev = curr;
+	curr = prev->next;
+	while (curr != nullptr) {
+		// Did we find a match?
+		if (curr->data == data) {
+			// Remove "curr" from it's current spot
+			prev->next = curr->next;
+			curr->next->prev = prev;
+			// Update our "curr" node pointers
+			curr->prev = list->tail;
+			curr->next = nullptr;
+			// Update the end of the list
+			list->tail->next = curr;
+			list->tail = curr;
+			return 1;
+		}
+
+		// Advance the loop
+		prev = curr;
+		curr = prev->next;
+	}
+
+	return -2;
 }
 
 /**

@@ -13,7 +13,6 @@
 
 #include "glad/gles2.h"
 #include "breezy/bz_math.h"
-#include "breezy/bz_window_management.h"
 
 struct bz_drm {
 	int fd;
@@ -86,6 +85,17 @@ struct bz_wayland {
 	struct bz_list *event_sources; // Each item is of type "struct wl_event_source *"
 
 	struct bz_list *clients; // Each item is of type "struct wl_client *"
+};
+
+struct bz_window_mgmt {
+	/**
+	 * These are keyboard-focusable surfaces, and include xdg_toplevel, xdg_popup, and
+	 * sometimes wlr_layer_surfaces. The final item in the list has "keyboard focus".
+	 */
+	struct bz_list *activable_surfaces; // Each item is of type "struct bz_surface *"
+
+	struct bz_surface *pointer_focus; // nullptr if cursor isn't above a surface
+	struct bz_position last_cursor_loc;
 };
 
 

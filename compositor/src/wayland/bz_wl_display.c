@@ -11,6 +11,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_math.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_window_management.h"
 #include "breezy/bz_xdg_shell.h"
 
 
@@ -337,7 +338,7 @@ static void bz_surface_set_input_region(
 
 static void bz_surface_commit(struct wl_client *client, struct wl_resource *resource)
 {
-	struct bz_client *bzclient = wl_client_get_user_data(client);
+	struct bz_client *client_data = wl_client_get_user_data(client);
 	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
 
 	// After creating an XDG role, the client must perform an initial commit w/o a buffer. The
@@ -373,10 +374,14 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 			bz_initialize_gl_texture(bzsurf);
 		}
 		bz_apply_damage(bzsurf);
+
 		// Update our displayed window size
 		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->active_state->buffer);
 		bzsurf->size.w = wl_shm_buffer_get_width(shmbuf);
 		bzsurf->size.h = wl_shm_buffer_get_height(shmbuf);
+
+		// Since the surface was just mapped (and therefore displayed), let's focus the surface
+		bz_mgmt_open_window(&client_data->breezy->window_mgmt, bzsurf);
 	}
 
 	// Since the buffer is on our OpenGL texture, release the buffer.
@@ -386,7 +391,7 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	}
 
 	// Schedule a repaint
-	bz_graphics_schedule_render(bzclient->breezy);
+	bz_graphics_schedule_render(client_data->breezy);
 }
 
 static void bz_surface_set_buffer_transform(

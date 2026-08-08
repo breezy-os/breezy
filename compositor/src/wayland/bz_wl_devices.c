@@ -14,6 +14,8 @@
 
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_list.h"
+#include "breezy/bz_window_management.h"
 
 
 // =================================================================================================
@@ -239,7 +241,11 @@ static void bz_seat_get_keyboard(
 	//   keyboard "enter + modifiers" events.
 	struct bz_surface *active_surf = bz_mgmt_get_active_surface(&breezy->window_mgmt);
 	if (active_surf != nullptr && wl_resource_get_client(active_surf->resource) == client) {
-		bz_mgmt_notify_enter(breezy->input.xkb_state, res, active_surf->resource);
+		bz_mgmt_notify_kb_enter(
+			breezy->wayland.display,
+			breezy->input.xkb_state,
+			res, active_surf->resource
+		);
 	}
 
 	// Everything succeeded!

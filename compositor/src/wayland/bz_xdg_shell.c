@@ -10,6 +10,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_math.h"
 #include "breezy/bz_wl_display.h"
+#include "breezy/bz_window_management.h"
 
 
 // =================================================================================================
@@ -236,21 +237,10 @@ static void bz_xdg_surface_get_toplevel(
 	bzsurf->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
 	bzsurf->xdgtoplevel = xdgtoplevel;
 
-	// Track this surface as "activatable"
-	struct bz_client *client_data = wl_client_get_user_data(client);
-	struct bz_breezy *breezy = client_data->breezy;
-	int open_status = bz_mgmt_open_window(&breezy->window_mgmt, bzsurf);
-	if (open_status != 0) {
-		goto window_open_failed;
-	}
-
 	// Everything succeeded!
 	return;
 
 	// Error cleanup
-	window_open_failed:
-		bzsurf->xdgtoplevel = nullptr;
-		wl_resource_destroy(resource);
 	resource_failed:
 		free(xdgtoplevel);
 	surface_alloc_failed:

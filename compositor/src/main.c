@@ -14,6 +14,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_window_management.h"
 
 
 int main(void)
