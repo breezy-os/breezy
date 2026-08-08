@@ -33,14 +33,21 @@ void bz_fill_projection_matrix(
 	proj[8] = 1.0f;
 }
 
-double distance(int x1, int y1, int x2, int y2)
+double bz_distance(int x1, int y1, int x2, int y2)
 {
 	int dx = x2 - x1;
 	int dy = y2 - y1;
 	return sqrt(dx * dx + dy * dy);
 }
 
-int32_t randInt(int min, int max)
+int32_t bz_rand_int(int min, int max)
 {
 	return (rand() % (max - min + 1)) + min;
+}
+
+int32_t bz_clamp(uint32_t value, uint32_t min, uint32_t max)
+{
+	if (value < min) return min;
+	if (value > max) return max;
+	return value;
 }

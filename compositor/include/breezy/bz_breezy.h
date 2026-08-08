@@ -13,6 +13,7 @@
 
 #include "glad/gles2.h"
 #include "breezy/bz_math.h"
+#include "breezy/bz_window_management.h"
 
 struct bz_drm {
 	int fd;
@@ -61,7 +62,12 @@ struct bz_input {
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
 	struct xkb_state *xkb_state;
+
 	struct bz_list *device_lookup; // Each item is of type "struct bz_input_device *"
+	_Atomic int keyboard_count;
+	_Atomic int pointer_count;
+	bool ever_had_keyboard;
+	bool ever_had_pointer;
 };
 
 struct bz_wayland {
@@ -69,6 +75,7 @@ struct bz_wayland {
 	const char *socket_name;
 	struct wl_listener new_client_listener;
 	struct bz_list *event_sources; // Each item is of type "struct wl_event_source *"
+
 	struct bz_list *clients; // Each item is of type "struct wl_client *"
 };
 
@@ -80,6 +87,8 @@ struct bz_breezy {
 	struct bz_seat seat;
 	struct bz_input input;
 	struct bz_wayland wayland;
+	struct bz_window_mgmt window_mgmt;
+	bool is_terminating;
 };
 
 

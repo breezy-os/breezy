@@ -21,6 +21,7 @@ bz_testclient_lib = static_library(
     include_directories: testclient_inc,
     dependencies: [
         dependency('wayland-client'),
+        dependency('xkbcommon'),
         bz_utils_dep,
     ])
 bz_testclient_dep = declare_dependency(link_with: bz_testclient_lib, include_directories: testclient_inc)

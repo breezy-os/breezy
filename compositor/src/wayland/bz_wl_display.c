@@ -115,30 +115,19 @@ static void bz_compositor_create_surface(
 		bz_surface_dtor
 	);
 
-	// Track this surface on the client
-	const struct bz_client *client_data = wl_client_get_user_data(client);
-	const int append_status = bz_list_append(client_data->surfaces, surface);
-	if (append_status != 0) {
-		if (append_status == -2) {
-			wl_client_post_no_memory(client);
-		}
-		goto list_append_failed;
-	}
-
 	// Populate the surface's user data
+	const struct bz_client *client_data = wl_client_get_user_data(client);
 	surface->resource = res;
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
-	surface->position.x = randInt(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
-	surface->position.y = randInt(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
+	surface->position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
+	surface->position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
 
 	// Everything succeeded!
 	return;
 
 	// Error cleanups
-	list_append_failed:
-		wl_resource_destroy(res);
 	resource_failed:
 		bz_surface_state_free(active);
 	active_state_alloc_failed:

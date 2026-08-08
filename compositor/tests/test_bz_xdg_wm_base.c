@@ -8,7 +8,6 @@
 
 #include "unity.h"
 #include "fff.h"
-// #include "../../build/compositor/src/xdg-shell-server-protocol.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 

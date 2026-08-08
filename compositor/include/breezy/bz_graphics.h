@@ -18,7 +18,7 @@ void bz_graphics_schedule_render(struct bz_breezy *breezy);
 int bz_graphics_activate(struct bz_breezy *breezy);
 int bz_graphics_deactivate(struct bz_breezy *breezy);
 
-void bz_graphics_process_frame_callbacks(struct bz_client *client_data, uint32_t timestamp);
+void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp);
 
 // TODO: temp fun
 void bz_graphics_set_color_index(int i);

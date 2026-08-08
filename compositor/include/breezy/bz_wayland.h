@@ -12,7 +12,7 @@ struct bz_client {
 	struct wl_listener client_disconnect_listener;
 	pid_t pid;
 
-	struct bz_list *surfaces; // Stores a list of "struct bz_surface *"
+	struct bz_wl_seat *seat;
 };
 
 

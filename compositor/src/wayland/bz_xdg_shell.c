@@ -8,6 +8,7 @@
 #include "breezy/bz_list.h"
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_logger.h"
+#include "breezy/bz_math.h"
 #include "breezy/bz_wl_display.h"
 
 
@@ -235,10 +236,21 @@ static void bz_xdg_surface_get_toplevel(
 	bzsurf->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
 	bzsurf->xdgtoplevel = xdgtoplevel;
 
+	// Track this surface as "activatable"
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_breezy *breezy = client_data->breezy;
+	int open_status = bz_mgmt_open_window(&breezy->window_mgmt, bzsurf);
+	if (open_status != 0) {
+		goto window_open_failed;
+	}
+
 	// Everything succeeded!
 	return;
 
 	// Error cleanup
+	window_open_failed:
+		bzsurf->xdgtoplevel = nullptr;
+		wl_resource_destroy(resource);
 	resource_failed:
 		free(xdgtoplevel);
 	surface_alloc_failed:
@@ -343,13 +355,13 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		}
 
 		// Assign our initial state
-		configevt->serial = xdgsurface->serial;
+		configevt->serial = wl_display_next_serial(wl_client_get_display(client));
 		configevt->type = BZ_XDG_SURF_TOPLEVEL;
 		wl_array_init(&configevt->toplevel.states);
 		configevt->toplevel.max_size.w = globals->drm.mode_info.hdisplay;
 		configevt->toplevel.max_size.h = globals->drm.mode_info.vdisplay;
-		configevt->toplevel.recommended_size.w = randInt(400, globals->drm.mode_info.hdisplay/2);
-		configevt->toplevel.recommended_size.h = randInt(300, globals->drm.mode_info.vdisplay/2);
+		configevt->toplevel.recommended_size.w = bz_rand_int(400, globals->drm.mode_info.hdisplay/2);
+		configevt->toplevel.recommended_size.h = bz_rand_int(300, globals->drm.mode_info.vdisplay/2);
 
 		// Send initial state values
 		//   wl_surface_send_preferred_buffer_scale(resource, 1);
@@ -372,7 +384,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 	}
 
 	bz_list_append(xdgsurface->pending_configures, configevt);
-	xdg_surface_send_configure(xdgsurface->resource, xdgsurface->serial++);
+	xdg_surface_send_configure(xdgsurface->resource, configevt->serial);
 	return;
 
 	null_toplevel:

@@ -195,8 +195,8 @@ void test_surface_frame__multiple_frame_requests(void)
 	wl_resource_get_user_data_fake.return_val = surf_data;
 	struct wl_resource *callback_res = calloc(1, sizeof(*callback_res));
 	wl_resource_create_fake.return_val = callback_res;
-	struct bz_client *client_data = bz_create_client_data();
-	bz_list_append(client_data->surfaces, surf_data);
+	struct bz_list *surfaces = bz_list_create();
+	bz_list_append(surfaces, surf_data);
 
 	// Create multiple frame requests
 	bz_surface_implementation.frame(nullptr, nullptr, 0);
@@ -213,13 +213,13 @@ void test_surface_frame__multiple_frame_requests(void)
 
 	// Trigger the callbacks to run
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_event_fake.call_count);
-	bz_graphics_process_frame_callbacks(client_data, 0);
+	bz_graphics_process_frame_callbacks(surfaces, 0);
 	TEST_ASSERT_EQUAL_INT(2, wl_resource_post_event_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(WL_CALLBACK_DONE, wl_resource_post_event_fake.arg1_history[0]);
 	TEST_ASSERT_EQUAL_INT(WL_CALLBACK_DONE, wl_resource_post_event_fake.arg1_history[1]);
 
 	// Cleanup
-	bz_free_client_data(client_data);
+	bz_list_free(surfaces, nullptr);
 	free(callback_res);
 	bz_free_surface_data(surf_data);
 }
@@ -232,8 +232,8 @@ void test_surface_frame__callback_is_destroyed_immediately(void)
 	wl_resource_get_user_data_fake.return_val = surf_data;
 	struct wl_resource *callback_res = calloc(1, sizeof(*callback_res));
 	wl_resource_create_fake.return_val = callback_res;
-	struct bz_client *client_data = bz_create_client_data();
-	bz_list_append(client_data->surfaces, surf_data);
+	struct bz_list *surfaces = bz_list_create();
+	bz_list_append(surfaces, surf_data);
 
 	// Create a frame request
 	bz_surface_implementation.frame(nullptr, nullptr, 0);
@@ -249,7 +249,7 @@ void test_surface_frame__callback_is_destroyed_immediately(void)
 
 	// Trigger the callback to run
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_event_fake.call_count);
-	bz_graphics_process_frame_callbacks(client_data, 0);
+	bz_graphics_process_frame_callbacks(surfaces, 0);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_event_fake.call_count);
 
 	// Verify the thing being tested
@@ -257,7 +257,7 @@ void test_surface_frame__callback_is_destroyed_immediately(void)
 	TEST_ASSERT_EQUAL(callback_res, wl_resource_destroy_fake.arg0_val);
 
 	// Cleanup
-	bz_free_client_data(client_data);
+	bz_list_free(surfaces, nullptr);
 	free(callback_res);
 	bz_free_surface_data(surf_data);
 }
@@ -370,7 +370,7 @@ int main(void) {
 	RUN_TEST(test_surface_damage__multiple_calls_are_unioned); // TODO
 	RUN_TEST(test_surface_damage__starts_out_no_damage); // TODO
 
-	// Test bz_surface_frame()
+	// // Test bz_surface_frame()
 	RUN_TEST(test_surface_frame__requests_are_double_buffered);
 	RUN_TEST(test_surface_frame__client_not_visible); // TODO
 	RUN_TEST(test_surface_frame__multiple_frame_requests);

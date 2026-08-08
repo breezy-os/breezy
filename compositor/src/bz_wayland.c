@@ -61,8 +61,6 @@ static void bz_wayland_client_dtor(void *data)
 {
 	struct bz_client *client_data = data;
 
-	bz_list_free(client_data->surfaces, nullptr);
-
 	free(client_data);
 }
 
@@ -88,11 +86,10 @@ static void bz_wayland_handle_client_connection(struct wl_listener *listener, vo
 	}
 	client_data->breezy = breezy;
 	client_data->pid = pid;
-	client_data->surfaces = bz_list_create();
 	wl_client_set_user_data(client, client_data, bz_wayland_client_dtor);
 
-	// Add the client to our "clients" list.
-	bz_list_append(wayland_data->clients, client);
+	// Insert the client at the beginning of our "clients" list.
+	bz_list_insert(wayland_data->clients, client, nullptr);
 
 	// Set up a listener to clean up the client.
 	client_data->client_disconnect_listener.notify = bz_wayland_handle_client_disconnect;
@@ -285,12 +282,12 @@ void bz_wayland_cleanup(struct bz_breezy *breezy)
 	if (breezy->wayland.event_sources != nullptr) {
 		bz_list_free(breezy->wayland.event_sources, bz_wayland_destroy_event_source);
 	}
-	if (breezy->wayland.clients != nullptr) {
-		// The actual wl_clients (and resources) are destroyed through wl_display_destroy_clients()
-		bz_list_free(breezy->wayland.clients, nullptr);
-	}
 	if (breezy->wayland.display != nullptr) {
 		wl_display_destroy_clients(breezy->wayland.display);
 		wl_display_destroy(breezy->wayland.display);
+	}
+	if (breezy->wayland.clients != nullptr) {
+		// The actual wl_clients (and resources) are destroyed through wl_display_destroy_clients()
+		bz_list_free(breezy->wayland.clients, nullptr);
 	}
 }

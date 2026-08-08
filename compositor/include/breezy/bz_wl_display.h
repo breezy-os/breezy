@@ -45,6 +45,8 @@ struct bz_surface {
 	struct wl_resource *resource;
 	struct bz_xdg_surface *xdgsurface; // nullptr for non-xdg surfaces.
 
+	struct wl_listener disable_on_destroy; // Removes surface from breezy.wayland.activable_surfaces
+
 	// Role tracking
 	enum bz_surface_role role;
 	union {

@@ -13,5 +13,8 @@ int bz_input_process_events(int fd, uint32_t mask, void *data);
 int bz_input_activate(struct bz_breezy *breezy);
 void bz_input_deactivate(struct bz_breezy *breezy);
 
+/** Available externally mainly for testing. */
+void bz_input_change_device_counts(struct bz_breezy *breezy, int keyboard_delta, int pointer_delta);
+
 // #################################################################################################
 #endif

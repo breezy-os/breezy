@@ -1,8 +1,10 @@
-
-#include <stdlib.h>
-#include <time.h>
+#define _POSIX_C_SOURCE 200809L // NOLINT
 
 #include "breezy/bz_breezy.h"
+
+#include <signal.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include <wayland-server.h>
 
@@ -22,10 +24,12 @@ int main(void)
 
 	// Set up our logger
 	bz_log_initialize(BZ_LOG_INFO);
-	bz_log_set_level(BZ_LOG_WAYLAND, BZ_LOG_DEBUG);
-	bz_log_set_level(BZ_LOG_WL_DISPLAY, BZ_LOG_DEBUG);
+	bz_log_set_level(BZ_LOG_INPUT, BZ_LOG_DEBUG);
+	bz_log_set_level(BZ_LOG_WINDOW_MGMT, BZ_LOG_DEBUG);
 	bz_log_set_level(BZ_LOG_WL_DEVICES, BZ_LOG_DEBUG);
-	bz_log_set_level(BZ_LOG_WL_XDG_SHELL, BZ_LOG_DEBUG);
+	// bz_log_set_level(BZ_LOG_WAYLAND, BZ_LOG_DEBUG);
+	// bz_log_set_level(BZ_LOG_WL_DISPLAY, BZ_LOG_DEBUG);
+	// bz_log_set_level(BZ_LOG_WL_XDG_SHELL, BZ_LOG_DEBUG);
 
 	// Initialize our main "breezy" struct, explicitly setting non-zero/nullptr values as needed.
 	struct bz_breezy breezy = { 0 };
@@ -38,6 +42,14 @@ int main(void)
 	if (breezy.input.device_lookup == nullptr) {
 		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__, "Failed to initialize device lookup list.");
 		return -1; // If we're already failing to malloc this early, let's just exit.
+	}
+
+	// Window management initialization
+	retval = bz_mgmt_initialize(&breezy.window_mgmt);
+	if (retval != 0) {
+		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__,
+			"Failed to initialize window management. Error: %d", retval);
+		goto window_management_cleanup;
 	}
 
 	// Seat initialization
@@ -113,6 +125,8 @@ graphics_cleanup:
 	bz_graphics_cleanup(&breezy);
 seat_cleanup:
 	bz_seat_cleanup(&breezy);
+window_management_cleanup:
+	bz_mgmt_cleanup(&breezy.window_mgmt);
 
 	return retval;
 }

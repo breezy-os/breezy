@@ -362,13 +362,7 @@ void bz_drm_handle_pageflip(
 
 	// Emit the Wayland "done" event for all active frame callbacks.
 	uint32_t timestamp = (uint32_t)((uint64_t)tv_sec * 1000 + tv_usec / 1000);
-	struct bz_node *curr_client = breezy->wayland.clients->head;
-	while (curr_client != nullptr) {
-		struct wl_client *client = curr_client->data;
-		struct bz_client *client_data = wl_client_get_user_data(client);
-		bz_graphics_process_frame_callbacks(client_data, timestamp);
-		curr_client = curr_client->next;
-	}
+	bz_graphics_process_frame_callbacks(breezy->window_mgmt.activable_surfaces, timestamp);
 
 	// Occasionally, a render will fail due to both GBM buffers being unreleased. When that happens,
 	//   this flag gets set to true, prompting us to retry during this "release" step.
@@ -755,36 +749,30 @@ static void bz_gles_render_and_commit(void *data) {
 		glEnableVertexAttribArray(0);
 		glEnableVertexAttribArray(1);
 
-		// ...then render each client's surfaces
-		struct bz_node *curr_client = breezy->wayland.clients->head;
-		while (curr_client != nullptr) {
-			struct wl_client *client = curr_client->data;
-			struct bz_client *client_data = wl_client_get_user_data(client);
-			struct bz_node *curr_surf = client_data->surfaces->head;
-			while (curr_surf != nullptr) {
-				struct bz_surface *bzsurf = curr_surf->data;
-				if (bzsurf->texture != 0 && bzsurf->active_state->buffer != nullptr) {
-					// Load our surface projection matrix
-					bz_mat3 projection = {0};
-					bz_fill_projection_matrix(projection,
-						0, 0, 1, 1,
-						bzsurf->position.x, bzsurf->position.y, bzsurf->size.w, bzsurf->size.h
-					);
-					GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
-					glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+		// ...then render each activable surface
+		struct bz_node *curr_surf = breezy->window_mgmt.activable_surfaces->head;
+		while (curr_surf != nullptr) {
+			struct bz_surface *bzsurf = curr_surf->data;
+			if (bzsurf->texture != 0 && bzsurf->active_state->buffer != nullptr) {
+				// Load our surface projection matrix
+				bz_mat3 projection = {0};
+				bz_fill_projection_matrix(projection,
+					0, 0, 1, 1,
+					bzsurf->position.x, bzsurf->position.y, bzsurf->size.w, bzsurf->size.h
+				);
+				GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+				glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
 
-					// Prep the texture
-					glActiveTexture(GL_TEXTURE0);
-					glBindTexture(GL_TEXTURE_2D, bzsurf->texture);
-					GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
-					glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+				// Prep the texture
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, bzsurf->texture);
+				GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+				glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
 
-					// Render!
-					glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-				}
-				curr_surf = curr_surf->next;
+				// Render!
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 			}
-			curr_client = curr_client->next;
+			curr_surf = curr_surf->next;
 		}
 	}
 
@@ -919,7 +907,11 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
 void bz_graphics_schedule_render(struct bz_breezy *breezy)
 {
 	// Only schedule if we're not already scheduled
-	if (breezy->wayland.display && !breezy->drm.retry_render_on_page_flip && !breezy->gl.is_dirty) {
+	if (!breezy->is_terminating &&
+		breezy->wayland.display &&
+		!breezy->drm.retry_render_on_page_flip &&
+		!breezy->gl.is_dirty
+	) {
 		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Scheduling render.");
 		breezy->gl.is_dirty = true;
 		struct wl_event_loop *evt_loop = wl_display_get_event_loop(breezy->wayland.display);
@@ -1045,15 +1037,14 @@ int bz_graphics_deactivate(struct bz_breezy *breezy)
 }
 
 /**
- * Processes all frame callbacks for the given client by iterating over all the client's surfaces,
- * submitting the "done" request for all surfaces that have active frame requests and are visible,
+ * Processes all frame callbacks for the given list of surfaces (of type "struct bz_surface *"),
+ * submitting the "done" request for each surface that has an active frame request and is visible,
  * and then cleans up those callbacks.
  *
  * (Exposed as "public" for testing purposes only.)
  */
-void bz_graphics_process_frame_callbacks(struct bz_client *client_data, uint32_t timestamp)
-{
-	struct bz_node *curr_surf = client_data->surfaces->head;
+void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp) {
+	struct bz_node *curr_surf = surfaces->head;
 
 	// TODO: Only emit for surfaces that are visible.
 	while (curr_surf != nullptr) {

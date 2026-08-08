@@ -9,6 +9,7 @@
 
 #include <wayland-client.h>
 #include <sys/mman.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "breezy/bz_logger.h"
 #include "breezy/bz_application.h"
@@ -85,6 +86,7 @@ int main(void)
 
 	// Cleanup
 	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Cleaning up and disconnecting.");
+	// TODO-dl10: Call *surface.destroy methods
 	if (client_globals.window != nullptr) {
 		for (uint8_t i = 0; i < 2; i++) {
 			if (client_globals.window->buffers[i].buffer != nullptr) {
@@ -102,6 +104,18 @@ int main(void)
 			client_globals.window->frame_callback = nullptr;
 		}
 	}
+	if (client_globals.seat != nullptr) {
+		struct bz_seat *seat_data = wl_seat_get_user_data(client_globals.seat);
+		if (seat_data != nullptr) {
+			if (seat_data->keyboard   != nullptr) { wl_keyboard_release(seat_data->keyboard); }
+			if (seat_data->pointer    != nullptr) { wl_pointer_release(seat_data->pointer); }
+			if (seat_data->xkbstate   != nullptr) { xkb_state_unref(seat_data->xkbstate); }
+			if (seat_data->xkbkeymap  != nullptr) { xkb_keymap_unref(seat_data->xkbkeymap); }
+			if (seat_data->xkbcontext != nullptr) { xkb_context_unref(seat_data->xkbcontext); }
+			free(seat_data);
+		}
+	}
+
 	wl_display_disconnect(client_globals.display);
 	close(client_globals.is_quitting);
 

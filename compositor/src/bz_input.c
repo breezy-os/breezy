@@ -19,6 +19,9 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_wl_devices.h"
+#include "breezy/bz_wl_display.h"
+#include "breezy/bz_xdg_shell.h"
 
 
 // =================================================================================================
@@ -28,10 +31,10 @@
 static int bz_input_open_restricted(const char *path, int flags, void *data);
 static void bz_input_close_restricted(int fd, void *data);
 static bool bz_input_device_fd_matches(void *fd, void *device);
+static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
-static void bz_input_terminate_client(struct bz_breezy *breezy);
 
 
 // =================================================================================================
@@ -43,7 +46,8 @@ static const struct libinput_interface bz_libinput_interface = {
 	.close_restricted = bz_input_close_restricted,
 };
 
-static int bz_input_open_restricted(const char *path, int /*flags*/, void *data) {
+static int bz_input_open_restricted(const char *path, int /*flags*/, void *data)
+{
 	struct bz_breezy *breezy = data;
 
 	// Open the device
@@ -59,7 +63,8 @@ static int bz_input_open_restricted(const char *path, int /*flags*/, void *data)
 	return fd;
 }
 
-static void bz_input_close_restricted(int fd, void *data) {
+static void bz_input_close_restricted(int fd, void *data)
+{
 	struct bz_breezy *breezy = data;
 
 	// Look up and close the device
@@ -81,6 +86,59 @@ static bool bz_input_device_fd_matches(void *fd, void *device)
 	return _device->fd == *_fd;
 }
 
+static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status)
+{
+	// Update our plugged in keyboard/pointer counts
+	int keyboard_delta = 0;
+	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_KEYBOARD)) {
+		breezy->input.keyboard_count += new_plugged_status ? 1 : -1;
+	}
+	int pointer_delta = 0;
+	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_POINTER)) {
+		breezy->input.pointer_count += new_plugged_status ? 1 : -1;
+	}
+
+	bz_input_change_device_counts(breezy, keyboard_delta, pointer_delta);
+}
+
+void bz_input_change_device_counts(struct bz_breezy *breezy, int keyboard_delta, int pointer_delta)
+{
+	// Record our initial capabilities so we know if they've changed.
+	bool had_keyboard = breezy->input.keyboard_count > 0;
+	bool had_pointer  = breezy->input.pointer_count  > 0;
+
+	// Update our counts
+	breezy->input.keyboard_count += keyboard_delta;
+	breezy->input.pointer_count  += pointer_delta;
+
+	// If the capabilities have changed, broadcast the new capabilities to each client.
+	bool has_keyboard = breezy->input.keyboard_count > 0;
+	bool has_pointer  = breezy->input.pointer_count  > 0;
+	if (had_keyboard != has_keyboard || had_pointer != has_pointer) {
+		uint32_t capabilities =
+			(has_keyboard ? WL_SEAT_CAPABILITY_KEYBOARD : 0) |
+			(has_pointer ? WL_SEAT_CAPABILITY_POINTER : 0);
+		struct bz_node *node = breezy->wayland.clients->head;
+		while (node != nullptr) {
+			struct wl_client *client = node->data;
+			struct bz_client *client_data = wl_client_get_user_data(client);
+			if (client_data->seat != nullptr) {
+				wl_seat_send_capabilities(client_data->seat->resource, capabilities);
+			}
+			node = node->next;
+		}
+	}
+
+	// We need to track if our seat *ever* had these things, so toggle them to true if able.
+	if (has_keyboard) { breezy->input.ever_had_keyboard = true; }
+	if (has_pointer)  { breezy->input.ever_had_pointer  = true; }
+
+	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__,
+		"Device hotplugged. New counts: [keyboards: %d], [pointers: %d]",
+		breezy->input.keyboard_count,
+		breezy->input.pointer_count);
+}
+
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event)
 {
 	// Parse the libinput event
@@ -90,14 +148,13 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	// Feed into xkbcommon
 	const uint32_t xkb_keycode = keycode + 8; // xkb keycode is offset by 8 from evdev
 	enum xkb_key_direction press_state = keystate ? XKB_KEY_DOWN : XKB_KEY_UP;
-	xkb_state_update_key(breezy->input.xkb_state, xkb_keycode, press_state);
+	enum xkb_state_component changes = xkb_state_update_key(breezy->input.xkb_state, xkb_keycode, press_state);
 	const uint32_t xkb_keysym = xkb_state_key_get_one_sym(breezy->input.xkb_state, xkb_keycode);
 
 	// Figure out our modifier keys
 	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE);
 	const bool ctrl_held  = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE);
-	const bool alt_held   = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE);
-	// const bool shift_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE);
+	const bool alt_held   = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_ALT,  XKB_STATE_MODS_EFFECTIVE);
 
 	// First, check for a VT switch. (The only hotkey that doesn't use "super".)
 	const int target_vt = bz_input_check_vt_change(ctrl_held, alt_held, xkb_keysym);
@@ -112,36 +169,68 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 
 		// Quit Compositor
 		case XKB_KEY_Escape:
+			breezy->is_terminating = true;
 			wl_display_terminate(breezy->wayland.display);
-			break;
+			return;
 
 		// Start / Stop Applications
 		case XKB_KEY_t:
 			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/git/breezy/build/test-client/test-client");
-			break;
+			return;
 		case XKB_KEY_q:
-			bz_input_terminate_client(breezy);
-			break;
+			bz_mgmt_close_active_window(&breezy->window_mgmt);
+			return;
 
 		// Change Colors
 		case XKB_KEY_1:
 			bz_graphics_set_color_index(0);
-			break;
+			return;
 		case XKB_KEY_2:
 			bz_graphics_set_color_index(1);
-			break;
+			return;
 		case XKB_KEY_3:
 			bz_graphics_set_color_index(2);
-			break;
+			return;
 		case XKB_KEY_Up:
 			bz_graphics_change_color(breezy, 20.0f/255);
-			break;
+			return;
 		case XKB_KEY_Down:
 			bz_graphics_change_color(breezy, -20.0f/255);
-			break;
+			return;
 
 		default:
 			break; // Does nothing, but shuts up clang-tidy
+		}
+	}
+
+	// Any that weren't caught, send onwards to the active surface.
+	struct xkb_state *xkbstate = breezy->input.xkb_state;
+	struct bz_surface *active_surface = bz_mgmt_get_active_surface(&breezy->window_mgmt);
+	if (active_surface != nullptr) {
+		struct wl_client *client = wl_resource_get_client(active_surface->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		struct bz_node *kb_node = client_data->seat->keyboards->head;
+		while (kb_node != nullptr) {
+			struct wl_resource *keyboard = kb_node->data;
+			wl_keyboard_send_key(
+				keyboard,
+				wl_display_next_serial(breezy->wayland.display),
+				libinput_event_keyboard_get_time(kb_event),
+				keycode,
+				keystate ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED
+			);
+			if (changes & (XKB_STATE_MODS_EFFECTIVE | XKB_STATE_LAYOUT_EFFECTIVE)) {
+				// A modifier changed, so re-send the full modifiers event.
+				wl_keyboard_send_modifiers(
+					keyboard,
+					wl_display_next_serial(breezy->wayland.display),
+					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_DEPRESSED),
+					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LATCHED),
+					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LOCKED),
+					xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
+				);
+			}
+			kb_node = kb_node->next;
 		}
 	}
 }
@@ -205,27 +294,6 @@ static void bz_input_spawn_child(const char *socket_name, const char *program_pa
 
 	// -- Parent Process --
 	// Nothing to do!
-}
-
-/**
- * Terminates the first client in our list of connected clients. This will eventually be improved
- * to terminate whichever client is "active", but at the time of writing, we don't have any concept
- * of an "active client".
- */
-static void bz_input_terminate_client(struct bz_breezy *breezy)
-{
-	if (breezy->wayland.clients->length == 0) {
-		bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "No clients to terminate.");
-		return;
-	}
-	struct wl_client *client = breezy->wayland.clients->head->data;
-	const struct bz_client *client_data = wl_client_get_user_data(client);
-
-	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "Terminating client with pid %d.", client_data->pid);
-	kill(client_data->pid, SIGTERM);
-	// TODO: After a few seconds, if it still exists: kill(client_data->pid, SIGKILL);
-
-	// (Data cleanup is handled in the client disconnect handlers.)
 }
 
 
@@ -345,6 +413,10 @@ int bz_input_process_events(int /*fd*/, uint32_t /*mask*/, void *data)
 	while ((event = libinput_get_event(breezy->input.libinput)) != nullptr) {
 		if (libinput_event_get_type(event) == LIBINPUT_EVENT_KEYBOARD_KEY) {
 			bz_input_process_kb_event(breezy, libinput_event_get_keyboard_event(event));
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_DEVICE_ADDED) {
+			bz_input_process_hotplug_event(breezy, libinput_event_get_device(event), 1);
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_DEVICE_REMOVED) {
+			bz_input_process_hotplug_event(breezy, libinput_event_get_device(event), 0);
 		}
 		libinput_event_destroy(event);
 	}

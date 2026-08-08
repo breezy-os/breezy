@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_list.h"
@@ -11,6 +12,10 @@
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
 
+// -- bz_breezy --
+struct bz_breezy *bz_create_breezy_data(void);
+void bz_free_breezy_data(struct bz_breezy *data);
+
 // -- bz_client --
 struct bz_client *bz_create_client_data(void);
 void bz_free_client_data(struct bz_client *data);
@@ -18,6 +23,10 @@ void bz_free_client_data(struct bz_client *data);
 // -- bz_surface --
 struct bz_surface *bz_create_surface_data(void);
 void bz_free_surface_data(struct bz_surface *data);
+
+// -- bz_wl_seat --
+struct bz_wl_seat *bz_create_seat_data(void);
+void bz_free_seat_data(struct bz_wl_seat *data);
 
 // -- bz_xdg_surface --
 struct bz_xdg_surface *bz_create_xdg_surface_data();
@@ -33,6 +42,34 @@ void bz_free_xdg_surface_configure(struct bz_xdg_surface_configure *data);
 
 
 // =================================================================================================
+//  bz_breezy
+// -------------------------------------------------------------------------------------------------
+
+struct bz_breezy *bz_create_breezy_data(void)
+{
+	struct bz_breezy *data = calloc(1, sizeof(*data));
+
+	data->window_mgmt.activable_surfaces = bz_list_create();
+	data->wayland.clients = bz_list_create();
+
+	return data;
+}
+
+void bz_free_breezy_data(struct bz_breezy *data)
+{
+	if (data) {
+		if (data->window_mgmt.activable_surfaces != nullptr) {
+			bz_list_free(data->window_mgmt.activable_surfaces, nullptr);
+		}
+		if (data->wayland.clients != nullptr) {
+			bz_list_free(data->wayland.clients, nullptr);
+		}
+		free(data);
+	}
+}
+
+
+// =================================================================================================
 //  bz_client
 // -------------------------------------------------------------------------------------------------
 
@@ -40,7 +77,8 @@ struct bz_client *bz_create_client_data(void)
 {
 	struct bz_client *data = calloc(1, sizeof(*data));
 
-	data->surfaces = bz_list_create();
+	data->breezy = bz_create_breezy_data();
+	data->seat = bz_create_seat_data();
 
 	return data;
 }
@@ -48,7 +86,8 @@ struct bz_client *bz_create_client_data(void)
 void bz_free_client_data(struct bz_client *data)
 {
 	if (data) {
-		if (data->surfaces) { bz_list_free(data->surfaces, nullptr); }
+		if (data->breezy != nullptr) { bz_free_breezy_data(data->breezy); }
+		if (data->seat != nullptr)   { bz_free_seat_data(data->seat); }
 		free(data);
 	}
 }
@@ -81,6 +120,34 @@ void bz_free_surface_data(struct bz_surface *data)
 		if (data->active_state) {
 			bz_list_free(data->active_state->frame_callbacks, nullptr);
 			free(data->active_state);
+		}
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_seat
+// -------------------------------------------------------------------------------------------------
+
+struct bz_wl_seat *bz_create_seat_data(void)
+{
+	struct bz_wl_seat *data = calloc(1, sizeof(*data));
+
+	data->keyboards = bz_list_create();
+	data->pointers = bz_list_create();
+
+	return data;
+}
+
+void bz_free_seat_data(struct bz_wl_seat *data)
+{
+	if (data) {
+		if (data->keyboards) {
+			bz_list_free(data->keyboards, nullptr);
+		}
+		if (data->pointers) {
+			bz_list_free(data->pointers, nullptr);
 		}
 		free(data);
 	}
