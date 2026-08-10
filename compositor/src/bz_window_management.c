@@ -119,8 +119,12 @@ static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, voi
 			&breezy->window_mgmt,
 			&breezy->gl.cursor
 		);
+		// Found a surface! Also update our keyboard's focus, then early exit. The code inside
+		//   bz_mgmt_update_pointer_position isn't sufficient if the window gaining focus is
+		//   already the new "last item" in the list.
 		if (new_focus != nullptr) {
-			return; // Found a surface; early exit.
+			bz_mgmt_change_keyboard_focus(&breezy->window_mgmt, nullptr, new_focus);
+			return;
 		}
 
 		// If that fails, then let's just grab the last window in our list. No need to set pointer
@@ -130,44 +134,42 @@ static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, voi
 		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
 		struct wl_display *display = new_client_data->breezy->wayland.display;
 		struct xkb_state *xkbstate = new_client_data->breezy->input.xkb_state;
+		uint32_t enter_serial = wl_display_next_serial(display);
+		uint32_t modifiers_serial = wl_display_next_serial(display);
 		struct bz_node *node = new_client_data->seat->keyboards->head;
 		while (node != nullptr) {
 			struct wl_resource *keyboard = node->data;
-			bz_mgmt_notify_kb_enter(display, xkbstate, keyboard, new_surf_data->resource);
+			bz_mgmt_notify_kb_enter(
+				enter_serial,
+				modifiers_serial,
+				xkbstate,
+				keyboard,
+				new_surf_data->resource
+			);
 			node = node->next;
 		}
 	}
 }
 
 void bz_mgmt_notify_kb_enter(
-	struct wl_display *display,
+	uint32_t enter_serial,
+	uint32_t modifiers_serial,
 	struct xkb_state *xkbstate,
 	struct wl_resource *keyboard,
 	struct wl_resource *surface
 ) {
 	struct wl_array keys;
 	wl_array_init(&keys); // TODO-dl11: Populate this properly
-	wl_keyboard_send_enter(keyboard, wl_display_next_serial(display), surface, &keys);
+	wl_keyboard_send_enter(keyboard, enter_serial, surface, &keys);
 	wl_keyboard_send_modifiers(
 		keyboard,
-		wl_display_next_serial(display),
+		modifiers_serial,
 		xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_DEPRESSED),
 		xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LATCHED),
 		xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LOCKED),
 		xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
 	);
 	wl_array_release(&keys);
-}
-
-void bz_mgmt_notify_ptr_enter(
-	struct wl_display *display,
-	struct bz_position *cursor_position,
-	struct wl_resource *pointer,
-	struct wl_resource *surface
-) {
-	uint32_t serial = wl_display_next_serial(display);
-	wl_pointer_send_enter(pointer, serial, surface, cursor_position->x, cursor_position->y);
-	wl_pointer_send_frame(pointer);
 }
 
 
@@ -216,10 +218,9 @@ static void bz_mgmt_change_keyboard_focus(
 	if (orig_surface != nullptr) {
 		struct wl_client *orig_client = wl_resource_get_client(orig_surface->resource);
 		struct bz_client *orig_client_data = wl_client_get_user_data(orig_client);
-		struct wl_display *display = orig_client_data->breezy->wayland.display;
+		uint32_t serial = wl_display_next_serial(orig_client_data->breezy->wayland.display);
 		struct bz_node *curr_kb = orig_client_data->seat->keyboards->head;
 		while (curr_kb != nullptr) {
-			uint32_t serial = wl_display_next_serial(display);
 			wl_keyboard_send_leave(curr_kb->data, serial, orig_surface->resource);
 			curr_kb = curr_kb->next;
 		}
@@ -230,9 +231,11 @@ static void bz_mgmt_change_keyboard_focus(
 	struct bz_client *new_client_data = wl_client_get_user_data(new_client);
 	struct wl_display *display = new_client_data->breezy->wayland.display;
 	struct xkb_state *xkbstate = new_client_data->breezy->input.xkb_state;
+	uint32_t enter_serial = wl_display_next_serial(display);
+	uint32_t modifiers_serial = wl_display_next_serial(display);
 	struct bz_node *curr_kb = new_client_data->seat->keyboards->head;
 	while (curr_kb != nullptr) {
-		bz_mgmt_notify_kb_enter(display, xkbstate, curr_kb->data, new_surface->resource);
+		bz_mgmt_notify_kb_enter(enter_serial, modifiers_serial, xkbstate, curr_kb->data, new_surface->resource);
 		curr_kb = curr_kb->next;
 	}
 }
@@ -251,8 +254,8 @@ static void bz_mgmt_change_pointer_focus(
 		struct bz_client *orig_client_data = wl_client_get_user_data(orig_client);
 		struct wl_display *display = orig_client_data->breezy->wayland.display;
 		struct bz_node *curr_ptr = orig_client_data->seat->pointers->head;
+		uint32_t serial = wl_display_next_serial(display);
 		while (curr_ptr != nullptr) {
-			uint32_t serial = wl_display_next_serial(display);
 			wl_pointer_send_leave(curr_ptr->data, serial, orig_surface->resource);
 			wl_pointer_send_frame(curr_ptr->data);
 			curr_ptr = curr_ptr->next;
@@ -263,14 +266,14 @@ static void bz_mgmt_change_pointer_focus(
 	if (new_surface != nullptr) {
 		struct wl_client *new_client = wl_resource_get_client(new_surface->resource);
 		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
-		struct wl_display *display = new_client_data->breezy->wayland.display;
-		struct bz_position cursor_position = {
-			.x = mgmt->last_cursor_loc.x - new_surface->position.x,
-			.y = mgmt->last_cursor_loc.y - new_surface->position.y,
-		};
+		int32_t x_pos = mgmt->last_cursor_loc.x - new_surface->position.x;
+		int32_t y_pos = mgmt->last_cursor_loc.y - new_surface->position.y;
+		uint32_t serial = wl_display_next_serial(new_client_data->breezy->wayland.display);
+		new_client_data->seat->last_enter_serial = serial;
 		struct bz_node *curr_ptr = new_client_data->seat->pointers->head;
 		while (curr_ptr != nullptr) {
-			bz_mgmt_notify_ptr_enter(display, &cursor_position, curr_ptr->data, new_surface->resource);
+			wl_pointer_send_enter(curr_ptr->data, serial, new_surface->resource, x_pos, y_pos);
+			wl_pointer_send_frame(curr_ptr->data);
 			curr_ptr = curr_ptr->next;
 		}
 	}

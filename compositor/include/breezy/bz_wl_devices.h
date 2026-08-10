@@ -6,6 +6,8 @@
 
 #include <wayland-server.h>
 
+#include "breezy/bz_breezy.h"
+
 // -- wl_seat --
 #define BZ_SEAT_VERSION 10
 void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
@@ -13,6 +15,9 @@ struct bz_wl_seat {
 	struct wl_resource *resource; // The "wl_seat"
 	struct bz_list *keyboards;    // List of "struct wl_resource *"
 	struct bz_list *pointers;     // List of "struct wl_resource *"
+
+	uint32_t last_enter_serial;   // Serial from the last wl_pointer::enter event
+	struct bz_cursor_img *cursor; // One "cursor" per seat. All wl_pointers impact this one cursor.
 };
 
 // -- wl_pointer --

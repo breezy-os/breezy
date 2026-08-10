@@ -242,7 +242,8 @@ static void bz_seat_get_keyboard(
 	struct bz_surface *active_surf = bz_mgmt_get_active_surface(&breezy->window_mgmt);
 	if (active_surf != nullptr && wl_resource_get_client(active_surf->resource) == client) {
 		bz_mgmt_notify_kb_enter(
-			breezy->wayland.display,
+			wl_display_next_serial(breezy->wayland.display),
+			wl_display_next_serial(breezy->wayland.display),
 			breezy->input.xkb_state,
 			res, active_surf->resource
 		);

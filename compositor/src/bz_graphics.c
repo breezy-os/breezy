@@ -18,6 +18,7 @@
 #include "breezy/bz_math.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
 
 
@@ -832,8 +833,16 @@ static void bz_gles_render_and_commit(void *data) {
 	}
 
 	// Render the cursor
-	struct bz_cursor_img cursor = breezy->gl.cursor;
-	if (cursor.texture != 0) {
+	struct bz_cursor_img *cursor = nullptr;
+	if (breezy->window_mgmt.pointer_focus == nullptr) {
+		cursor = &breezy->gl.cursor;
+	} else {
+		struct wl_resource *focused_surf = breezy->window_mgmt.pointer_focus->resource;
+		struct wl_client *client = wl_resource_get_client(focused_surf);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		cursor = client_data->seat->cursor;
+	}
+	if (cursor != nullptr && cursor->texture != 0) {
 		// Load our program
 		GLuint client_program = breezy->gl.client_shader_program;
 		glUseProgram(client_program);
@@ -851,14 +860,14 @@ static void bz_gles_render_and_commit(void *data) {
 		bz_mat3 projection = {0};
 		bz_fill_projection_matrix(projection,
 			0, 0, 1, 1,
-			cursor.position.x, cursor.position.y, BZ_CURSOR_W, BZ_CURSOR_H
+			cursor->position.x, cursor->position.y, BZ_CURSOR_W, BZ_CURSOR_H
 		);
 		GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
 		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
 
 		// Prep the texture
 		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, cursor.texture);
+		glBindTexture(GL_TEXTURE_2D, cursor->texture);
 		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
 		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
 
