@@ -73,9 +73,9 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 	// Also update our pointer's position to be in the window (which also adjusts its focus)
 	struct wl_client *client = wl_resource_get_client(surface->resource);
 	struct bz_client *client_data = wl_client_get_user_data(client);
-	struct bz_cursor_img *cursor = &client_data->breezy->gl.cursor;
-	cursor->position.x = surface->position.x;
-	cursor->position.y = surface->position.y;
+	struct bz_renderable *cursor = &client_data->breezy->gl.cursor;
+	cursor->position.x = surface->renderable.position.x;
+	cursor->position.y = surface->renderable.position.y;
 	bz_mgmt_update_pointer_position(mgmt, cursor);
 }
 
@@ -266,8 +266,8 @@ static void bz_mgmt_change_pointer_focus(
 	if (new_surface != nullptr) {
 		struct wl_client *new_client = wl_resource_get_client(new_surface->resource);
 		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
-		int32_t x_pos = mgmt->last_cursor_loc.x - new_surface->position.x;
-		int32_t y_pos = mgmt->last_cursor_loc.y - new_surface->position.y;
+		int32_t x_pos = mgmt->last_cursor_loc.x - new_surface->renderable.position.x;
+		int32_t y_pos = mgmt->last_cursor_loc.y - new_surface->renderable.position.y;
 		uint32_t serial = wl_display_next_serial(new_client_data->breezy->wayland.display);
 		new_client_data->seat->last_enter_serial = serial;
 		struct bz_node *curr_ptr = new_client_data->seat->pointers->head;
@@ -282,18 +282,19 @@ static void bz_mgmt_change_pointer_focus(
 	mgmt->pointer_focus = new_surface;
 }
 
-struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_cursor_img *cursor)
+struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_renderable *cursor)
 {
-	mgmt->last_cursor_loc.x = cursor->position.x + cursor->hotspot.x;
-	mgmt->last_cursor_loc.y = cursor->position.y + cursor->hotspot.y;
+	mgmt->last_cursor_loc.x = cursor->position.x - cursor->offset.x;
+	mgmt->last_cursor_loc.y = cursor->position.y - cursor->offset.y;
 
 	// Iterate over our list, BACKWARDS, until we overlap with a window (or run out of items)
 	struct bz_node *curr_window = mgmt->activable_surfaces->tail;
 	while (curr_window != nullptr) {
 		struct bz_surface *surf = curr_window->data;
+		struct bz_renderable surf_rect = surf->renderable;
 
 		// Check if cursor is overlapping
-		if (bz_contains_point(&surf->position, &surf->size, &mgmt->last_cursor_loc)) {
+		if (bz_contains_point(&surf_rect.position, &surf_rect.size, &mgmt->last_cursor_loc)) {
 			// If it doesn't already have pointer focus, send an enter event for pointers.
 			if (mgmt->pointer_focus != surf) {
 				bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, surf);

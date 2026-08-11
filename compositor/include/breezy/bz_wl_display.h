@@ -6,6 +6,7 @@
 
 #include <wayland-server.h>
 
+#include "breezy/bz_breezy.h"
 #include "breezy/bz_math.h"
 #include "glad/gles2.h"
 
@@ -52,6 +53,7 @@ struct bz_surface {
 	union {
 		struct bz_xdg_toplevel *xdgtoplevel;
 		struct bz_xdg_popup *xdgpopup;
+		// (no data needed for "cursor")
 		// ...etc...
 	};
 
@@ -60,9 +62,7 @@ struct bz_surface {
 	struct bz_surface_state *active_state;
 
 	// Display data
-	GLuint texture;
-	struct bz_position position;
-	struct bz_dimension size;
+	struct bz_renderable renderable;
 };
 
 void bz_surface_dtor(struct wl_resource *data);

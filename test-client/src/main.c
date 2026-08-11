@@ -78,8 +78,9 @@ int main(void)
 	bz_registry_constructor(&client_globals);
 	wl_display_roundtrip(client_globals.display);
 
-	// Make our main application window
+	// Make our main application window and cursor
 	client_globals.window = bz_create_app_window(&client_globals);
+	client_globals.cursor = bz_create_cursor_surface(&client_globals);
 
 	// Loop!
 	bz_run_event_loop(&client_globals);

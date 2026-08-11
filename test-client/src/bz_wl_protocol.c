@@ -30,7 +30,7 @@ static void bz_shm_format(void *data, struct wl_shm *shm, uint32_t format);
 
 // -- wl_buffer --
 
-static const struct wl_buffer_listener bz_buffer_implementation;
+const struct wl_buffer_listener bz_buffer_implementation;
 static void bz_buffer_release(void *data, struct wl_buffer *buffer);
 
 // -- wl_seat --
@@ -198,7 +198,7 @@ static void bz_shm_format(void * /*data*/, struct wl_shm * /*shm*/, uint32_t for
 //  wl_buffer
 // -------------------------------------------------------------------------------------------------
 
-static const struct wl_buffer_listener bz_buffer_implementation = {
+const struct wl_buffer_listener bz_buffer_implementation = {
 	.release = bz_buffer_release,
 };
 
@@ -443,9 +443,13 @@ static void bz_pointer_enter(
 	wl_fixed_t surface_x,
 	wl_fixed_t surface_y
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.enter not implemented");
-	// TODO
-	// TODO-dl11: Clients should call "set_cursor()" in response to this enter event.
+	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Surface entered via pointer! Calling set_cursor.");
+
+	struct bz_seat *seat_data = data;
+
+	// "null" cursor surface will clear the display
+	// wl_pointer_set_cursor(wl_pointer, serial, nullptr, 0, 0);
+	wl_pointer_set_cursor(wl_pointer, serial, seat_data->globals->cursor->wlsurface, 0, 0);
 }
 
 static void bz_pointer_leave(
@@ -613,49 +617,21 @@ static void bz_initialize_surface_buffers(
 	struct bz_client_globals *globals,
 	struct bz_application_window *window
 ) {
-	// Create a pool for our buffers
-	size_t buffer_size = window->size.w * window->size.h * 4; // 4 bytes per px (XRGB8888)
-	window->pool_size = buffer_size * 2; // Two buffers per pool (double-buffered)
-	int fd = bz_allocate_shm_file(window->pool_size);
-	if (fd == -1) {
-		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to allocate shared memory.");
-		return;
-	}
+	struct bz_buff_alloc *allocation = bz_allocate_shm_buffers(
+		window->size.w,
+		window->size.h,
+		2,
+		globals->shm,
+		&bz_buffer_implementation
+	);
 
-	// Map the pool's file descriptor to memory
-	window->pool_data = mmap(NULL, window->pool_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (window->pool_data == MAP_FAILED) {
-		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to mmap pool data.");
-		window->pool_data = nullptr;
-		close(fd);
-		return;
-	}
-
-	// Send the pool to the server
-	window->shm_pool = wl_shm_create_pool(globals->shm, fd, window->pool_size);
-	close(fd);
-
-	// Create our two buffers
-	for (uint8_t i = 0; i < 2; i++) {
-		size_t offset = i * buffer_size;
-		window->buffers[i].is_released = true;
-		window->buffers[i].size = window->size;
-		window->buffers[i].pixel_data = (uint32_t *)(&window->pool_data[offset]);
-		window->buffers[i].buffer = wl_shm_pool_create_buffer(
-			window->shm_pool,
-			offset,
-			window->size.w,
-			window->size.h,
-			window->size.w * 4, // Stride
-			WL_SHM_FORMAT_XRGB8888
-		);
-		wl_buffer_add_listener(
-			window->buffers[i].buffer,
-			&bz_buffer_implementation,
-			&window->buffers[i]
-		);
-	}
+	window->pool_size = allocation->pool_size;
+	window->pool_data = allocation->pool_data;
+	window->shm_pool = allocation->shm_pool;
+	window->buffers = allocation->buffers;
 	window->active_buffer = 0;
+
+	free(allocation);
 }
 
 static void bz_update_circle(struct bz_application_window *window, uint32_t new_time)
@@ -766,7 +742,7 @@ static void bz_submit_frame(struct bz_application_window *window)
 	bzbuffer->is_released = false;
 
 	wl_surface_attach(window->wlsurface, bzbuffer->buffer, 0, 0);
-	// TODO-dl10: wl_surface_damage(window->wlsurface, 0, 0, INT32_MAX, INT32_MAX);
+	// TODO-dl12: wl_surface_damage(window->wlsurface, 0, 0, INT32_MAX, INT32_MAX);
 
 	// Set up our frame callback to get notified when our next frame should be drawn
 	window->frame_callback = wl_surface_frame(window->wlsurface);

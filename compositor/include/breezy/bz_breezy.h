@@ -33,11 +33,12 @@ struct bz_gbm {
 	struct gbm_bo *new_bo;  // The recently committed, but not yet displayed, buffer.
 };
 
-#define BZ_CURSOR_W 24
-#define BZ_CURSOR_H 24
-struct bz_cursor_img {
+struct bz_renderable {
 	struct bz_position position;
-	struct bz_position hotspot; // relative to position
+	/** How far to shift the position before rendering. A positive number means the buffer should
+	 * be shifted to the right and down. For cursors, this is the "negative hotspot". */
+	struct bz_position offset;
+	struct bz_dimension size;
 	GLuint texture;
 };
 
@@ -49,7 +50,7 @@ struct bz_gl {
 	bool is_dirty;
 	GLuint client_shader_program;
 	GLuint vbo;
-	struct bz_cursor_img cursor;
+	struct bz_renderable cursor;
 };
 
 struct bz_seat {
@@ -94,7 +95,7 @@ struct bz_window_mgmt {
 	 */
 	struct bz_list *activable_surfaces; // Each item is of type "struct bz_surface *"
 
-	struct bz_surface *pointer_focus; // nullptr if cursor isn't above a surface
+	struct bz_surface *pointer_focus;  // nullptr if cursor isn't above a surface
 	struct bz_position last_cursor_loc;
 };
 

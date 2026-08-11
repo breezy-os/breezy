@@ -4,7 +4,6 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <sys/poll.h>
-#include <time.h>
 
 #include <wayland-client.h>
 #include <xdg-shell-client-protocol.h>
@@ -92,4 +91,44 @@ struct bz_application_window *bz_create_app_window(struct bz_client_globals *glo
 	wl_surface_commit(window->wlsurface);
 
 	return window;
+}
+
+extern const struct wl_buffer_listener bz_buffer_implementation;
+struct bz_cursor *bz_create_cursor_surface(struct bz_client_globals *globals)
+{
+	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Creating cursor surface.");
+	struct bz_cursor *cursor = calloc(1, sizeof(*cursor));
+
+	const int32_t width = 24;
+	const int32_t height = 24;
+
+	// Create the Wayland surface and buffer
+	struct wl_surface *surface = wl_compositor_create_surface(globals->compositor);
+	struct bz_buff_alloc *allocation = bz_allocate_shm_buffers(
+		width,
+		height,
+		1,
+		globals->shm,
+		&bz_buffer_implementation
+	);
+	cursor->wlsurface = surface;
+	cursor->pool_size = allocation->pool_size;
+	cursor->pool_data = allocation->pool_data;
+	cursor->shm_pool = allocation->shm_pool;
+	cursor->buffer = allocation->buffers;
+	free(allocation);
+
+	// Create/populate our cursor
+	uint32_t color = globals->window->bg_color;
+	for (int32_t row = 0; row < height; row++) {
+		for (int32_t col = 0; col < width; col++) {
+			cursor->buffer->pixel_data[row * width + col] = color;
+		}
+	}
+
+	// Attach and commit
+	wl_surface_attach(surface, cursor->buffer->buffer, 0, 0);
+	wl_surface_commit(surface);
+
+	return cursor;
 }

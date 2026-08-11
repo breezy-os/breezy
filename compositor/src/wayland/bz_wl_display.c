@@ -49,8 +49,7 @@ static void bz_surface_set_buffer_scale(struct wl_client *client, struct wl_reso
 static void bz_surface_damage_buffer(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
 static void bz_surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
 // Helpers
-static void bz_initialize_gl_texture(struct bz_surface *surface);
-static void bz_apply_damage(struct bz_surface *bzsurf);
+static void bz_write_surface_texture(struct bz_surface *surface_data);
 
 
 // =================================================================================================
@@ -122,8 +121,8 @@ static void bz_compositor_create_surface(
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
-	surface->position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
-	surface->position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
+	surface->renderable.position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
+	surface->renderable.position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
 
 	// Everything succeeded!
 	return;
@@ -248,14 +247,14 @@ void bz_surface_dtor(struct wl_resource *data)
 	bz_surface_state_free(bzsurf->pending_state);
 	bz_surface_state_free(bzsurf->active_state);
 
-	glDeleteTextures(1, &bzsurf->texture);
+	glDeleteTextures(1, &bzsurf->renderable.texture);
 
 	free(bzsurf);
 
 	// Not sure I really like this here... keep an eye out for a better place to unrender clients.
 	struct wl_client *client = wl_resource_get_client(data);
-	struct bz_client *bzclient = wl_client_get_user_data(client);
-	bz_graphics_schedule_render(bzclient->breezy);
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	bz_graphics_schedule_render(client_data->breezy);
 }
 
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource)
@@ -273,9 +272,9 @@ static void bz_surface_attach(
 	int32_t x,
 	int32_t y
 ) {
-	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
-	bzsurf->pending_state->buffer = buffer;
-	// TODO: accommodate x and y
+	struct bz_surface *surf_data = wl_resource_get_user_data(resource);
+	surf_data->pending_state->buffer = buffer;
+	// TODO: accommodate x and y. Consider how this would apply for both XDG surfaces and cursors.
 }
 
 static void bz_surface_damage(
@@ -370,24 +369,22 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 
 	if (bzsurf->active_state->buffer != nullptr) {
 		// Update our OpenGL texture
-		if (bzsurf->texture == 0) {
-			bz_initialize_gl_texture(bzsurf);
-		}
-		bz_apply_damage(bzsurf);
+		bz_write_surface_texture(bzsurf);
 
 		// Update our displayed window size
 		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->active_state->buffer);
-		bzsurf->size.w = wl_shm_buffer_get_width(shmbuf);
-		bzsurf->size.h = wl_shm_buffer_get_height(shmbuf);
+		bzsurf->renderable.size.w = wl_shm_buffer_get_width(shmbuf);
+		bzsurf->renderable.size.h = wl_shm_buffer_get_height(shmbuf);
+
+		// Since the buffer contents are saved on our OpenGL texture, release the buffer.
+		// TODO: This might need to be deferred for the DMA-BUF protocol..?
+		wl_buffer_send_release(bzsurf->active_state->buffer);
 
 		// Since the surface was just mapped (and therefore displayed), let's focus the surface
-		bz_mgmt_open_window(&client_data->breezy->window_mgmt, bzsurf);
-	}
-
-	// Since the buffer is on our OpenGL texture, release the buffer.
-	// TODO: This might need to be deferred for the DMA-BUF protocol..?
-	if (bzsurf->active_state->buffer != nullptr) {
-		wl_buffer_send_release(bzsurf->active_state->buffer);
+		// TODO-dl13 (ish): Also consider wlr_layer_surfaces
+		if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
+			bz_mgmt_open_window(&client_data->breezy->window_mgmt, bzsurf);
+		}
 	}
 
 	// Schedule a repaint
@@ -436,32 +433,33 @@ static void bz_surface_offset(
 
 // ---  Helpers  -----------------------------------------------------------------------------------
 
-static void bz_initialize_gl_texture(struct bz_surface *surface)
+static void bz_write_surface_texture(struct bz_surface *surface_data)
 {
-	bz_info(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Initializing OpenGL texture for surface.");
+	// Initialize the texture
+	if (surface_data->renderable.texture == 0) {
+		bz_info(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Initializing OpenGL texture for surface.");
+		glGenTextures(1, &surface_data->renderable.texture);
+		glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
 
-	glGenTextures(1, &surface->texture);
-	glBindTexture(GL_TEXTURE_2D, surface->texture);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-}
-
-static void bz_apply_damage(struct bz_surface *bzsurf)
-{
-	if (bzsurf->active_state->buffer == nullptr) {
+	// Make sure we have a buffer ready to go
+	if (surface_data->active_state->buffer == nullptr) {
 		return;
 	}
 
-	struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->active_state->buffer);
+	// Copy in the surface
+	struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(surface_data->active_state->buffer);
 	wl_shm_buffer_begin_access(shmbuf);
 	// --- Buffer Access Begin ---------------------------------------------------------------------
 
 	uint32_t *data = wl_shm_buffer_get_data(shmbuf);
 	int32_t width = wl_shm_buffer_get_width(shmbuf);
 	int32_t height = wl_shm_buffer_get_height(shmbuf);
-	glBindTexture(GL_TEXTURE_2D, bzsurf->texture);
+	glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
 	glTexImage2D(
 		GL_TEXTURE_2D,

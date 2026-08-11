@@ -18,7 +18,7 @@ void bz_mgmt_notify_kb_enter(uint32_t enter_serial, uint32_t modifiers_serial, s
 
 // -- Window Focus --
 struct bz_surface *bz_mgmt_get_active_surface(struct bz_window_mgmt *mgmt);
-struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_cursor_img *cursor);
+struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_renderable *cursor);
 
 // #################################################################################################
 #endif

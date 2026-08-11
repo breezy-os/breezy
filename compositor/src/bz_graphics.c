@@ -697,14 +697,20 @@ static void bz_gles_create_unit_quad(struct bz_breezy *breezy)
 
 static void bz_gles_init_client_cursor(struct bz_breezy *breezy)
 {
-	uint32_t pixels[BZ_CURSOR_W * BZ_CURSOR_H];
-	for (uint32_t row = 0; row < BZ_CURSOR_H; row++) {
-		for (uint32_t col = 0; col < BZ_CURSOR_W; col++) {
-			pixels[row*BZ_CURSOR_W + col] = 0xffff0000; // red
+	struct bz_renderable *cursor = &breezy->gl.cursor;
+	cursor->position.x = 0;
+	cursor->position.y = 0;
+	cursor->size.w = 24;
+	cursor->size.h = 24;
+	cursor->offset.x = -cursor->size.w / 2;
+	cursor->offset.y = -cursor->size.h / 2;
+
+	uint32_t pixels[cursor->size.w * cursor->size.h];
+	for (int32_t row = 0; row < cursor->size.h; row++) {
+		for (int32_t col = 0; col < cursor->size.w; col++) {
+			pixels[row * cursor->size.w + col] = 0xffff0000; // red
 		}
 	}
-	breezy->gl.cursor.hotspot.x = BZ_CURSOR_W / 2;
-	breezy->gl.cursor.hotspot.y = BZ_CURSOR_H / 2;
 
 	glGenTextures(1, &breezy->gl.cursor.texture);
 	glBindTexture(GL_TEXTURE_2D, breezy->gl.cursor.texture);
@@ -716,8 +722,8 @@ static void bz_gles_init_client_cursor(struct bz_breezy *breezy)
 		GL_TEXTURE_2D,
 		0,
 		GL_BGRA_EXT,
-		BZ_CURSOR_W,
-		BZ_CURSOR_H,
+		cursor->size.w,
+		cursor->size.h,
 		0,
 		GL_BGRA_EXT,
 		GL_UNSIGNED_BYTE,
@@ -808,20 +814,22 @@ static void bz_gles_render_and_commit(void *data) {
 		// ...then render each activable surface
 		struct bz_node *curr_surf = breezy->window_mgmt.activable_surfaces->head;
 		while (curr_surf != nullptr) {
-			struct bz_surface *bzsurf = curr_surf->data;
-			if (bzsurf->texture != 0 && bzsurf->active_state->buffer != nullptr) {
+			struct bz_surface *surf_data = curr_surf->data;
+			struct bz_renderable renderable = surf_data->renderable;
+			if (renderable.texture != 0 && surf_data->active_state->buffer != nullptr) {
 				// Load our surface projection matrix
 				bz_mat3 projection = {0};
 				bz_fill_projection_matrix(projection,
 					0, 0, 1, 1,
-					bzsurf->position.x, bzsurf->position.y, bzsurf->size.w, bzsurf->size.h
+					renderable.position.x, renderable.position.y,
+					renderable.size.w, renderable.size.h
 				);
 				GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
 				glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
 
 				// Prep the texture
 				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, bzsurf->texture);
+				glBindTexture(GL_TEXTURE_2D, renderable.texture);
 				GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
 				glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
 
@@ -833,14 +841,16 @@ static void bz_gles_render_and_commit(void *data) {
 	}
 
 	// Render the cursor
-	struct bz_cursor_img *cursor = nullptr;
+	struct bz_renderable *cursor = nullptr;
 	if (breezy->window_mgmt.pointer_focus == nullptr) {
 		cursor = &breezy->gl.cursor;
 	} else {
 		struct wl_resource *focused_surf = breezy->window_mgmt.pointer_focus->resource;
 		struct wl_client *client = wl_resource_get_client(focused_surf);
 		struct bz_client *client_data = wl_client_get_user_data(client);
-		cursor = client_data->seat->cursor;
+		if (client_data->seat && client_data->seat->cursor_surface) {
+			cursor = &client_data->seat->cursor_surface->renderable;
+		}
 	}
 	if (cursor != nullptr && cursor->texture != 0) {
 		// Load our program
@@ -860,7 +870,7 @@ static void bz_gles_render_and_commit(void *data) {
 		bz_mat3 projection = {0};
 		bz_fill_projection_matrix(projection,
 			0, 0, 1, 1,
-			cursor->position.x, cursor->position.y, BZ_CURSOR_W, BZ_CURSOR_H
+			cursor->position.x, cursor->position.y, cursor->size.w, cursor->size.h
 		);
 		GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
 		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);

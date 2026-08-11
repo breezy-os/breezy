@@ -33,7 +33,10 @@ static void bz_seat_release(struct wl_client *client, struct wl_resource *resour
 // -- wl_pointer --
 
 static const struct wl_pointer_interface bz_pointer_implementation;
+static void bz_pointer_set_cursor(struct wl_client *client, struct wl_resource *resource, uint32_t serial, struct wl_resource *surface, int32_t hotspot_x, int32_t hotspot_y);
 static void bz_pointer_release(struct wl_client *client, struct wl_resource *resource);
+// Helpers
+static void bz_write_surface_texture(struct bz_surface *surface_data);
 
 // -- wl_keyboard --
 
@@ -277,8 +280,80 @@ static void bz_seat_release(struct wl_client *client, struct wl_resource *resour
 // -------------------------------------------------------------------------------------------------
 
 static const struct wl_pointer_interface bz_pointer_implementation = {
+	.set_cursor = bz_pointer_set_cursor,
 	.release = bz_pointer_release,
 };
+
+static void bz_pointer_set_cursor(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	uint32_t serial,
+	struct wl_resource *surface,
+	int32_t hotspot_x,
+	int32_t hotspot_y
+) {
+	// Must have a seat to have arrived here
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_wl_seat *seat = client_data->seat;
+	if (seat == nullptr) {
+		// This should be impossible... Can't have a null seat if you have a pointer object.
+		bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Client's seat was null.");
+		goto null_seat;
+	}
+
+	// There needs to be a pointer-focused surface to have arrived here.
+	struct bz_surface *focused_surface = client_data->breezy->window_mgmt.pointer_focus;
+	if (focused_surface == nullptr) {
+		bz_info(BZ_LOG_WL_DEVICES, __FILE__, __LINE__,
+			"wl_pointer::set_cursor called without a surface having pointer focus.");
+		return;
+	}
+
+	// Make sure the submitted serial matches the latest "enter" serial for this seat.
+	if (seat->last_enter_serial != serial) {
+		bz_info(BZ_LOG_WL_DEVICES, __FILE__, __LINE__,
+			"wl_pointer::set_cursor called with an outdated serial.");
+		return;
+	}
+
+	// Cursor only changes IF:
+	//   (1) the focus for this `wl_pointer` is one of the requesting client's surfaces, OR
+	//   (2) the surface parameter is the current pointer surface.
+	struct wl_client *focused_client = wl_resource_get_client(focused_surface->resource);
+	if ((focused_client != client) && (focused_surface->resource != surface)) {
+		bz_info(BZ_LOG_WL_DEVICES, __FILE__, __LINE__,
+			"A currently inactive client called pointer::set_cursor.");
+		return;
+	}
+
+	// If the given surface is NULL, the pointer image is hidden.
+	if (surface == nullptr) {
+		seat->cursor_surface = nullptr;
+		return;
+	}
+
+	// If the surface already has another role, it raises a protocol error.
+	struct bz_surface *surface_data = wl_resource_get_user_data(surface);
+	if (surface_data->role != BZ_SURF_ROLE_NONE && surface_data->role != BZ_SURF_ROLE_WL_CURSOR) {
+		wl_resource_post_error(resource, WL_POINTER_ERROR_ROLE, "Surface role cannot be changed.");
+		goto initial_checks_failed;
+	}
+
+	// Ok, all checks out. Let's make the change!
+	surface_data->renderable.offset.x = -hotspot_x;
+	surface_data->renderable.offset.y = -hotspot_y;
+	surface_data->renderable.position.x = client_data->breezy->window_mgmt.last_cursor_loc.x;
+	surface_data->renderable.position.y = client_data->breezy->window_mgmt.last_cursor_loc.y;
+	surface_data->role = BZ_SURF_ROLE_WL_CURSOR;
+	seat->cursor_surface = surface_data;
+
+	// Everything succeeded!
+	return;
+
+	null_seat:
+	initial_checks_failed:
+		bz_error(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Failed to execute 'pointer::set_cursor'.");
+}
 
 static void bz_pointer_release(struct wl_client *client, struct wl_resource *resource)
 {

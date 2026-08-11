@@ -17,7 +17,7 @@ struct bz_wl_seat {
 	struct bz_list *pointers;     // List of "struct wl_resource *"
 
 	uint32_t last_enter_serial;   // Serial from the last wl_pointer::enter event
-	struct bz_cursor_img *cursor; // One "cursor" per seat. All wl_pointers impact this one cursor.
+	struct bz_surface *cursor_surface; // One "cursor" per seat. All wl_pointers impact this one cursor.
 };
 
 // -- wl_pointer --
