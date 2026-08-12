@@ -77,6 +77,7 @@ struct bz_application_window *bz_create_app_window(struct bz_client_globals *glo
 
 	struct bz_application_window *window = calloc(1, sizeof(*window));
 	// Visual / application state
+	window->radius = 50;
 	window->bg_color = bz_random_color();
 	window->fg_color = bz_random_color();
 	window->circle_speed_x = bz_rand_int(2, 20) * 0.1f;

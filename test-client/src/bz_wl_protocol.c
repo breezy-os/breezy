@@ -402,7 +402,7 @@ static void bz_keyboard_modifiers(
 	uint32_t mods_locked,
 	uint32_t group
 ) {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Modifiers received! %d, %d, %d, %d, %d", serial, mods_depressed, mods_latched, mods_locked, group);
+	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Modifiers received! %d, %d, %d, %d, %d", serial, mods_depressed, mods_latched, mods_locked, group);
 	// TODO
 }
 
@@ -412,7 +412,6 @@ static void bz_keyboard_repeat_info(
 	int32_t rate,
 	int32_t delay
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_keyboard.repeat_info not implemented");
 	// TODO
 }
 
@@ -459,8 +458,7 @@ static void bz_pointer_leave(
 	uint32_t serial,
 	struct wl_surface *surface
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.leave not implemented");
-	// TODO
+	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Surface left via pointer!");
 }
 
 static void bz_pointer_motion(
@@ -508,12 +506,12 @@ static void bz_pointer_axis(
 	uint32_t axis,
 	wl_fixed_t value
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis not implemented");
-	// TODO
+	struct bz_seat *seat_data = data;
+	struct bz_application_window *window = seat_data->globals->window;
+	window->radius = bz_clamp(window->radius + (value / 2), 20, 150);
 }
 
 static void bz_pointer_frame(void *data, struct wl_pointer *wl_pointer) {
-	// bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.frame not implemented");
 	// TODO
 }
 
@@ -522,7 +520,6 @@ static void bz_pointer_axis_source(
 	struct wl_pointer *wl_pointer,
 	uint32_t axis_source
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_source not implemented");
 	// TODO
 }
 
@@ -552,7 +549,6 @@ static void bz_pointer_axis_value120(
 	uint32_t axis,
 	int32_t value120
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_value120 not implemented");
 	// TODO
 }
 
@@ -711,7 +707,6 @@ static void bz_control_circle(struct bz_application_window *window, uint32_t new
 
 #define BZ_BORDER_WIDTH 8
 #define BZ_TITLE_WIDTH 40
-#define BZ_CIRCLE_RADIUS 50
 static void bz_draw_frame(struct bz_application_window *window)
 {
 	const struct bz_buffer *buffer = &window->buffers[window->active_buffer];
@@ -738,11 +733,11 @@ static void bz_draw_frame(struct bz_application_window *window)
 			} else if (y < BZ_TITLE_WIDTH) {
 				buffer->pixel_data[y * buffer->size.w + x] = 0xFFFFFFFF;
 			} else if (window->konami_active &&
-				abs(circle_x - x) < BZ_CIRCLE_RADIUS &&
-				abs(circle_y - y) < BZ_CIRCLE_RADIUS
+				abs(circle_x - x) < window->radius &&
+				abs(circle_y - y) < window->radius
 			) {
 				buffer->pixel_data[y * buffer->size.w + x] = window->fg_color;
-			} else if (bz_distance(circle_x, circle_y, x, y) < BZ_CIRCLE_RADIUS) {
+			} else if (bz_distance(circle_x, circle_y, x, y) < window->radius) {
 				buffer->pixel_data[y * buffer->size.w + x] = window->fg_color;
 			} else {
 				buffer->pixel_data[y * buffer->size.w + x] = window->bg_color;

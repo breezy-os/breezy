@@ -37,6 +37,7 @@ struct bz_application_window {
 	struct bz_configure_sequence *finalized;
 
 	struct bz_dimension size;
+	uint32_t radius;
 	uint32_t bg_color;
 	uint32_t fg_color;
 	uint32_t prev_time; // Used for circle animation.
