@@ -34,6 +34,7 @@ static void bz_input_close_restricted(int fd, void *data);
 static bool bz_input_device_fd_matches(void *fd, void *device);
 static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status);
 static void bz_input_process_pointer_motion_event(struct bz_breezy *breezy, struct libinput_event_pointer *pt_event);
+static void bz_input_process_pointer_button_event(struct bz_breezy *breezy, struct libinput_event_pointer *pt_event);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
@@ -150,6 +151,7 @@ static void bz_input_process_pointer_motion_event(
 	double delta_x = libinput_event_pointer_get_dx_unaccelerated(pt_event);
 	double delta_y = libinput_event_pointer_get_dy_unaccelerated(pt_event);
 
+	// Update the cursor on the screen
 	breezy->gl.cursor.position.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay) + breezy->gl.cursor.offset.x;
 	breezy->gl.cursor.position.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay) + breezy->gl.cursor.offset.y;
 	if (breezy->window_mgmt.pointer_focus != nullptr) {
@@ -162,8 +164,52 @@ static void bz_input_process_pointer_motion_event(
 		}
 	}
 
+	// Check for surface enter/leave events
 	bz_mgmt_update_pointer_position(&breezy->window_mgmt, &breezy->gl.cursor);
+
+	// Send motion events to all the focused surface's wl_pointers.
+	struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
+	if (focused_surf != nullptr) {
+		uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
+		int32_t x_pos = breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.position.x;
+		int32_t y_pos = breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.position.y;
+		struct wl_client *client = wl_resource_get_client(focused_surf->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		struct bz_node *curr_pointer = client_data->seat->pointers->head;
+		while (curr_pointer != nullptr) {
+			wl_pointer_send_motion(curr_pointer->data, timestamp, x_pos, y_pos);
+			wl_pointer_send_frame(curr_pointer->data);
+			curr_pointer = curr_pointer->next;
+		}
+	}
+
 	bz_graphics_schedule_render(breezy);
+}
+
+static void bz_input_process_pointer_button_event(
+	struct bz_breezy *breezy,
+	struct libinput_event_pointer *pt_event
+) {
+	// Send motion events to all the focused surface's wl_pointers.
+	struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
+	if (focused_surf != nullptr) {
+		struct wl_client *client = wl_resource_get_client(focused_surf->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+
+		uint32_t serial = wl_display_next_serial(client_data->breezy->wayland.display);
+		uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
+		uint32_t button = libinput_event_pointer_get_button(pt_event);
+		uint32_t state = libinput_event_pointer_get_button_state(pt_event) == LIBINPUT_BUTTON_STATE_PRESSED
+			? WL_POINTER_BUTTON_STATE_PRESSED
+			: WL_POINTER_BUTTON_STATE_RELEASED;
+
+		struct bz_node *curr_pointer = client_data->seat->pointers->head;
+		while (curr_pointer != nullptr) {
+			wl_pointer_send_button(curr_pointer->data, serial, timestamp, button, state);
+			wl_pointer_send_frame(curr_pointer->data);
+			curr_pointer = curr_pointer->next;
+		}
+	}
 }
 
 static void bz_input_process_kb_event(
@@ -442,6 +488,8 @@ int bz_input_process_events(int /*fd*/, uint32_t /*mask*/, void *data)
 	while ((event = libinput_get_event(breezy->input.libinput)) != nullptr) {
 		if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_MOTION) {
 			bz_input_process_pointer_motion_event(breezy, libinput_event_get_pointer_event(event));
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_BUTTON) {
+			bz_input_process_pointer_button_event(breezy, libinput_event_get_pointer_event(event));
 		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_KEYBOARD_KEY) {
 			bz_input_process_kb_event(breezy, libinput_event_get_keyboard_event(event));
 		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_DEVICE_ADDED) {

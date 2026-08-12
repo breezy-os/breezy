@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <linux/input-event-codes.h>
 
 #include <xdg-shell-client-protocol.h>
 #include <xkbcommon/xkbcommon.h>
@@ -469,8 +470,9 @@ static void bz_pointer_motion(
 	wl_fixed_t surface_x,
 	wl_fixed_t surface_y
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.motion not implemented");
-	// TODO
+	struct bz_seat *seat_data = data;
+	seat_data->globals->window->circle_center.x = surface_x;
+	seat_data->globals->window->circle_center.y = surface_y;
 }
 
 static void bz_pointer_button(
@@ -481,8 +483,22 @@ static void bz_pointer_button(
 	uint32_t button,
 	uint32_t state
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.button not implemented");
-	// TODO
+	// We don't really care about the press event, just the release event.
+	if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
+		return;
+	}
+
+	struct bz_seat *seat_data = data;
+	struct bz_application_window *window = seat_data->globals->window;
+
+	switch (button) {
+	case BTN_LEFT:
+		window->fg_color = bz_random_color();
+		break;
+	case BTN_RIGHT:
+		window->bg_color = bz_random_color();
+		break;
+	}
 }
 
 static void bz_pointer_axis(
@@ -497,7 +513,7 @@ static void bz_pointer_axis(
 }
 
 static void bz_pointer_frame(void *data, struct wl_pointer *wl_pointer) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.frame not implemented");
+	// bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.frame not implemented");
 	// TODO
 }
 
