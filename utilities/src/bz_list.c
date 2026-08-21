@@ -15,7 +15,7 @@ struct bz_list *bz_list_create()
 {
 	struct bz_list *list = malloc(sizeof(*list));
 	if (!list) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__, "Failed to allocate memory creating list.");
+		bz_error(BZ_LOG_LIST, "Failed to allocate memory creating list.");
 		return nullptr;
 	}
 	list->head = nullptr;
@@ -31,13 +31,12 @@ struct bz_list *bz_list_create()
 int bz_list_append(struct bz_list *list, void *data)
 {
 	if (list == nullptr) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__, "Append failed: list was not initialized.");
+		bz_error(BZ_LOG_LIST, "Append failed: list was not initialized.");
 		return -1;
 	}
 	struct bz_node *new_node = malloc(sizeof(*new_node));
 	if (!new_node) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__,
-			"Append failed: new node could not be allocated.");
+		bz_error(BZ_LOG_LIST, "Append failed: new node could not be allocated.");
 		return -2;
 	}
 	new_node->data = data;
@@ -72,7 +71,7 @@ int bz_list_append(struct bz_list *list, void *data)
 int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 {
 	if (list == nullptr) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__, "Insertion failed: list was not initialized.");
+		bz_error(BZ_LOG_LIST, "Insertion failed: list was not initialized.");
 		return -1;
 	}
 
@@ -81,8 +80,7 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 		// Allocate a new node
 		struct bz_node *new_node = malloc(sizeof(*new_node));
 		if (!new_node) {
-			bz_error(BZ_LOG_LIST, __FILE__, __LINE__,
-				"Insertion failed: new node could not be allocated.");
+			bz_error(BZ_LOG_LIST, "Insertion failed: new node could not be allocated.");
 			return -3;
 		}
 		new_node->data = data;
@@ -117,8 +115,7 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 		// Allocate a new node
 		struct bz_node *new_node = malloc(sizeof(*new_node));
 		if (!new_node) {
-			bz_error(BZ_LOG_LIST, __FILE__, __LINE__,
-				"Insertion failed: new node could not be allocated.");
+			bz_error(BZ_LOG_LIST, "Insertion failed: new node could not be allocated.");
 			return -4;
 		}
 		new_node->data = data;
@@ -158,7 +155,7 @@ int bz_list_replace(
 	void (*free_data)(void *)
 ) {
 	if (list == nullptr) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__, "Remove failed: list was not initialized.");
+		bz_error(BZ_LOG_LIST, "Remove failed: list was not initialized.");
 		return -1;
 	}
 
@@ -176,8 +173,7 @@ int bz_list_replace(
 		// Allocate space for the new node
 		struct bz_node *new_node = malloc(sizeof(*new_node));
 		if (!new_node) {
-			bz_error(BZ_LOG_LIST, __FILE__, __LINE__,
-				"Replacement failed: new node could not be allocated.");
+			bz_error(BZ_LOG_LIST, "Replacement failed: new node could not be allocated.");
 			return -3;
 		}
 		new_node->data = replacement;
@@ -213,7 +209,7 @@ int bz_list_replace(
 int bz_list_remove(struct bz_list *list, void *data, void (*free_data)(void *))
 {
 	if (list == nullptr) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__, "Remove failed: list was not initialized.");
+		bz_error(BZ_LOG_LIST, "Remove failed: list was not initialized.");
 		return -1;
 	}
 
@@ -299,7 +295,7 @@ int bz_list_filter(
 	void (*free_data)(void *)
 ) {
 	if (list == nullptr) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__, "Filter failed: list was not initialized.");
+		bz_error(BZ_LOG_LIST, "Filter failed: list was not initialized.");
 		return -1;
 	}
 
@@ -344,7 +340,7 @@ int bz_list_filter(
 void bz_list_clear(struct bz_list *list, void (*free_data)(void *))
 {
 	if (list == nullptr) {
-		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__, "List clearing failed: list was not initialized.");
+		bz_warn(BZ_LOG_LIST, "List clearing failed: list was not initialized.");
 		return;
 	}
 	struct bz_node *next = list->head;
@@ -370,7 +366,7 @@ void bz_list_clear(struct bz_list *list, void (*free_data)(void *))
 void bz_list_free(struct bz_list *list, void (*free_data)(void *))
 {
 	if (list == nullptr) {
-		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__, "List freeing failed: list was not initialized.");
+		bz_warn(BZ_LOG_LIST, "List freeing failed: list was not initialized.");
 		return;
 	}
 	bz_list_clear(list, free_data);
@@ -387,7 +383,7 @@ void bz_list_free(struct bz_list *list, void (*free_data)(void *))
 void *bz_list_find(struct bz_list *list, void *match_data, bool (*item_matches)(void *, void *))
 {
 	if (list == nullptr) {
-		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__, "Find failed: list was not initialized.");
+		bz_warn(BZ_LOG_LIST, "Find failed: list was not initialized.");
 		return nullptr;
 	}
 
@@ -406,7 +402,7 @@ void *bz_list_find(struct bz_list *list, void *match_data, bool (*item_matches)(
 bool bz_list_contains(struct bz_list *list, void *match_data)
 {
 	if (list == nullptr) {
-		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__, "Contains failed: list was not initialized.");
+		bz_warn(BZ_LOG_LIST, "Contains failed: list was not initialized.");
 		return false;
 	}
 
@@ -429,7 +425,7 @@ bool bz_list_contains(struct bz_list *list, void *match_data)
 void *bz_list_get_neighbor(struct bz_list *list, void *item)
 {
 	if (list == nullptr) {
-		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__, "Get neighbor failed: list was not initialized.");
+		bz_warn(BZ_LOG_LIST, "Get neighbor failed: list was not initialized.");
 		return nullptr;
 	}
 
@@ -466,13 +462,11 @@ int bz_list_move_to_end(struct bz_list *list_dest, struct bz_list *list_src)
 {
 	// Validation checks
 	if (list_dest == nullptr) {
-		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__,
-			"Move to end failed: destination list was not initialized.");
+		bz_warn(BZ_LOG_LIST, "Move to end failed: destination list was not initialized.");
 		return -1;
 	}
 	if (list_src == nullptr) {
-		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__,
-			"Move to end failed: source list was not initialized.");
+		bz_warn(BZ_LOG_LIST, "Move to end failed: source list was not initialized.");
 		return -1;
 	}
 
@@ -514,8 +508,7 @@ int bz_list_move_to_end(struct bz_list *list_dest, struct bz_list *list_src)
 int bz_list_move_item_to_end(struct bz_list *list, void *data)
 {
 	if (list == nullptr) {
-		bz_warn(BZ_LOG_LIST, __FILE__, __LINE__,
-			"Move item to end failed: list was not initialized.");
+		bz_warn(BZ_LOG_LIST, "Move item to end failed: list was not initialized.");
 		return -1;
 	}
 
@@ -579,15 +572,14 @@ struct bz_list *bz_list_clone(struct bz_list *list, void *(*clone_data)(void *))
 
 	// Error case - null "clone_data" function. This is a required parameter.
 	if (clone_data == nullptr) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__,
-			"Clone failed. 'clone_data' parameter is required but was null.");
+		bz_error(BZ_LOG_LIST, "Clone failed. 'clone_data' parameter is required but was null.");
 		return nullptr;
 	}
 
 	// Create the new list
 	struct bz_list *new_list = bz_list_create();
 	if (new_list == nullptr) {
-		bz_error(BZ_LOG_LIST, __FILE__, __LINE__, "Failed to allocate memory duplicating list.");
+		bz_error(BZ_LOG_LIST, "Failed to allocate memory duplicating list.");
 		return nullptr;
 	}
 
@@ -604,7 +596,7 @@ struct bz_list *bz_list_clone(struct bz_list *list, void *(*clone_data)(void *))
 	return new_list;
 
 append_failure:
-	bz_error(BZ_LOG_LIST, __FILE__, __LINE__, "Failed to duplicate items into target list.");
+	bz_error(BZ_LOG_LIST, "Failed to duplicate items into target list.");
 	bz_list_free(new_list, free);
 	return nullptr;
 }

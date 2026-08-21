@@ -59,6 +59,8 @@ static int bz_gles_assert_extension(const char *extensionList, const char *exten
 static char *bz_get_egl_error_text(EGLint error);
 static void bz_gles_print_egl_error(char *function_name, EGLint error);
 static void bz_gles_render_and_commit(void *data);
+static void bz_gles_render_applications(struct bz_breezy *breezy);
+static void bz_gles_render_cursor(struct bz_breezy *breezy);
 // Shaders
 static GLuint bz_gles_create_client_shader_program(void);
 static GLuint compile_shader(GLenum type, const char *code);
@@ -83,19 +85,19 @@ static int bz_drm_init(struct bz_breezy *breezy)
 
 	// Make sure our inputs are good.
 	if (drm_fd < 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to initialize DRM: drm_fd was not set.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to initialize DRM: drm_fd was not set.");
 		retval = -1;
 		goto exit;
 	}
 
 	// Set our expected capabilities
 	if (drmSetClientCap(drm_fd, DRM_CLIENT_CAP_ATOMIC, 1) < 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Atomic modesetting not supported.");
+		bz_error(BZ_LOG_GRAPHICS, "Atomic modesetting not supported.");
 		retval = -2;
 		goto exit;
 	}
 	if (drmSetClientCap(drm_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) < 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Universal planes not supported.");
+		bz_error(BZ_LOG_GRAPHICS, "Universal planes not supported.");
 		retval = -3;
 		goto exit;
 	}
@@ -103,7 +105,7 @@ static int bz_drm_init(struct bz_breezy *breezy)
 	// Get all of our DRM resources so we can sift through our options.
 	drmModeRes *resources = drmModeGetResources(drm_fd);
 	if (resources == nullptr) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to get DRM resources.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to get DRM resources.");
 		retval = -4;
 		goto exit;
 	}
@@ -111,7 +113,7 @@ static int bz_drm_init(struct bz_breezy *breezy)
 	// Grab our first connected connector
 	drmModeConnector *connector = bz_drm_get_first_valid_connector(drm_fd, resources);
 	if (connector == nullptr) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to find a suitable connector.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to find a suitable connector.");
 		retval = -5;
 		goto clean_resources;
 	}
@@ -127,12 +129,12 @@ static int bz_drm_init(struct bz_breezy *breezy)
 		&breezy->drm.mode_blob_id
 	);
 	if (result != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to create mode_info blob.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to create mode_info blob.");
 		retval = -6;
 		goto clean_connector;
 	}
-	bz_info(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-		"Chosen Mode: %dx%d", breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay);
+	bz_info(BZ_LOG_GRAPHICS, "Chosen Mode: %dx%d",
+		breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay);
 
 	// Set up our projection matrix based on the chosen mode
 	bz_fill_projection_matrix(
@@ -145,14 +147,14 @@ static int bz_drm_init(struct bz_breezy *breezy)
 	int crtc_index = -1;
 	breezy->drm.crtc_id = bz_drm_find_valid_crtc(drm_fd, resources, connector, &crtc_index);
 	if (breezy->drm.crtc_id == 0 || crtc_index == -1) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to find a suitable CRTC.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to find a suitable CRTC.");
 		retval = -7;
 		goto clean_connector;
 	}
 
 	breezy->drm.plane_id = bz_drm_find_valid_plane(drm_fd, crtc_index);
 	if (breezy->drm.plane_id == 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to find a suitable Plane.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to find a suitable Plane.");
 		retval = -8;
 		goto clean_connector;
 	}
@@ -181,7 +183,7 @@ static int bz_drm_init(struct bz_breezy *breezy)
 	// Create our GBM device.
 	breezy->gbm.device = gbm_create_device(drm_fd);
 	if (breezy->gbm.device == nullptr) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to create GBM device.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to create GBM device.");
 		retval = -9;
 		goto clean_connector;
 	}
@@ -206,15 +208,15 @@ exit:
 static drmModeConnector *bz_drm_get_first_valid_connector(const int drm_fd, const drmModeRes *resources)
 {
 	drmModeConnector *connector = nullptr;
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Found %d connectors.", resources->count_connectors);
+	bz_debug(BZ_LOG_GRAPHICS, "Found %d connectors.", resources->count_connectors);
 	for (int i = 0; i < resources->count_connectors; i++) {
 		connector = drmModeGetConnector(drm_fd, resources->connectors[i]);
 		if (!connector) {
-			bz_warn(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to get data for DRM connector.");
+			bz_warn(BZ_LOG_GRAPHICS, "Failed to get data for DRM connector.");
 			continue;
 		}
 		if (connector->connection == DRM_MODE_CONNECTED) {
-			bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "  Using connector %d.", i);
+			bz_debug(BZ_LOG_GRAPHICS, "  Using connector %d.", i);
 			break;
 		}
 		drmModeFreeConnector(connector);
@@ -228,10 +230,10 @@ static drmModeConnector *bz_drm_get_first_valid_connector(const int drm_fd, cons
  */
 static void bz_drm_print_modes(const drmModeConnector *connector)
 {
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Found %d modes.", connector->count_modes);
+	bz_debug(BZ_LOG_GRAPHICS, "Found %d modes.", connector->count_modes);
 	for (int i = 0; i < connector->count_modes; i++) {
 		const drmModeModeInfo mode = connector->modes[i];
-		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "  Mode: %dx%d, %d",
+		bz_debug(BZ_LOG_GRAPHICS, "  Mode: %dx%d, %d",
 			mode.hdisplay, mode.vdisplay, mode.vrefresh);
 	}
 }
@@ -250,11 +252,11 @@ static uint32_t bz_drm_find_valid_crtc(
 	uint32_t crtc = 0;
 
 	// Search all possible encoders to find a valid one.
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Found %d encoders.", connector->count_encoders);
+	bz_debug(BZ_LOG_GRAPHICS, "Found %d encoders.", connector->count_encoders);
 	for (int i = 0; i < connector->count_encoders && crtc == 0; ++i) {
 		drmModeEncoder *encoder = drmModeGetEncoder(drm_fd, connector->encoders[i]);
 		if (!encoder) {
-			bz_warn(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to get data for DRM encoder.");
+			bz_warn(BZ_LOG_GRAPHICS, "Failed to get data for DRM encoder.");
 			continue;
 		}
 
@@ -264,8 +266,7 @@ static uint32_t bz_drm_find_valid_crtc(
 			if (encoder->possible_crtcs & (1 << j)) {
 				crtc = resources->crtcs[j];
 				*crtc_index = j;
-				bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-					"  Using CRTC ID %d with index %d.", crtc, j);
+				bz_debug(BZ_LOG_GRAPHICS, "  Using CRTC ID %d with index %d.", crtc, j);
 				break;
 			}
 		}
@@ -288,18 +289,18 @@ static uint32_t bz_drm_find_valid_plane(const int drm_fd, const int crtc_index)
 	uint32_t _plane_id = 0;
 
 	drmModePlaneRes *planes = drmModeGetPlaneResources(drm_fd);
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Found %d planes.", planes->count_planes);
+	bz_debug(BZ_LOG_GRAPHICS, "Found %d planes.", planes->count_planes);
 	for (uint32_t i = 0; i < planes->count_planes && _plane_id == 0; i++) {
 		drmModePlane *plane = drmModeGetPlane(drm_fd, planes->planes[i]);
 		if (!plane) {
-			bz_warn(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to get data for DRM plane.");
+			bz_warn(BZ_LOG_GRAPHICS, "Failed to get data for DRM plane.");
 			continue;
 		}
 
 		// Determine if this plane works with our chosen CRTC
 		if (plane->possible_crtcs & (1 << crtc_index)) {
 			_plane_id = plane->plane_id;
-			bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "  Using Plane ID %d.", _plane_id);
+			bz_debug(BZ_LOG_GRAPHICS, "  Using Plane ID %d.", _plane_id);
 		}
 
 		drmModeFreePlane(plane);
@@ -321,12 +322,11 @@ static uint32_t bz_drm_get_prop_id(
 ) {
 	uint32_t prop_id = 0;
 	drmModeObjectProperties *props = drmModeObjectGetProperties(drm_fd, object_id, object_type);
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Found %d object properties", props->count_props);
+	bz_debug(BZ_LOG_GRAPHICS, "Found %d object properties", props->count_props);
 	for (uint32_t j = 0; j < props->count_props && prop_id == 0; j++) {
 		drmModePropertyRes *p = drmModeGetProperty(drm_fd, props->props[j]);
 		if (strcmp(p->name, prop_name) == 0) {
-			bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-				"  Found %s with id %d", p->name, p->prop_id);
+			bz_debug(BZ_LOG_GRAPHICS, "  Found %s with id %d", p->name, p->prop_id);
 			prop_id = p->prop_id;
 		}
 		drmModeFreeProperty(p);
@@ -334,8 +334,7 @@ static uint32_t bz_drm_get_prop_id(
 	drmModeFreeObjectProperties(props);
 
 	if (prop_id == 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-			"  Could not find property with name %s.", prop_name);
+		bz_error(BZ_LOG_GRAPHICS, "  Could not find property with name %s.", prop_name);
 	}
 
 	return prop_id;
@@ -527,7 +526,7 @@ static int bz_gles_init(struct bz_breezy *breezy)
 		bz_gles_print_egl_error("eglInitialize()", eglGetError());
 		return -2;
 	}
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "EGL initialized with version %d.%d",
+	bz_debug(BZ_LOG_GRAPHICS, "EGL initialized with version %d.%d",
 		major_egl_version, minor_egl_version);
 
 	// Bind to OpenGL ES
@@ -554,7 +553,7 @@ static int bz_gles_init(struct bz_breezy *breezy)
 		return -4;
 	}
 	if (num_configs == 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "No matching EGL configs found.");
+		bz_error(BZ_LOG_GRAPHICS, "No matching EGL configs found.");
 		return -5;
 	}
 
@@ -580,7 +579,7 @@ static int bz_gles_init(struct bz_breezy *breezy)
 		GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING
 	);
 	if (breezy->gbm.surface == nullptr) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to create GBM surface.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to create GBM surface.");
 		return -7;
 	}
 
@@ -604,10 +603,10 @@ static int bz_gles_init(struct bz_breezy *breezy)
 	// Load our OpenGL ES API through GLAD
 	const int glad_version = gladLoadGLES2(eglGetProcAddress);
 	if (glad_version == 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to laod OpenGL ES via GLAD.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to laod OpenGL ES via GLAD.");
 		return -10;
 	}
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GLAD Version: %d.%d",
+	bz_debug(BZ_LOG_GRAPHICS, "GLAD Version: %d.%d",
 		GLAD_VERSION_MAJOR(glad_version), GLAD_VERSION_MINOR(glad_version));
 
 	// Define some GLES configs
@@ -622,7 +621,7 @@ static int bz_gles_init(struct bz_breezy *breezy)
 	}
 	breezy->gl.client_shader_program = program;
 
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized GLES.");
+	bz_debug(BZ_LOG_GRAPHICS, "Successfully initialized GLES.");
 	return 0;
 }
 
@@ -647,7 +646,7 @@ void bz_graphics_change_color(struct bz_breezy *breezy, float amount) {
 static int bz_gles_load_egl_extensions(void)
 {
 	const char *extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "EGL Extensions: %s", extensions);
+	bz_debug(BZ_LOG_GRAPHICS, "EGL Extensions: %s", extensions);
 
 	// Make sure the necessary extension(s) exist
 	int failure = 0;
@@ -667,7 +666,7 @@ static int bz_gles_load_gles_extensions(void)
 	glGetIntegerv(GL_NUM_EXTENSIONS, &num_ext);
 	for (uint32_t i = 0; i < num_ext; i++) {
 		const GLubyte *extension = glGetStringi(GL_EXTENSIONS, i);
-		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GLES Extension: %s", extension);
+		bz_debug(BZ_LOG_GRAPHICS, "GLES Extension: %s", extension);
 		// We only care about this one extension for now, so to keep this logic simple, just return
 		//   when it's found.
 		if (strstr((const char *)extension, "GL_EXT_texture_format_BGRA8888")) {
@@ -739,7 +738,7 @@ static void bz_gles_init_client_cursor(struct bz_breezy *breezy)
 static int bz_gles_assert_extension(const char *extensionList, const char *extensionName)
 {
 	if (!strstr(extensionList, extensionName)) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Missing extension: %s", extensionName);
+		bz_error(BZ_LOG_GRAPHICS, "Missing extension: %s", extensionName);
 		return 1;
 	}
 	return 0;
@@ -769,13 +768,13 @@ static char *bz_get_egl_error_text(const EGLint error)
 /** Helper function that prints a formatted error for a given, failed EGL function call. */
 static void bz_gles_print_egl_error(char *function_name, const EGLint error)
 {
-	bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to call %s: %s",
+	bz_error(BZ_LOG_GRAPHICS, "Failed to call %s: %s",
 		function_name, bz_get_egl_error_text(error));
 }
 
 /** Renders via OpenGL, and then swaps and commits our buffer to DRM. */
 static void bz_gles_render_and_commit(void *data) {
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Rendering!");
+	bz_debug(BZ_LOG_GRAPHICS, "Rendering!");
 	struct bz_breezy *breezy = data;
 
 	// No point in trying this render. We don't have any GBM buffers ready. This flag gets cleared
@@ -789,58 +788,85 @@ static void bz_gles_render_and_commit(void *data) {
 	breezy->gl.is_dirty = false;
 
 	if (!gbm_surface_has_free_buffers(breezy->gbm.surface)) {
-		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "GBM surface has no free buffers.");
+		bz_debug(BZ_LOG_GRAPHICS, "GBM surface has no free buffers.");
 		breezy->drm.retry_render_on_page_flip = true;
 		return;
 	}
 
-	// Render time! First, clear the screen
+	// -- Render time! --
 	// glViewport(0, 0, output->width, output->height);
-	glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT);            // First, clear the screen
 	if (breezy->gl.vbo != 0) {
-		// ...then load our program
-		GLuint client_program = breezy->gl.client_shader_program;
-		glUseProgram(client_program);
-		// ...our projection matrix
-		GLint outputProj = glGetUniformLocation(client_program, "u_outputProj");
-		glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.output_projection);
-		// ...and our unit quad vbo
-		glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
-		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
-		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
-		glEnableVertexAttribArray(0);
-		glEnableVertexAttribArray(1);
-
-		// ...then render each activable surface
-		struct bz_node *curr_surf = breezy->window_mgmt.activable_surfaces->head;
-		while (curr_surf != nullptr) {
-			struct bz_surface *surf_data = curr_surf->data;
-			struct bz_renderable renderable = surf_data->renderable;
-			if (renderable.texture != 0 && surf_data->active_state->buffer != nullptr) {
-				// Load our surface projection matrix
-				bz_mat3 projection = {0};
-				bz_fill_projection_matrix(projection,
-					0, 0, 1, 1,
-					renderable.position.x, renderable.position.y,
-					renderable.size.w, renderable.size.h
-				);
-				GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
-				glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
-
-				// Prep the texture
-				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, renderable.texture);
-				GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
-				glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
-
-				// Render!
-				glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-			}
-			curr_surf = curr_surf->next;
-		}
+		bz_gles_render_applications(breezy); // Then render the applications.
+		bz_gles_render_cursor(breezy);       // Lastly, put the cursor on the top.
 	}
 
-	// Render the cursor
+
+	// Buffer switcheroo
+	eglSwapBuffers(breezy->gl.display, breezy->gl.surface);
+	struct gbm_bo *bo = gbm_surface_lock_front_buffer(breezy->gbm.surface);
+	const uint32_t fb_id = bz_drm_gbm_get_bo_fb(breezy, bo);
+
+	// Scanout!
+	int retval = 0;
+	breezy->gbm.new_bo = bo;
+	retval = (breezy->gbm.prev_bo == nullptr)
+		? bz_drm_atomic_commit_initial(breezy, fb_id)
+		: bz_drm_atomic_commit_recurring(breezy, fb_id);
+	// (When the DRM page flip completes, "bz_drm_handle_pageflip()" is called, which releases
+	//   the old buffer object.)
+
+	if (retval != 0) {
+		bz_error(BZ_LOG_GRAPHICS, "Failed to make an atomic commit.");
+	}
+}
+
+static void bz_gles_render_applications(struct bz_breezy *breezy)
+{
+	// ...then load our program
+	GLuint client_program = breezy->gl.client_shader_program;
+	glUseProgram(client_program);
+	// ...our projection matrix
+	GLint outputProj = glGetUniformLocation(client_program, "u_outputProj");
+	glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.output_projection);
+	// ...and our unit quad vbo
+	glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	// ...then render each activable surface
+	struct bz_node *curr_surf = breezy->window_mgmt.activable_surfaces->head;
+	while (curr_surf != nullptr) {
+		struct bz_surface *surf_data = curr_surf->data;
+		struct bz_renderable renderable = surf_data->renderable;
+		if (renderable.texture != 0 && surf_data->active_state->buffer != nullptr) {
+			// Load our surface projection matrix
+			bz_mat3 projection = {0};
+			bz_fill_projection_matrix(projection,
+				0, 0, 1, 1,
+				renderable.position.x, renderable.position.y,
+				renderable.size.w, renderable.size.h
+			);
+			GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+			glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+
+			// Prep the texture
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, renderable.texture);
+			GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+			glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+			// Render!
+			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		}
+		curr_surf = curr_surf->next;
+	}
+}
+
+static void bz_gles_render_cursor(struct bz_breezy *breezy)
+{
 	struct bz_renderable *cursor = nullptr;
 	if (breezy->window_mgmt.pointer_focus == nullptr) {
 		cursor = &breezy->gl.cursor;
@@ -848,8 +874,8 @@ static void bz_gles_render_and_commit(void *data) {
 		struct wl_resource *focused_surf = breezy->window_mgmt.pointer_focus->resource;
 		struct wl_client *client = wl_resource_get_client(focused_surf);
 		struct bz_client *client_data = wl_client_get_user_data(client);
-		if (client_data->seat && client_data->seat->cursor_surface) {
-			cursor = &client_data->seat->cursor_surface->renderable;
+		if (client_data->cursor_surface) {
+			cursor = &client_data->cursor_surface->renderable;
 		}
 	}
 	if (cursor != nullptr && cursor->texture != 0) {
@@ -884,24 +910,6 @@ static void bz_gles_render_and_commit(void *data) {
 		// Render!
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	}
-
-	// Buffer switcheroo
-	eglSwapBuffers(breezy->gl.display, breezy->gl.surface);
-	struct gbm_bo *bo = gbm_surface_lock_front_buffer(breezy->gbm.surface);
-	const uint32_t fb_id = bz_drm_gbm_get_bo_fb(breezy, bo);
-
-	// Scanout!
-	int retval = 0;
-	breezy->gbm.new_bo = bo;
-	retval = (breezy->gbm.prev_bo == nullptr)
-		? bz_drm_atomic_commit_initial(breezy, fb_id)
-		: bz_drm_atomic_commit_recurring(breezy, fb_id);
-	// (When the DRM page flip completes, "bz_drm_handle_pageflip()" is called, which releases
-	//   the old buffer object.)
-
-	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to make an atomic commit.");
-	}
 }
 
 static GLuint bz_gles_create_client_shader_program(void)
@@ -921,7 +929,7 @@ static GLuint bz_gles_create_client_shader_program(void)
 	if (status == GL_FALSE) {
 		char message[512];
 		glGetProgramInfoLog(client_shader_program, 512, nullptr, message);
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Shader link error: %s", message);
+		bz_error(BZ_LOG_GRAPHICS, "Shader link error: %s", message);
 		return 0;
 	}
 
@@ -945,7 +953,7 @@ static GLuint compile_shader(GLenum type, const char *code)
 		// It failed, so print the latest message from the OpenGL shader log
 		char message[512];
 		glGetShaderInfoLog(shader, 512, NULL, message);
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Shader error: %s", message);
+		bz_error(BZ_LOG_GRAPHICS, "Shader error: %s", message);
 	}
 
 	// It all worked, return the goods!
@@ -971,8 +979,7 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
 	// Make sure our EGL extensions are available
 	int retval = bz_gles_load_egl_extensions();
 	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-			"Failed to load EGL extensions. Code: %d", retval);
+		bz_error(BZ_LOG_GRAPHICS, "Failed to load EGL extensions. Code: %d", retval);
 		return -1;
 	}
 
@@ -980,40 +987,39 @@ int bz_graphics_initialize(struct bz_breezy *breezy) {
 	// TODO: Swap this out to choose a graphics device more intelligently with udev.
 	breezy->drm.device_id = bz_seat_open_device(breezy, "/dev/dri/card1", &breezy->drm.fd);
 	if (breezy->drm.fd < 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to open DRM device.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to open DRM device.");
 		return -2;
 	}
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully opened DRM device.");
+	bz_debug(BZ_LOG_GRAPHICS, "Successfully opened DRM device.");
 
 	// (Make sure we're master)
 	if (!drmIsMaster(breezy->drm.fd)) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to claim DRM master.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to claim DRM master.");
 		return -3;
 	}
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully claimed DRM master.");
+	bz_debug(BZ_LOG_GRAPHICS, "Successfully claimed DRM master.");
 
 	retval = bz_drm_init(breezy);
 	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to initialize DRM. Code: %d", retval);
+		bz_error(BZ_LOG_GRAPHICS, "Failed to initialize DRM. Code: %d", retval);
 		return -4;
 	}
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized DRM resources.");
+	bz_debug(BZ_LOG_GRAPHICS, "Successfully initialized DRM resources.");
 
 	retval = bz_gles_init(breezy);
 	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to initialize GLES. Code: %d", retval);
+		bz_error(BZ_LOG_GRAPHICS, "Failed to initialize GLES. Code: %d", retval);
 		return -5;
 	}
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized EGL/GLES.");
+	bz_debug(BZ_LOG_GRAPHICS, "Successfully initialized EGL/GLES.");
 
 	retval = bz_gles_load_gles_extensions();
 	if (retval != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__,
-			"Failed to load GLES extensions. Code: %d", retval);
+		bz_error(BZ_LOG_GRAPHICS, "Failed to load GLES extensions. Code: %d", retval);
 		return -6;
 	}
 
-	bz_info(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Successfully initialized our graphics system.");
+	bz_info(BZ_LOG_GRAPHICS, "Successfully initialized our graphics system.");
 	return 0;
 }
 
@@ -1028,7 +1034,7 @@ void bz_graphics_schedule_render(struct bz_breezy *breezy)
 		!breezy->drm.retry_render_on_page_flip &&
 		!breezy->gl.is_dirty
 	) {
-		bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Scheduling render.");
+		bz_debug(BZ_LOG_GRAPHICS, "Scheduling render.");
 		breezy->gl.is_dirty = true;
 		struct wl_event_loop *evt_loop = wl_display_get_event_loop(breezy->wayland.display);
 		wl_event_loop_add_idle(evt_loop, bz_gles_render_and_commit, breezy);
@@ -1042,7 +1048,7 @@ void bz_graphics_schedule_render(struct bz_breezy *breezy)
  * to re-initialize the graphics system after calling this cleanup function.
  */
 void bz_graphics_cleanup(struct bz_breezy *breezy) {
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Cleaning up bz_graphics.");
+	bz_debug(BZ_LOG_GRAPHICS, "Cleaning up bz_graphics.");
 
 	// -- GLES --
 	if (breezy->gl.vbo != 0) {
@@ -1100,14 +1106,14 @@ void bz_graphics_cleanup(struct bz_breezy *breezy) {
 		breezy->drm.fd = -1;
 	}
 
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "DRM clean-up complete!");
+	bz_debug(BZ_LOG_GRAPHICS, "DRM clean-up complete!");
 }
 
 /** Handles a pending DRM event. This should only be called when there are events pending. */
 int bz_graphics_handle_drm_event(int /*fd*/, uint32_t /*mask*/, void *data)
 {
 	struct bz_breezy *breezy = data;
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Handling drm_fd event.");
+	bz_debug(BZ_LOG_GRAPHICS, "Handling drm_fd event.");
 	drmEventContext drm_event_context = {
 		.version = DRM_EVENT_CONTEXT_VERSION,
 		.page_flip_handler = bz_drm_handle_pageflip,

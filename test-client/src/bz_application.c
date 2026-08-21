@@ -50,7 +50,7 @@ void bz_run_event_loop(const struct bz_client_globals *globals)
 			{ .fd = wayland_fd,           .events = POLLIN },
 		};
 		const int ret = poll(fds, 2, 1000);
-		if (ret == 0) bz_warn(BZ_LOG_MAIN, __FILE__, __LINE__, "Timeout waiting for FD.");
+		if (ret == 0) bz_warn(BZ_LOG_MAIN, "Timeout waiting for FD.");
 		if (ret < 0) {
 			wl_display_cancel_read(globals->display);
 			break; // Failure
@@ -73,7 +73,7 @@ void bz_run_event_loop(const struct bz_client_globals *globals)
 
 struct bz_application_window *bz_create_app_window(struct bz_client_globals *globals)
 {
-	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Creating application window.");
+	bz_info(BZ_LOG_MAIN, "Creating application window.");
 
 	struct bz_application_window *window = calloc(1, sizeof(*window));
 	// Visual / application state
@@ -97,7 +97,7 @@ struct bz_application_window *bz_create_app_window(struct bz_client_globals *glo
 extern const struct wl_buffer_listener bz_buffer_implementation;
 struct bz_cursor *bz_create_cursor_surface(struct bz_client_globals *globals)
 {
-	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Creating cursor surface.");
+	bz_info(BZ_LOG_MAIN, "Creating cursor surface.");
 	struct bz_cursor *cursor = calloc(1, sizeof(*cursor));
 
 	const int32_t width = 24;

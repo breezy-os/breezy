@@ -59,7 +59,7 @@ static void bz_write_surface_texture(struct bz_surface *surface_data);
 /** Gets executed whenever a client binds to wl_compositor. */
 void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Binding a client to wl_compositor.");
+	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_compositor.");
 
 	struct wl_resource *res = wl_resource_create(client, &wl_compositor_interface, version, id);
 	if (res == nullptr) {
@@ -135,7 +135,7 @@ static void bz_compositor_create_surface(
 	pending_state_alloc_failed:
 		free(surface);
 	surface_alloc_failed:
-		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new surface.");
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to construct a new surface.");
 }
 
 static void bz_compositor_create_region(
@@ -143,7 +143,7 @@ static void bz_compositor_create_region(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_compositor.create_region not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_compositor.create_region not implemented");
 	// TODO
 }
 
@@ -166,7 +166,7 @@ static struct bz_surface_state *bz_surface_state_init(void)
 	callback_list_failed:
 		free(state);
 	state_alloc_failed:
-		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to create empty bz_surface_state.");
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to create empty bz_surface_state.");
 		return nullptr;
 }
 
@@ -188,7 +188,7 @@ static void bz_surface_state_free(struct bz_surface_state *state)
 /** Gets executed whenever a client binds to wl_subcompositor. */
 void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Binding a client to wl_subcompositor.");
+	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_subcompositor.");
 
 	struct wl_resource *res = wl_resource_create(client, &wl_subcompositor_interface, version, id);
 	if (res == nullptr) {
@@ -206,7 +206,7 @@ static const struct wl_subcompositor_interface bz_subcompositor_implementation =
 
 static void bz_subcompositor_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_subcompositor.destroy not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subcompositor.destroy not implemented");
 	// TODO
 }
 
@@ -217,7 +217,7 @@ static void bz_subcompositor_get_subsurface(
 	struct wl_resource *surface,
 	struct wl_resource *parent
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_subcompositor.get_subsurface not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subcompositor.get_subsurface not implemented");
 	// TODO
 }
 
@@ -259,7 +259,7 @@ void bz_surface_dtor(struct wl_resource *data)
 
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.destroy not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.destroy not implemented");
 	// TODO
 	// wl_resource_destroy(resource);
 	// Role must be destroyed first. Otherwise, "defunct_role_object" error
@@ -285,7 +285,7 @@ static void bz_surface_damage(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.damage not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.damage not implemented");
 	// TODO
 }
 
@@ -314,7 +314,7 @@ static void bz_surface_frame(
 	return;
 
 	resource_failed:
-		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new frame callback.");
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to construct a new frame callback.");
 }
 
 static void bz_surface_set_opaque_region(
@@ -322,7 +322,7 @@ static void bz_surface_set_opaque_region(
 	struct wl_resource *resource,
 	struct wl_resource *region
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.set_opaque_region not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_opaque_region not implemented");
 	// TODO
 }
 
@@ -331,7 +331,7 @@ static void bz_surface_set_input_region(
 	struct wl_resource *resource,
 	struct wl_resource *region
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.set_input_region not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_input_region not implemented");
 	// TODO
 }
 
@@ -349,7 +349,7 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 			&& bzsurf->active_state->buffer == nullptr
 	) {
 		if (bzsurf->xdgsurface == nullptr) {
-			bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__,
+			bz_error(BZ_LOG_WL_DISPLAY,
 				"XDG surface object was null on wl_surface after being assigned. "
 				"THIS SHOULD NEVER HAPPEN.");
 			wl_client_post_implementation_error(client,
@@ -396,7 +396,7 @@ static void bz_surface_set_buffer_transform(
 	struct wl_resource *resource,
 	int32_t transform
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.set_buffer_transform not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_buffer_transform not implemented");
 	// TODO
 }
 
@@ -405,7 +405,7 @@ static void bz_surface_set_buffer_scale(
 	struct wl_resource *resource,
 	int32_t scale
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.set_buffer_scale not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_buffer_scale not implemented");
 	// TODO
 }
 
@@ -417,7 +417,7 @@ static void bz_surface_damage_buffer(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.damage_buffer not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.damage_buffer not implemented");
 	// TODO
 }
 
@@ -427,7 +427,7 @@ static void bz_surface_offset(
 	int32_t x,
 	int32_t y
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.offset not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.offset not implemented");
 	// TODO
 }
 
@@ -437,7 +437,7 @@ static void bz_write_surface_texture(struct bz_surface *surface_data)
 {
 	// Initialize the texture
 	if (surface_data->renderable.texture == 0) {
-		bz_info(BZ_LOG_WL_DEVICES, __FILE__, __LINE__, "Initializing OpenGL texture for surface.");
+		bz_info(BZ_LOG_WL_DEVICES, "Initializing OpenGL texture for surface.");
 		glGenTextures(1, &surface_data->renderable.texture);
 		glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

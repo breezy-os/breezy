@@ -88,14 +88,14 @@ struct bz_buff_alloc *bz_allocate_shm_buffers(
 	allocation->pool_size = allocation->buffer_size * num_buffers; // Two buffers per pool (double-buffered)
 	int fd = bz_allocate_shm_file(allocation->pool_size);
 	if (fd == -1) {
-		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to allocate shared memory.");
+		bz_error(BZ_LOG_WAYLAND, "Failed to allocate shared memory.");
 		goto shm_alloc_failure;
 	}
 
 	// Map the pool's file descriptor to memory
 	allocation->pool_data = mmap(NULL, allocation->pool_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (allocation->pool_data == MAP_FAILED) {
-		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to mmap pool data.");
+		bz_error(BZ_LOG_WAYLAND, "Failed to mmap pool data.");
 		goto pool_mmap_failure;
 	}
 

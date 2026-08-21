@@ -1014,6 +1014,230 @@ void test_list_clone_returns_different_but_equal_values(void)
 
 
 // =================================================================================================
+//  Test bz_list_foreach()
+// -------------------------------------------------------------------------------------------------
+
+void test_list_foreach__basic_iteration(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+
+	// Run the test
+	int counter = 1;
+	int *val; bz_list_foreach(val, list) {
+		TEST_ASSERT_EQUAL_INT(counter, *val);
+		counter++;
+	}
+	// Make sure we iterated all 3 times.
+	TEST_ASSERT_EQUAL_INT(4, counter);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_foreach__early_exit_with_break(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+
+	// Run the test
+	int counter = 1;
+	int *val; bz_list_foreach(val, list) {
+		TEST_ASSERT_EQUAL_INT(counter, *val);
+		if (counter == 2) {
+			break;
+		}
+		counter++;
+	}
+	// Make sure we didn't make it to the third iteration.
+	TEST_ASSERT_EQUAL_INT(2, counter);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_foreach__early_iteration_with_continue(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+
+	// Run the test
+	int counter = 1;
+	int complete_iterations = 0;
+	int *val; bz_list_foreach(val, list) {
+		TEST_ASSERT_EQUAL_INT(counter, *val);
+		counter++;
+		if (counter == 2) {
+			continue;
+		}
+		complete_iterations++;
+	}
+	// Make sure we iterated enough times
+	TEST_ASSERT_EQUAL_INT(4, counter);
+	// Make sure we hit the "continue" statement once.
+	TEST_ASSERT_EQUAL_INT(2, complete_iterations);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_foreach__nested_loops(void)
+{
+	// Create our lists
+	struct bz_list *list1 = bz_list_create();
+	int val1 = 1; bz_list_append(list1, &val1);
+	int val2 = 2; bz_list_append(list1, &val2);
+	int val3 = 3; bz_list_append(list1, &val3);
+	struct bz_list *list2 = bz_list_create();
+	int val4 = 4; bz_list_append(list2, &val4);
+	int val5 = 5; bz_list_append(list2, &val5);
+	int val6 = 6; bz_list_append(list2, &val6);
+
+	// Run the test
+	int out_count = 1;
+	int in_count = 4;
+	int total_count = 0;
+	int *outer; bz_list_foreach(outer, list1) {
+		in_count = 4;
+		int *inner; bz_list_foreach(inner, list2) {
+			TEST_ASSERT_EQUAL_INT(out_count, *outer);
+			TEST_ASSERT_EQUAL_INT(in_count, *inner);
+			in_count++;
+			total_count++;
+		}
+		out_count++;
+	}
+	// Make sure we iterated enough times.
+	TEST_ASSERT_EQUAL_INT(9, total_count);
+
+	// Cleanup
+	bz_list_free(list1, nullptr);
+	bz_list_free(list2, nullptr);
+}
+
+
+// =================================================================================================
+//  Test bz_list_foreach_rev()
+// -------------------------------------------------------------------------------------------------
+
+void test_list_foreach_rev__basic_iteration(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+
+	// Run the test
+	int counter = 3;
+	int *val; bz_list_foreach_rev(val, list) {
+		TEST_ASSERT_EQUAL_INT(counter, *val);
+		counter--;
+	}
+	// Make sure we iterated all 3 times.
+	TEST_ASSERT_EQUAL_INT(0, counter);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_foreach_rev__early_exit_with_break(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+
+	// Run the test
+	int counter = 3;
+	int *val; bz_list_foreach_rev(val, list) {
+		TEST_ASSERT_EQUAL_INT(counter, *val);
+		if (counter == 2) {
+			break;
+		}
+		counter--;
+	}
+	// Make sure we didn't make it to the third iteration.
+	TEST_ASSERT_EQUAL_INT(2, counter);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_foreach_rev__early_iteration_with_continue(void)
+{
+	// Create our list
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+
+	// Run the test
+	int counter = 3;
+	int complete_iterations = 0;
+	int *val; bz_list_foreach_rev(val, list) {
+		TEST_ASSERT_EQUAL_INT(counter, *val);
+		counter--;
+		if (counter == 2) {
+			continue;
+		}
+		complete_iterations++;
+	}
+	// Make sure we iterated enough times
+	TEST_ASSERT_EQUAL_INT(0, counter);
+	// Make sure we hit the "continue" statement once.
+	TEST_ASSERT_EQUAL_INT(2, complete_iterations);
+
+	// Cleanup
+	bz_list_free(list, nullptr);
+}
+
+void test_list_foreach_rev__nested_loops(void)
+{
+	// Create our lists
+	struct bz_list *list1 = bz_list_create();
+	int val1 = 1; bz_list_append(list1, &val1);
+	int val2 = 2; bz_list_append(list1, &val2);
+	int val3 = 3; bz_list_append(list1, &val3);
+	struct bz_list *list2 = bz_list_create();
+	int val4 = 4; bz_list_append(list2, &val4);
+	int val5 = 5; bz_list_append(list2, &val5);
+	int val6 = 6; bz_list_append(list2, &val6);
+
+	// Run the test
+	int out_count = 3;
+	int in_count = 6;
+	int total_count = 0;
+	int *outer; bz_list_foreach_rev(outer, list1) {
+		in_count = 6;
+		int *inner; bz_list_foreach_rev(inner, list2) {
+			TEST_ASSERT_EQUAL_INT(out_count, *outer);
+			TEST_ASSERT_EQUAL_INT(in_count, *inner);
+			in_count--;
+			total_count++;
+		}
+		out_count--;
+	}
+	// Make sure we iterated enough times.
+	TEST_ASSERT_EQUAL_INT(9, total_count);
+
+	// Cleanup
+	bz_list_free(list1, nullptr);
+	bz_list_free(list2, nullptr);
+}
+
+
+// =================================================================================================
 //  Runner
 // -------------------------------------------------------------------------------------------------
 
@@ -1095,6 +1319,18 @@ int main(void) {
 	RUN_TEST(test_list_clone_returns_null_for_null_clone_fn);
 	RUN_TEST(test_list_clone_returns_different_list);
 	RUN_TEST(test_list_clone_returns_different_but_equal_values);
+
+	// Test bz_list_foreach() macro
+	RUN_TEST(test_list_foreach__basic_iteration);
+	RUN_TEST(test_list_foreach__early_exit_with_break);
+	RUN_TEST(test_list_foreach__early_iteration_with_continue);
+	RUN_TEST(test_list_foreach__nested_loops);
+
+	// Test bz_list_foreach_rev() macro
+	RUN_TEST(test_list_foreach_rev__basic_iteration);
+	RUN_TEST(test_list_foreach_rev__early_exit_with_break);
+	RUN_TEST(test_list_foreach_rev__early_iteration_with_continue);
+	RUN_TEST(test_list_foreach_rev__nested_loops);
 
 	return UNITY_END();
 }

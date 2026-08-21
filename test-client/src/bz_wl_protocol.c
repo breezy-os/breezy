@@ -97,7 +97,7 @@ static void bz_xdg_toplevel_wm_capabilities(void *data, struct xdg_toplevel *xdg
 
 void bz_registry_constructor(struct bz_client_globals *globals)
 {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Setting up registry listener.");
+	bz_debug(BZ_LOG_WAYLAND, "Setting up registry listener.");
 	globals->registry = wl_display_get_registry(globals->display);
 	wl_registry_add_listener(globals->registry, &bz_registry_implementation, globals);
 }
@@ -114,7 +114,7 @@ static void bz_registry_global(
 	const char *interface,
 	uint32_t version
 ) {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__,
+	bz_info(BZ_LOG_WAYLAND,
 		"Registering interface: '%s', version: %d, name: %d", interface, version, name);
 
 	struct bz_client_globals *globals = data;
@@ -157,7 +157,7 @@ static void bz_registry_global(
 
 static void bz_registry_global_remove(void *data, struct wl_registry * /*registry*/, uint32_t name)
 {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Removing global with name: %d", name);
+	bz_info(BZ_LOG_WAYLAND, "Removing global with name: %d", name);
 	struct bz_client_globals *globals = data;
 
 	if (name == globals->compositor_name) {
@@ -191,7 +191,7 @@ static const struct wl_shm_listener bz_shm_implementation = {
 
 static void bz_shm_format(void * /*data*/, struct wl_shm * /*shm*/, uint32_t format)
 {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Supported shm format: %d", format);
+	bz_debug(BZ_LOG_WAYLAND, "Supported shm format: %d", format);
 }
 
 
@@ -221,7 +221,7 @@ static const struct wl_seat_listener bz_seat_implementation = {
 
 static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t capabilities)
 {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Capabilities: %d", capabilities);
+	bz_info(BZ_LOG_WAYLAND, "Capabilities: %d", capabilities);
 	struct bz_seat *seat_data = wl_seat_get_user_data(wl_seat);
 
 	// Add / remove keyboard resource
@@ -248,7 +248,7 @@ static void bz_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t c
 
 static void bz_seat_name(void *data, struct wl_seat *wl_seat, const char *name)
 {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Received seat name: %s", name);
+	bz_info(BZ_LOG_WAYLAND, "Received seat name: %s", name);
 }
 
 
@@ -276,7 +276,7 @@ static void bz_keyboard_keymap(
 
 	// Make sure it's in xkb format
 	if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
-		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Unsupported keyboard keymap format.");
+		bz_error(BZ_LOG_WAYLAND, "Unsupported keyboard keymap format.");
 		return;
 	}
 
@@ -343,7 +343,7 @@ static void bz_keyboard_key(
 
 	const uint32_t xkb_keycode = key + 8; // xkb keycode is offset by 8
 	if (state == WL_KEYBOARD_KEY_STATE_REPEATED) {
-		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Unsupported key state: 'repeated'.");
+		bz_error(BZ_LOG_WAYLAND, "Unsupported key state: 'repeated'.");
 		return;
 	}
 	enum xkb_key_direction press_state = state == WL_KEYBOARD_KEY_STATE_PRESSED
@@ -402,7 +402,7 @@ static void bz_keyboard_modifiers(
 	uint32_t mods_locked,
 	uint32_t group
 ) {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Modifiers received! %d, %d, %d, %d, %d", serial, mods_depressed, mods_latched, mods_locked, group);
+	bz_debug(BZ_LOG_WAYLAND, "Modifiers received! %d, %d, %d, %d, %d", serial, mods_depressed, mods_latched, mods_locked, group);
 	// TODO
 }
 
@@ -443,7 +443,7 @@ static void bz_pointer_enter(
 	wl_fixed_t surface_x,
 	wl_fixed_t surface_y
 ) {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Surface entered via pointer! Calling set_cursor.");
+	bz_info(BZ_LOG_WAYLAND, "Surface entered via pointer! Calling set_cursor.");
 
 	struct bz_seat *seat_data = data;
 
@@ -458,7 +458,7 @@ static void bz_pointer_leave(
 	uint32_t serial,
 	struct wl_surface *surface
 ) {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Surface left via pointer!");
+	bz_info(BZ_LOG_WAYLAND, "Surface left via pointer!");
 }
 
 static void bz_pointer_motion(
@@ -529,7 +529,7 @@ static void bz_pointer_axis_stop(
 	uint32_t time,
 	uint32_t axis
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_stop not implemented");
+	bz_error(BZ_LOG_WAYLAND, "wl_pointer.axis_stop not implemented");
 	// TODO
 }
 
@@ -539,7 +539,7 @@ static void bz_pointer_axis_discrete(
 	uint32_t axis,
 	int32_t discrete
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_discrete not implemented");
+	bz_error(BZ_LOG_WAYLAND, "wl_pointer.axis_discrete not implemented");
 	// TODO
 }
 
@@ -558,7 +558,7 @@ static void bz_pointer_axis_relative_direction(
 	uint32_t axis,
 	uint32_t direction
 ) {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "wl_pointer.axis_relative_direction not implemented");
+	bz_error(BZ_LOG_WAYLAND, "wl_pointer.axis_relative_direction not implemented");
 	// TODO
 }
 
@@ -586,7 +586,7 @@ struct xdg_surface *bz_xdg_surface_constructor(
 	struct bz_client_globals *globals,
 	struct wl_surface *wlsurface
 ) {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Creating an XDG surface");
+	bz_debug(BZ_LOG_WAYLAND, "Creating an XDG surface");
 	struct xdg_surface *xdgsurf = xdg_wm_base_get_xdg_surface(globals->xdg_wm_base, wlsurface);
 	xdg_surface_add_listener(xdgsurf, &bz_xdg_surface_implementation, globals);
 	return xdgsurf;
@@ -598,7 +598,7 @@ static const struct xdg_surface_listener bz_xdg_surface_implementation = {
 
 static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial)
 {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__,
+	bz_debug(BZ_LOG_WAYLAND,
 		"xdg_surface.configure(): Finalizing configure sequence for serial %d.", serial);
 	struct bz_client_globals *client_globals = data;
 	struct bz_application_window *window = client_globals->window;
@@ -711,7 +711,7 @@ static void bz_draw_frame(struct bz_application_window *window)
 {
 	const struct bz_buffer *buffer = &window->buffers[window->active_buffer];
 	if (!buffer->is_released) {
-		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Cannot draw frame on an unreleased buffer.");
+		bz_error(BZ_LOG_WAYLAND, "Cannot draw frame on an unreleased buffer.");
 		return;
 	}
 
@@ -767,8 +767,6 @@ static void bz_submit_frame(struct bz_application_window *window)
 
 static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t callback_data)
 {
-	// bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "RENDER CALLBACK TRIGGERED! Time: %d", callback_data); // TODO-dl9: delete
-
 	struct bz_application_window *window = data;
 
 	window->frame_callback = nullptr;
@@ -792,7 +790,7 @@ struct xdg_toplevel *bz_xdg_toplevel_constructor(
 	struct bz_client_globals *globals,
 	struct xdg_surface *xdgsurface
 ) {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Creating an XDG toplevel");
+	bz_debug(BZ_LOG_WAYLAND, "Creating an XDG toplevel");
 	struct xdg_toplevel *xdgtoplevel = xdg_surface_get_toplevel(xdgsurface);
 	xdg_toplevel_add_listener(xdgtoplevel, &bz_xdg_toplevel_implementation, globals);
 	// xdg_toplevel_set_title(xdgtoplevel, "Greetings from test client!");
@@ -813,7 +811,7 @@ static void bz_xdg_toplevel_configure(
 	int32_t height,
 	struct wl_array *states
 ) {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__,
+	bz_debug(BZ_LOG_WAYLAND,
 		"xdg_toplevel.configure(): Setting recommended bounds (%dx%d) and states on xdg toplevel.",
 		width, height);
 	struct bz_client_globals *client_globals = data;
@@ -825,7 +823,7 @@ static void bz_xdg_toplevel_configure(
 
 static void bz_xdg_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
 {
-	bz_info(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Closing xdg_toplevel surface.");
+	bz_info(BZ_LOG_WAYLAND, "Closing xdg_toplevel surface.");
 	const struct bz_client_globals *client_globals = data;
 	constexpr uint64_t val = 1;
 	write(client_globals->is_quitting, &val, sizeof(val));
@@ -833,7 +831,7 @@ static void bz_xdg_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
 
 static void bz_xdg_toplevel_configure_bounds(void *data, struct xdg_toplevel *xdg_toplevel, int32_t width, int32_t height)
 {
-	bz_debug(BZ_LOG_WAYLAND, __FILE__, __LINE__,
+	bz_debug(BZ_LOG_WAYLAND,
 		"xdg_toplevel.configure_bounds(): Setting max bounds on xdg toplevel to %dx%d.",
 		width, height);
 	struct bz_client_globals *client_globals = data;
@@ -844,6 +842,6 @@ static void bz_xdg_toplevel_configure_bounds(void *data, struct xdg_toplevel *xd
 
 static void bz_xdg_toplevel_wm_capabilities(void * /*data*/, struct xdg_toplevel *xdg_toplevel, struct wl_array *capabilities)
 {
-	bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "xdg_toplevel.wm_capabilities not implemented");
+	bz_error(BZ_LOG_WAYLAND, "xdg_toplevel.wm_capabilities not implemented");
 	// TODO
 }

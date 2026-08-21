@@ -34,7 +34,7 @@ static void bz_add_termint_handler(int signum);
 
 static void bz_termint_handler(int signum)
 {
-	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "SIGTERM/SIGINT (%d) signal received", signum);
+	bz_info(BZ_LOG_MAIN, "SIGTERM/SIGINT (%d) signal received", signum);
 	constexpr uint64_t val = 1;
 	write(client_globals.is_quitting, &val, sizeof(val));
 }
@@ -69,7 +69,7 @@ int main(void)
 	// Establish the connection
 	client_globals.display = wl_display_connect(nullptr);
 	if (!client_globals.display) {
-		bz_error(BZ_LOG_WAYLAND, __FILE__, __LINE__, "Failed to connect to Wayland display.");
+		bz_error(BZ_LOG_WAYLAND, "Failed to connect to Wayland display.");
 		close(client_globals.is_quitting);
 		return 1;
 	}
@@ -86,8 +86,7 @@ int main(void)
 	bz_run_event_loop(&client_globals);
 
 	// Cleanup
-	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Cleaning up and disconnecting.");
-	// TODO-dl10: Call *surface.destroy methods
+	bz_info(BZ_LOG_MAIN, "Cleaning up and disconnecting.");
 	if (client_globals.window != nullptr) {
 		for (uint8_t i = 0; i < 2; i++) {
 			if (client_globals.window->buffers[i].buffer != nullptr) {
@@ -115,11 +114,12 @@ int main(void)
 			if (seat_data->xkbcontext != nullptr) { xkb_context_unref(seat_data->xkbcontext); }
 			free(seat_data);
 		}
+		wl_seat_release(client_globals.seat);
 	}
 
 	wl_display_disconnect(client_globals.display);
 	close(client_globals.is_quitting);
 
-	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Clean exit.");
+	bz_info(BZ_LOG_MAIN, "Clean exit.");
 	return 0;
 }

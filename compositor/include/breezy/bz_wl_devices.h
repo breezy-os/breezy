@@ -11,20 +11,20 @@
 // -- wl_seat --
 #define BZ_SEAT_VERSION 10
 void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
+void bz_seat_dtor(struct wl_resource *data);
 struct bz_wl_seat {
 	struct wl_resource *resource; // The "wl_seat"
 	struct bz_list *keyboards;    // List of "struct wl_resource *"
 	struct bz_list *pointers;     // List of "struct wl_resource *"
-
-	uint32_t last_enter_serial;   // Serial from the last wl_pointer::enter event
-	struct bz_surface *cursor_surface; // One "cursor" per seat. All wl_pointers impact this one cursor.
 };
 
 // -- wl_pointer --
 #define BZ_POINTER_VERSION 10
+void bz_pointer_dtor(struct wl_resource *data);
 
 // -- wl_keyboard --
 #define BZ_KEYBOARD_VERSION 10
+void bz_keyboard_dtor(struct wl_resource *data);
 
 // -- wl_output --
 #define BZ_OUTPUT_VERSION 4

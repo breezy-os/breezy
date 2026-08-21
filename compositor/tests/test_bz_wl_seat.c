@@ -29,6 +29,8 @@ FAKE_VOID_FUNC(wl_resource_set_implementation, struct wl_resource *, const void 
 FAKE_VOID_FUNC_VARARG(wl_resource_post_event, struct wl_resource *, uint32_t, ...)
 FAKE_VALUE_FUNC(struct wl_resource *, wl_resource_create, struct wl_client *, const struct wl_interface *, int, uint32_t)
 FAKE_VOID_FUNC_VARARG(wl_resource_post_error, struct wl_resource *, uint32_t, const char *, ...)
+FAKE_VALUE_FUNC(void *, wl_resource_get_user_data, struct wl_resource *)
+FAKE_VOID_FUNC(wl_resource_destroy, struct wl_resource *)
 // -- xkbcommon --
 FAKE_VALUE_FUNC(char *, xkb_keymap_get_as_string, struct xkb_keymap *, enum xkb_keymap_format)
 
@@ -41,6 +43,8 @@ void setUp(void)
 	RESET_FAKE(wl_resource_post_event);
 	RESET_FAKE(wl_resource_create);
 	RESET_FAKE(wl_resource_post_error);
+	RESET_FAKE(wl_resource_get_user_data);
+	RESET_FAKE(wl_resource_destroy);
 	RESET_FAKE(xkb_keymap_get_as_string);
 	FFF_RESET_HISTORY();
 
@@ -70,10 +74,6 @@ void test_seat_constructor__initializes_resource(void)
 	struct bz_client *client_data = bz_create_client_data();
 	wl_client_get_user_data_fake.return_val = client_data;
 
-	// This test doesn't want the seat being pre-created...
-	bz_free_seat_data(client_data->seat);
-	client_data->seat = nullptr;
-
 	// Run our test!
 	bz_seat_constructor(nullptr, nullptr, 0, 0);
 
@@ -84,9 +84,10 @@ void test_seat_constructor__initializes_resource(void)
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
 	TEST_ASSERT_EQUAL_PTR(seat_res, wl_resource_set_implementation_fake.arg0_val);
 	struct bz_wl_seat *seat_data = wl_resource_set_implementation_fake.arg2_val;
-	TEST_ASSERT_EQUAL_PTR(seat_data, client_data->seat);
+	TEST_ASSERT_EQUAL_PTR(seat_data, client_data->seats->head->data);
 
 	// Clean up
+	bz_free_seat_data(seat_data);
 	bz_free_client_data(client_data); // Also frees the seat
 	free(seat_res);
 }
@@ -120,10 +121,6 @@ void test_seat_capabilities__sent_when_bound_to_seat(void)
 	struct bz_client *client_data = bz_create_client_data();
 	wl_client_get_user_data_fake.return_val = client_data;
 
-	// This test doesn't want the seat being pre-created...
-	bz_free_seat_data(client_data->seat);
-	client_data->seat = nullptr;
-
 	// Run our test!
 	bz_seat_constructor(nullptr, nullptr, 0, 0);
 
@@ -134,6 +131,7 @@ void test_seat_capabilities__sent_when_bound_to_seat(void)
 	TEST_ASSERT_EQUAL_INT(WL_SEAT_CAPABILITIES, wl_resource_post_event_fake.arg1_history[1]);
 
 	// Clean up
+	bz_free_seat_data(client_data->seats->head->data);
 	bz_free_client_data(client_data);
 	free(seat_res);
 }
@@ -143,6 +141,8 @@ void test_seat_capabilities__sent_when_capabilities_added(void)
 {
 	// Initialize our data
 	struct bz_client *client_data = bz_create_client_data();
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
 	struct wl_resource *client_res = malloc(sizeof(*client_res));
 	bz_list_append(client_data->breezy->wayland.clients, client_res);
@@ -169,6 +169,7 @@ void test_seat_capabilities__sent_when_capabilities_added(void)
 
 	// Clean up
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 	free(client_res);
 }
 
@@ -177,6 +178,8 @@ void test_seat_capabilities__sent_when_capabilities_removed(void)
 {
 	// Initialize our data
 	struct bz_client *client_data = bz_create_client_data();
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
 	struct wl_resource *client_res = malloc(sizeof(*client_res));
 	bz_list_append(client_data->breezy->wayland.clients, client_res);
@@ -205,6 +208,7 @@ void test_seat_capabilities__sent_when_capabilities_removed(void)
 
 	// Clean up
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 	free(client_res);
 }
 
@@ -213,6 +217,8 @@ void test_seat_capabilities__not_sent_when_capabilities_unchanged(void)
 {
 	// Initialize our data
 	struct bz_client *client_data = bz_create_client_data();
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
 	struct wl_resource *client_res = malloc(sizeof(*client_res));
 	bz_list_append(client_data->breezy->wayland.clients, client_res);
@@ -233,6 +239,7 @@ void test_seat_capabilities__not_sent_when_capabilities_unchanged(void)
 
 	// Clean up
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 	free(client_res);
 }
 
@@ -245,14 +252,19 @@ void test_seat_capabilities__not_sent_when_capabilities_unchanged(void)
 void test_seat_get_pointer__creates_new_pointer(void)
 {
 	// Set up our mocks
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	wl_resource_get_user_data_fake.return_val = seat_data;
+
 	struct bz_client *client_data = bz_create_client_data();
+	bz_list_append(client_data->seats, seat_data);
 	client_data->breezy->input.ever_had_pointer = true;
 	wl_client_get_user_data_fake.return_val = client_data;
+
 	struct wl_resource *pointer_res = calloc(1, sizeof(*pointer_res));
 	wl_resource_create_fake.return_val = pointer_res;
 
 	// Run our test
-	TEST_ASSERT_EQUAL_INT(0, client_data->seat->pointers->length);
+	TEST_ASSERT_EQUAL_INT(0, seat_data->pointers->length);
 	bz_seat_implementation.get_pointer(nullptr, nullptr, 0);
 
 	// Make our assertions
@@ -260,11 +272,12 @@ void test_seat_get_pointer__creates_new_pointer(void)
 	TEST_ASSERT_EQUAL_INT(0, wl_client_post_no_memory_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
 	TEST_ASSERT_EQUAL_PTR(pointer_res, wl_resource_set_implementation_fake.arg0_val);
-	TEST_ASSERT_EQUAL_INT(1, client_data->seat->pointers->length);
+	TEST_ASSERT_EQUAL_INT(1, seat_data->pointers->length);
 
 	// Clean up
 	free(pointer_res);
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 }
 
 /**
@@ -275,6 +288,8 @@ void test_seat_get_pointer__posts_missing_capability(void)
 {
 	// Set up our mocks
 	struct bz_client *client_data = bz_create_client_data();
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
 	struct wl_resource *pointer_res = calloc(1, sizeof(*pointer_res));
 	wl_resource_create_fake.return_val = pointer_res;
@@ -288,11 +303,12 @@ void test_seat_get_pointer__posts_missing_capability(void)
 	TEST_ASSERT_EQUAL_INT(WL_SEAT_ERROR_MISSING_CAPABILITY, wl_resource_post_error_fake.arg1_val);
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_create_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_set_implementation_fake.call_count);
-	TEST_ASSERT_EQUAL_INT(0, client_data->seat->pointers->length);
+	TEST_ASSERT_EQUAL_INT(0, seat_data->pointers->length);
 
 	// Clean up
 	free(pointer_res);
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 }
 
 /**
@@ -302,8 +318,13 @@ void test_seat_get_pointer__posts_missing_capability(void)
 void test_seat_get_pointer__succeeds_if_ever_had_capability(void)
 {
 	// Set up our mocks
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	wl_resource_get_user_data_fake.return_val = seat_data;
+
 	struct bz_client *client_data = bz_create_client_data();
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
+
 	struct wl_resource *pointer_res = calloc(1, sizeof(*pointer_res));
 	wl_resource_create_fake.return_val = pointer_res;
 
@@ -316,11 +337,12 @@ void test_seat_get_pointer__succeeds_if_ever_had_capability(void)
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
-	TEST_ASSERT_EQUAL_INT(1, client_data->seat->pointers->length);
+	TEST_ASSERT_EQUAL_INT(1, seat_data->pointers->length);
 
 	// Clean up
 	free(pointer_res);
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 }
 
 
@@ -332,9 +354,13 @@ void test_seat_get_pointer__succeeds_if_ever_had_capability(void)
 void test_seat_get_keyboard__creates_new_keyboard(void)
 {
 	// Set up our mocks
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	wl_resource_get_user_data_fake.return_val = seat_data;
 	struct bz_client *client_data = bz_create_client_data();
 	client_data->breezy->input.ever_had_keyboard = true;
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
+
 	struct wl_resource *keyboard_res = calloc(1, sizeof(*keyboard_res));
 	wl_resource_create_fake.return_val = keyboard_res;
 	// Since our code frees keymap, we can't use a stack-allocated string constant...
@@ -343,7 +369,7 @@ void test_seat_get_keyboard__creates_new_keyboard(void)
 	xkb_keymap_get_as_string_fake.return_val = keymap;
 
 	// Run our test
-	TEST_ASSERT_EQUAL_INT(0, client_data->seat->keyboards->length);
+	TEST_ASSERT_EQUAL_INT(0, seat_data->keyboards->length);
 	bz_seat_implementation.get_keyboard(nullptr, nullptr, 0);
 
 	// Make our assertions
@@ -351,20 +377,26 @@ void test_seat_get_keyboard__creates_new_keyboard(void)
 	TEST_ASSERT_EQUAL_INT(0, wl_client_post_no_memory_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
 	TEST_ASSERT_EQUAL_PTR(keyboard_res, wl_resource_set_implementation_fake.arg0_val);
-	TEST_ASSERT_EQUAL_INT(1, client_data->seat->keyboards->length);
+	TEST_ASSERT_EQUAL_INT(1, seat_data->keyboards->length);
 
 	// Clean up
 	free(keyboard_res);
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 }
 
 /** Keymap and repeat info should be sent when the keyboard is created. */
 void test_seat_get_keyboard__sends_keymap_and_repeat_info(void)
 {
 	// Set up our mocks
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	wl_resource_get_user_data_fake.return_val = seat_data;
+
 	struct bz_client *client_data = bz_create_client_data();
 	client_data->breezy->input.ever_had_keyboard = true;
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
+
 	struct wl_resource *keyboard_res = calloc(1, sizeof(*keyboard_res));
 	wl_resource_create_fake.return_val = keyboard_res;
 	// Since our code frees keymap, we can't use a stack-allocated string constant...
@@ -383,6 +415,7 @@ void test_seat_get_keyboard__sends_keymap_and_repeat_info(void)
 	// Clean up
 	free(keyboard_res);
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 }
 
 /**
@@ -393,6 +426,8 @@ void test_seat_get_keyboard__posts_missing_capability(void)
 {
 	// Set up our mocks
 	struct bz_client *client_data = bz_create_client_data();
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
 	struct wl_resource *keyboard_res = calloc(1, sizeof(*keyboard_res));
 	wl_resource_create_fake.return_val = keyboard_res;
@@ -406,11 +441,12 @@ void test_seat_get_keyboard__posts_missing_capability(void)
 	TEST_ASSERT_EQUAL_INT(WL_SEAT_ERROR_MISSING_CAPABILITY, wl_resource_post_error_fake.arg1_val);
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_create_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_set_implementation_fake.call_count);
-	TEST_ASSERT_EQUAL_INT(0, client_data->seat->keyboards->length);
+	TEST_ASSERT_EQUAL_INT(0, seat_data->keyboards->length);
 
 	// Clean up
 	free(keyboard_res);
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 }
 
 /**
@@ -420,7 +456,11 @@ void test_seat_get_keyboard__posts_missing_capability(void)
 void test_seat_get_keyboard__succeeds_if_ever_had_capability(void)
 {
 	// Set up our mocks
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	wl_resource_get_user_data_fake.return_val = seat_data;
+
 	struct bz_client *client_data = bz_create_client_data();
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
 	struct wl_resource *keyboard_res = calloc(1, sizeof(*keyboard_res));
 	wl_resource_create_fake.return_val = keyboard_res;
@@ -438,11 +478,12 @@ void test_seat_get_keyboard__succeeds_if_ever_had_capability(void)
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
-	TEST_ASSERT_EQUAL_INT(1, client_data->seat->keyboards->length);
+	TEST_ASSERT_EQUAL_INT(1, seat_data->keyboards->length);
 
 	// Clean up
 	free(keyboard_res);
 	bz_free_client_data(client_data);
+	bz_free_seat_data(seat_data);
 }
 
 
@@ -483,18 +524,26 @@ void test_seat_get_touch__succeeds_if_ever_had_capability(void)
 void test_seat_release__clears_our_seat_reference(void)
 {
 	// Set up our mocks / data
+	struct wl_resource *seat = calloc(1, sizeof(*seat));
+	struct bz_wl_seat *seat_data = bz_create_seat_data();
+	wl_resource_get_user_data_fake.return_val = seat_data;
+
 	struct bz_client *client_data = bz_create_client_data();
+	bz_list_append(client_data->seats, seat_data);
 	wl_client_get_user_data_fake.return_val = client_data;
-	struct bz_wl_seat *seat_data = client_data->seat;
 
 	// Run our test
-	TEST_ASSERT_NOT_NULL(client_data->seat);
-	bz_seat_implementation.release(nullptr, nullptr);
-	TEST_ASSERT_NULL(client_data->seat);
+	TEST_ASSERT_EQUAL_INT(1, client_data->seats->length);
+	bz_seat_implementation.release(nullptr, seat);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_destroy_fake.call_count);
+	// ".release" only triggers "wl_resource_destroy", which is faked. We should call our dtor manually.
+	bz_seat_dtor(seat);
+	TEST_ASSERT_EQUAL_INT(0, client_data->seats->length);
 
 	// Clean up
 	bz_free_client_data(client_data);
-	bz_free_seat_data(seat_data); // Since "release" nullifies client_data->seat
+	// Don't free seat data. It should be freed by bz_seat_dtor, and if it's not,
+	//   this test needs to fail.
 }
 
 

@@ -15,6 +15,14 @@ struct bz_list {
 	int length;
 };
 
+#define bz_list_foreach(item, list) \
+	for (struct bz_node *node = (list)->head; node != nullptr; node = node->next) \
+		if (((item) = node->data), 0) {} else
+
+#define bz_list_foreach_rev(item, list) \
+	for (struct bz_node *node = (list)->tail; node != nullptr; node = node->prev) \
+		if (((item) = node->data), 0) {} else
+
 struct bz_list *bz_list_create();
 int bz_list_append(struct bz_list *list, void *data);
 int bz_list_insert(struct bz_list *list, void *data, void *after_data);
