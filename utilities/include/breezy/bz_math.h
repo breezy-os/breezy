@@ -26,7 +26,9 @@ double bz_distance(int x1, int y1, int x2, int y2);
 
 int32_t bz_rand_int(int min, int max);
 
-int32_t bz_clamp(uint32_t value, uint32_t min, uint32_t max);
+int32_t bz_clamp(int32_t value, int32_t min, int32_t max);
+
+bool bz_contains_point(struct bz_position *rect_pos, struct bz_dimension *rect_size, struct bz_position *point);
 
 // #################################################################################################
 #endif

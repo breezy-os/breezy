@@ -25,10 +25,12 @@ bz_compositor_utils_lib = static_library(
 # Run each of our test suites
 foreach t : [
     'bz_seat',
-    # Wayland interfaces
+    # Wayland interfaces (alphabetized!)
     'bz_wl_compositor',
-    'bz_wl_surface',
+    'bz_wl_keyboard',
+    'bz_wl_pointer',
     'bz_wl_seat',
+    'bz_wl_surface',
     'bz_xdg_wm_base',
     'bz_xdg_surface',
 ]
@@ -44,6 +46,7 @@ foreach t : [
             fff_dep,
             dependency('libdrm'),
             dependency('libseat'),
+            dependency('wayland-server'),
         ],
         include_directories: compositor_inc)
     test(t, exe)

@@ -78,7 +78,7 @@ struct bz_client *bz_create_client_data(void)
 	struct bz_client *data = calloc(1, sizeof(*data));
 
 	data->breezy = bz_create_breezy_data();
-	data->seat = bz_create_seat_data();
+	data->seats = bz_list_create();
 
 	return data;
 }
@@ -87,7 +87,7 @@ void bz_free_client_data(struct bz_client *data)
 {
 	if (data) {
 		if (data->breezy != nullptr) { bz_free_breezy_data(data->breezy); }
-		if (data->seat != nullptr)   { bz_free_seat_data(data->seat); }
+		if (data->seats != nullptr)  { bz_list_free(data->seats, nullptr); }
 		free(data);
 	}
 }
@@ -100,6 +100,8 @@ void bz_free_client_data(struct bz_client *data)
 struct bz_surface *bz_create_surface_data(void)
 {
 	struct bz_surface *data = calloc(1, sizeof(*data));
+
+	data->role = BZ_SURF_ROLE_NONE;
 
 	data->pending_state = calloc(1, sizeof(*data->pending_state));
 	data->pending_state->frame_callbacks = bz_list_create();

@@ -35,7 +35,7 @@ static const struct libseat_seat_listener seat_listener = {
  * our rendering state/buffer.
  */
 static void handle_enable_seat(struct libseat * /*s*/, void *data) {
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Enabling seat and claiming DRM Master.");
+	bz_debug(BZ_LOG_GRAPHICS, "Enabling seat and claiming DRM Master.");
 	struct bz_breezy *breezy = data;
 	bz_graphics_activate(breezy);
 	bz_input_activate(breezy);
@@ -45,7 +45,7 @@ static void handle_enable_seat(struct libseat * /*s*/, void *data) {
 
 /** Disables our seat, and deactivates our DRM resources. */
 static void handle_disable_seat(struct libseat *s, void *data) {
-	bz_debug(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Disabling seat and releasing DRM Master.");
+	bz_debug(BZ_LOG_GRAPHICS, "Disabling seat and releasing DRM Master.");
 	struct bz_breezy *breezy = data;
 	bz_input_deactivate(breezy);
 	bz_graphics_deactivate(breezy);
@@ -53,7 +53,7 @@ static void handle_disable_seat(struct libseat *s, void *data) {
 
 	// Acknowledge we're done, releasing DRM Master.
 	if (libseat_disable_seat(s) != 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to release DRM Master.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to release DRM Master.");
 	}
 }
 
@@ -70,24 +70,24 @@ int bz_seat_initialize(struct bz_breezy *breezy) {
 	// Open a seat
 	breezy->seat.seat = libseat_open_seat(&seat_listener, breezy);
 	if (!breezy->seat.seat) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Failed to open seat.");
+		bz_error(BZ_LOG_GRAPHICS, "Failed to open seat.");
 		return -1;
 	}
 
 	// Initial dispatch to trigger "handle_enable_seat()"
 	if (libseat_dispatch(breezy->seat.seat, 1000) < 0) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Initial libseat_dispatch failed.");
+		bz_error(BZ_LOG_GRAPHICS, "Initial libseat_dispatch failed.");
 		return -2;
 	}
 
 	if (!breezy->seat.active) {
-		bz_error(BZ_LOG_GRAPHICS, __FILE__, __LINE__, "Seat not active after open.");
+		bz_error(BZ_LOG_GRAPHICS, "Seat not active after open.");
 		return -3;
 	}
 
 	breezy->seat.fd = libseat_get_fd(breezy->seat.seat);
 
-	bz_info(BZ_LOG_SEAT, __FILE__, __LINE__, "Successfully initialized our seat system.");
+	bz_info(BZ_LOG_SEAT, "Successfully initialized our seat system.");
 	return 0;
 }
 
@@ -95,9 +95,9 @@ int bz_seat_initialize(struct bz_breezy *breezy) {
 int bz_seat_handle_libseat_event(int /*fd*/, uint32_t /*mask*/, void *data)
 {
 	struct bz_breezy *breezy = data;
-	bz_debug(BZ_LOG_SEAT, __FILE__, __LINE__, "Handling seat_fd event.");
+	bz_debug(BZ_LOG_SEAT, "Handling seat_fd event.");
 	if (libseat_dispatch(breezy->seat.seat, 0) < 0) {
-		bz_error(BZ_LOG_SEAT, __FILE__, __LINE__, "libseat_dispatch failed.");
+		bz_error(BZ_LOG_SEAT, "libseat_dispatch failed.");
 	}
 	return 0;
 }
@@ -134,12 +134,12 @@ int bz_seat_close_device(struct bz_breezy *breezy, const int device_id) {
 }
 
 void bz_seat_change_vt(struct bz_breezy *breezy, const int vt_number) {
-	bz_info(BZ_LOG_SEAT, __FILE__, __LINE__, "Changing VT to %u", vt_number);
+	bz_info(BZ_LOG_SEAT, "Changing VT to %u", vt_number);
 	if (vt_number < 1 || vt_number > 12) {
-		bz_warn(BZ_LOG_SEAT, __FILE__, __LINE__, "VT was not in range: %d", vt_number);
+		bz_warn(BZ_LOG_SEAT, "VT was not in range: %d", vt_number);
 		return;
 	}
 	if (libseat_switch_session(breezy->seat.seat, vt_number) == -1) {
-		bz_warn(BZ_LOG_SEAT, __FILE__, __LINE__, "Failed to change VTs.");
+		bz_warn(BZ_LOG_SEAT, "Failed to change VTs.");
 	}
 }

@@ -62,11 +62,16 @@ This will run Breezy, sending all output to the `./build/stdout` and `./build/st
 
 # Using Breezy
 
-As of the last time I updated this readme (July 7, 2026), Breezy doesn't have too many capabilities... Here's the complete list:
+As of the last time I updated this readme (August 27, 2026), Breezy doesn't have too many capabilities... Here's the complete list:
 
 1. To quit out of Breezy, run `<Super> + <Esc>`
 2. To launch the test client, run `<Super> + T`. You can launch multiple at once.
-3. To quit one of the test clients, run `<Super> + Q`. If you ran multiple clients, they'll be quit in a FIFO order.
+3. To quit the focused test client, run `<Super> + Q`.
+4. To focus a different client, just move your cursor over the target client.
+5. To randomize the foreground/background color of the focused client, left/right click the mouse.
+6. To steer around the circle of the active client, either move the mouse, use WASD, or use the arrow keys.
+7. To change the size of the circle for the active client, scroll the mouse wheel in or out.
+8. To move the active client, place the mouse in the client's bounds, then hold down super while moving the mouse cursor.
 
 # Debugging
 

@@ -11,6 +11,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_math.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_window_management.h"
 #include "breezy/bz_xdg_shell.h"
 
 
@@ -48,8 +49,7 @@ static void bz_surface_set_buffer_scale(struct wl_client *client, struct wl_reso
 static void bz_surface_damage_buffer(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
 static void bz_surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
 // Helpers
-static void bz_initialize_gl_texture(struct bz_surface *surface);
-static void bz_apply_damage(struct bz_surface *bzsurf);
+static void bz_write_surface_texture(struct bz_surface *surface_data);
 
 
 // =================================================================================================
@@ -59,7 +59,7 @@ static void bz_apply_damage(struct bz_surface *bzsurf);
 /** Gets executed whenever a client binds to wl_compositor. */
 void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Binding a client to wl_compositor.");
+	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_compositor.");
 
 	struct wl_resource *res = wl_resource_create(client, &wl_compositor_interface, version, id);
 	if (res == nullptr) {
@@ -121,8 +121,8 @@ static void bz_compositor_create_surface(
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
-	surface->position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
-	surface->position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
+	surface->renderable.position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
+	surface->renderable.position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
 
 	// Everything succeeded!
 	return;
@@ -135,7 +135,7 @@ static void bz_compositor_create_surface(
 	pending_state_alloc_failed:
 		free(surface);
 	surface_alloc_failed:
-		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new surface.");
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to construct a new surface.");
 }
 
 static void bz_compositor_create_region(
@@ -143,7 +143,7 @@ static void bz_compositor_create_region(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_compositor.create_region not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_compositor.create_region not implemented");
 	// TODO
 }
 
@@ -166,7 +166,7 @@ static struct bz_surface_state *bz_surface_state_init(void)
 	callback_list_failed:
 		free(state);
 	state_alloc_failed:
-		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to create empty bz_surface_state.");
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to create empty bz_surface_state.");
 		return nullptr;
 }
 
@@ -188,7 +188,7 @@ static void bz_surface_state_free(struct bz_surface_state *state)
 /** Gets executed whenever a client binds to wl_subcompositor. */
 void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Binding a client to wl_subcompositor.");
+	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_subcompositor.");
 
 	struct wl_resource *res = wl_resource_create(client, &wl_subcompositor_interface, version, id);
 	if (res == nullptr) {
@@ -206,7 +206,7 @@ static const struct wl_subcompositor_interface bz_subcompositor_implementation =
 
 static void bz_subcompositor_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_subcompositor.destroy not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subcompositor.destroy not implemented");
 	// TODO
 }
 
@@ -217,7 +217,7 @@ static void bz_subcompositor_get_subsurface(
 	struct wl_resource *surface,
 	struct wl_resource *parent
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_subcompositor.get_subsurface not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subcompositor.get_subsurface not implemented");
 	// TODO
 }
 
@@ -247,19 +247,19 @@ void bz_surface_dtor(struct wl_resource *data)
 	bz_surface_state_free(bzsurf->pending_state);
 	bz_surface_state_free(bzsurf->active_state);
 
-	glDeleteTextures(1, &bzsurf->texture);
+	glDeleteTextures(1, &bzsurf->renderable.texture);
 
 	free(bzsurf);
 
 	// Not sure I really like this here... keep an eye out for a better place to unrender clients.
 	struct wl_client *client = wl_resource_get_client(data);
-	struct bz_client *bzclient = wl_client_get_user_data(client);
-	bz_graphics_schedule_render(bzclient->breezy);
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	bz_graphics_schedule_render(client_data->breezy);
 }
 
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.destroy not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.destroy not implemented");
 	// TODO
 	// wl_resource_destroy(resource);
 	// Role must be destroyed first. Otherwise, "defunct_role_object" error
@@ -272,9 +272,9 @@ static void bz_surface_attach(
 	int32_t x,
 	int32_t y
 ) {
-	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
-	bzsurf->pending_state->buffer = buffer;
-	// TODO: accommodate x and y
+	struct bz_surface *surf_data = wl_resource_get_user_data(resource);
+	surf_data->pending_state->buffer = buffer;
+	// TODO: accommodate x and y. Consider how this would apply for both XDG surfaces and cursors.
 }
 
 static void bz_surface_damage(
@@ -285,7 +285,7 @@ static void bz_surface_damage(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.damage not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.damage not implemented");
 	// TODO
 }
 
@@ -314,7 +314,7 @@ static void bz_surface_frame(
 	return;
 
 	resource_failed:
-		bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Failed to construct a new frame callback.");
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to construct a new frame callback.");
 }
 
 static void bz_surface_set_opaque_region(
@@ -322,7 +322,7 @@ static void bz_surface_set_opaque_region(
 	struct wl_resource *resource,
 	struct wl_resource *region
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.set_opaque_region not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_opaque_region not implemented");
 	// TODO
 }
 
@@ -331,13 +331,13 @@ static void bz_surface_set_input_region(
 	struct wl_resource *resource,
 	struct wl_resource *region
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.set_input_region not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_input_region not implemented");
 	// TODO
 }
 
 static void bz_surface_commit(struct wl_client *client, struct wl_resource *resource)
 {
-	struct bz_client *bzclient = wl_client_get_user_data(client);
+	struct bz_client *client_data = wl_client_get_user_data(client);
 	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
 
 	// After creating an XDG role, the client must perform an initial commit w/o a buffer. The
@@ -349,7 +349,7 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 			&& bzsurf->active_state->buffer == nullptr
 	) {
 		if (bzsurf->xdgsurface == nullptr) {
-			bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__,
+			bz_error(BZ_LOG_WL_DISPLAY,
 				"XDG surface object was null on wl_surface after being assigned. "
 				"THIS SHOULD NEVER HAPPEN.");
 			wl_client_post_implementation_error(client,
@@ -369,24 +369,26 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 
 	if (bzsurf->active_state->buffer != nullptr) {
 		// Update our OpenGL texture
-		if (bzsurf->texture == 0) {
-			bz_initialize_gl_texture(bzsurf);
-		}
-		bz_apply_damage(bzsurf);
+		bz_write_surface_texture(bzsurf);
+
 		// Update our displayed window size
 		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->active_state->buffer);
-		bzsurf->size.w = wl_shm_buffer_get_width(shmbuf);
-		bzsurf->size.h = wl_shm_buffer_get_height(shmbuf);
-	}
+		bzsurf->renderable.size.w = wl_shm_buffer_get_width(shmbuf);
+		bzsurf->renderable.size.h = wl_shm_buffer_get_height(shmbuf);
 
-	// Since the buffer is on our OpenGL texture, release the buffer.
-	// TODO: This might need to be deferred for the DMA-BUF protocol..?
-	if (bzsurf->active_state->buffer != nullptr) {
+		// Since the buffer contents are saved on our OpenGL texture, release the buffer.
+		// TODO: This might need to be deferred for the DMA-BUF protocol..?
 		wl_buffer_send_release(bzsurf->active_state->buffer);
+
+		// Since the surface was just mapped (and therefore displayed), let's focus the surface
+		// TODO-dl13 (ish): Also consider wlr_layer_surfaces
+		if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
+			bz_mgmt_open_window(&client_data->breezy->window_mgmt, bzsurf);
+		}
 	}
 
 	// Schedule a repaint
-	bz_graphics_schedule_render(bzclient->breezy);
+	bz_graphics_schedule_render(client_data->breezy);
 }
 
 static void bz_surface_set_buffer_transform(
@@ -394,7 +396,7 @@ static void bz_surface_set_buffer_transform(
 	struct wl_resource *resource,
 	int32_t transform
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.set_buffer_transform not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_buffer_transform not implemented");
 	// TODO
 }
 
@@ -403,7 +405,7 @@ static void bz_surface_set_buffer_scale(
 	struct wl_resource *resource,
 	int32_t scale
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.set_buffer_scale not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_buffer_scale not implemented");
 	// TODO
 }
 
@@ -415,7 +417,7 @@ static void bz_surface_damage_buffer(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.damage_buffer not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.damage_buffer not implemented");
 	// TODO
 }
 
@@ -425,47 +427,48 @@ static void bz_surface_offset(
 	int32_t x,
 	int32_t y
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "wl_surface.offset not implemented");
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.offset not implemented");
 	// TODO
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------
 
-static void bz_initialize_gl_texture(struct bz_surface *surface)
+static void bz_write_surface_texture(struct bz_surface *surface_data)
 {
-	bz_info(BZ_LOG_WL_DISPLAY, __FILE__, __LINE__, "Initializing OpenGL texture for surface.");
+	// Initialize the texture
+	if (surface_data->renderable.texture == 0) {
+		bz_info(BZ_LOG_WL_DEVICES, "Initializing OpenGL texture for surface.");
+		glGenTextures(1, &surface_data->renderable.texture);
+		glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
 
-	glGenTextures(1, &surface->texture);
-	glBindTexture(GL_TEXTURE_2D, surface->texture);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-}
-
-static void bz_apply_damage(struct bz_surface *bzsurf)
-{
-	if (bzsurf->active_state->buffer == nullptr) {
+	// Make sure we have a buffer ready to go
+	if (surface_data->active_state->buffer == nullptr) {
 		return;
 	}
 
-	struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->active_state->buffer);
+	// Copy in the surface
+	struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(surface_data->active_state->buffer);
 	wl_shm_buffer_begin_access(shmbuf);
 	// --- Buffer Access Begin ---------------------------------------------------------------------
 
 	uint32_t *data = wl_shm_buffer_get_data(shmbuf);
 	int32_t width = wl_shm_buffer_get_width(shmbuf);
 	int32_t height = wl_shm_buffer_get_height(shmbuf);
-	glBindTexture(GL_TEXTURE_2D, bzsurf->texture);
+	glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
 	glTexImage2D(
 		GL_TEXTURE_2D,
 		0,                // mipmap level
-		GL_RGBA,          // format
+		GL_BGRA_EXT,      // format
 		width,
 		height,
 		0,                // border
-		GL_RGBA,          // format
+		GL_BGRA_EXT,      // format
 		GL_UNSIGNED_BYTE, // type
 		data              // pointer to new data
 	);

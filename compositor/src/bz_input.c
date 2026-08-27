@@ -19,6 +19,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_window_management.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_xdg_shell.h"
@@ -32,6 +33,10 @@ static int bz_input_open_restricted(const char *path, int flags, void *data);
 static void bz_input_close_restricted(int fd, void *data);
 static bool bz_input_device_fd_matches(void *fd, void *device);
 static void bz_input_process_hotplug_event(struct bz_breezy *breezy, struct libinput_device *device, bool new_plugged_status);
+static void bz_input_process_pointer_motion_event(struct bz_breezy *breezy, struct libinput_event_pointer *pt_event);
+static void bz_input_process_pointer_button_event(struct bz_breezy *breezy, struct libinput_event_pointer *pt_event);
+static void bz_input_process_pointer_scroll_wheel_event(struct bz_breezy *breezy, struct libinput_event_pointer *pt_event);
+static bool bz_input_process_wheel_for_axis(struct libinput_event_pointer *pt_event, enum libinput_pointer_axis axis, struct bz_client *client_data);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
@@ -118,14 +123,11 @@ void bz_input_change_device_counts(struct bz_breezy *breezy, int keyboard_delta,
 		uint32_t capabilities =
 			(has_keyboard ? WL_SEAT_CAPABILITY_KEYBOARD : 0) |
 			(has_pointer ? WL_SEAT_CAPABILITY_POINTER : 0);
-		struct bz_node *node = breezy->wayland.clients->head;
-		while (node != nullptr) {
-			struct wl_client *client = node->data;
+		struct wl_client *client; bz_list_foreach(client, breezy->wayland.clients) {
 			struct bz_client *client_data = wl_client_get_user_data(client);
-			if (client_data->seat != nullptr) {
-				wl_seat_send_capabilities(client_data->seat->resource, capabilities);
+			struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
+				wl_seat_send_capabilities(seat->resource, capabilities);
 			}
-			node = node->next;
 		}
 	}
 
@@ -133,14 +135,145 @@ void bz_input_change_device_counts(struct bz_breezy *breezy, int keyboard_delta,
 	if (has_keyboard) { breezy->input.ever_had_keyboard = true; }
 	if (has_pointer)  { breezy->input.ever_had_pointer  = true; }
 
-	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__,
-		"Device hotplugged. New counts: [keyboards: %d], [pointers: %d]",
-		breezy->input.keyboard_count,
-		breezy->input.pointer_count);
+	bz_info(BZ_LOG_INPUT, "Device hotplugged. New counts: [keyboards: %d], [pointers: %d]",
+		breezy->input.keyboard_count, breezy->input.pointer_count);
 }
 
-static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event)
-{
+static void bz_input_process_pointer_motion_event(
+	struct bz_breezy *breezy,
+	struct libinput_event_pointer *pt_event
+) {
+	int32_t start_x = breezy->gl.cursor.position.x - breezy->gl.cursor.offset.x;
+	int32_t start_y = breezy->gl.cursor.position.y - breezy->gl.cursor.offset.y;
+	double delta_x = libinput_event_pointer_get_dx_unaccelerated(pt_event);
+	double delta_y = libinput_event_pointer_get_dy_unaccelerated(pt_event);
+
+	// Update the cursor on the screen
+	breezy->gl.cursor.position.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay) + breezy->gl.cursor.offset.x;
+	breezy->gl.cursor.position.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay) + breezy->gl.cursor.offset.y;
+	if (breezy->window_mgmt.pointer_focus != nullptr) {
+		struct wl_client *client = wl_resource_get_client(breezy->window_mgmt.pointer_focus->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		struct bz_surface *cursor = client_data->cursor_surface;
+		if (cursor != nullptr) {
+			cursor->renderable.position.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay) + breezy->gl.cursor.offset.x;
+			cursor->renderable.position.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay) + breezy->gl.cursor.offset.y;
+		}
+	}
+
+	// Check for surface enter/leave events
+	bz_mgmt_update_pointer_position(&breezy->window_mgmt, &breezy->gl.cursor);
+
+	// If we're in "super" mode, then drag the current window.
+	// Otherwise, sent the action into the client.
+	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE);
+	if (super_held) {
+		// TODO-dl13ish : This is all temporary nonsense. It'll be removed when we add tiling.
+		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
+		if (focused_surf != nullptr) {
+			focused_surf->renderable.position.x += delta_x;
+			focused_surf->renderable.position.y += delta_y;
+		}
+
+	} else {
+		// Send motion events to all the focused surface's wl_pointers.
+		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
+		if (focused_surf != nullptr) {
+			uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
+			int32_t x_pos = breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.position.x;
+			int32_t y_pos = breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.position.y;
+			struct wl_client *client = wl_resource_get_client(focused_surf->resource);
+			struct bz_client *client_data = wl_client_get_user_data(client);
+			struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
+				struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
+					wl_pointer_send_motion(pointer, timestamp, x_pos, y_pos);
+					wl_pointer_send_frame(pointer);
+				}
+			}
+		}
+	}
+
+	bz_graphics_schedule_render(breezy);
+}
+
+static void bz_input_process_pointer_button_event(
+	struct bz_breezy *breezy,
+	struct libinput_event_pointer *pt_event
+) {
+	// Send button events to all the focused surface's wl_pointers.
+	struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
+	if (focused_surf != nullptr) {
+		struct wl_client *client = wl_resource_get_client(focused_surf->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+
+		uint32_t serial = wl_display_next_serial(client_data->breezy->wayland.display);
+		uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
+		uint32_t button = libinput_event_pointer_get_button(pt_event);
+		uint32_t state = libinput_event_pointer_get_button_state(pt_event) == LIBINPUT_BUTTON_STATE_PRESSED
+			? WL_POINTER_BUTTON_STATE_PRESSED
+			: WL_POINTER_BUTTON_STATE_RELEASED;
+
+		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
+			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
+				wl_pointer_send_button(pointer, serial, timestamp, button, state);
+				wl_pointer_send_frame(pointer);
+			}
+		}
+	}
+}
+
+static void bz_input_process_pointer_scroll_wheel_event(
+	struct bz_breezy *breezy,
+	struct libinput_event_pointer *pt_event
+) {
+	struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
+	if (focused_surf == nullptr) {
+		return;
+	}
+	struct wl_client *client = wl_resource_get_client(focused_surf->resource);
+	struct bz_client *client_data = wl_client_get_user_data(client);
+
+	bool sent_request = false;
+	sent_request |= bz_input_process_wheel_for_axis(pt_event, LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL, client_data);
+	sent_request |= bz_input_process_wheel_for_axis(pt_event, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL, client_data);
+
+	if (sent_request) {
+		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
+			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
+				wl_pointer_send_axis_source(pointer, WL_POINTER_AXIS_SOURCE_WHEEL);
+				wl_pointer_send_frame(pointer);
+			}
+		}
+	}
+}
+
+static bool bz_input_process_wheel_for_axis(
+	struct libinput_event_pointer *pt_event,
+	enum libinput_pointer_axis axis,
+	struct bz_client *client_data
+) {
+	if (libinput_event_pointer_has_axis(pt_event, axis)) {
+		uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
+		uint32_t wl_axis = axis == LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL
+			? WL_POINTER_AXIS_HORIZONTAL_SCROLL
+			: WL_POINTER_AXIS_VERTICAL_SCROLL;
+		double h_scroll_value = libinput_event_pointer_get_scroll_value(pt_event, axis);
+		double h_scroll_value120 = libinput_event_pointer_get_scroll_value_v120(pt_event, axis);
+		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
+			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
+				wl_pointer_send_axis(pointer, timestamp, wl_axis, h_scroll_value);
+				wl_pointer_send_axis_value120(pointer, wl_axis, h_scroll_value120);
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
+static void bz_input_process_kb_event(
+	struct bz_breezy *breezy,
+	struct libinput_event_keyboard *kb_event
+) {
 	// Parse the libinput event
 	enum libinput_key_state keystate = libinput_event_keyboard_get_key_state(kb_event);
 	const uint32_t keycode = libinput_event_keyboard_get_key(kb_event);
@@ -209,28 +342,27 @@ static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_
 	if (active_surface != nullptr) {
 		struct wl_client *client = wl_resource_get_client(active_surface->resource);
 		struct bz_client *client_data = wl_client_get_user_data(client);
-		struct bz_node *kb_node = client_data->seat->keyboards->head;
-		while (kb_node != nullptr) {
-			struct wl_resource *keyboard = kb_node->data;
-			wl_keyboard_send_key(
-				keyboard,
-				wl_display_next_serial(breezy->wayland.display),
-				libinput_event_keyboard_get_time(kb_event),
-				keycode,
-				keystate ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED
-			);
-			if (changes & (XKB_STATE_MODS_EFFECTIVE | XKB_STATE_LAYOUT_EFFECTIVE)) {
-				// A modifier changed, so re-send the full modifiers event.
-				wl_keyboard_send_modifiers(
+		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
+			struct wl_resource *keyboard; bz_list_foreach(keyboard, seat->keyboards) {
+				wl_keyboard_send_key(
 					keyboard,
 					wl_display_next_serial(breezy->wayland.display),
-					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_DEPRESSED),
-					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LATCHED),
-					xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LOCKED),
-					xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
+					libinput_event_keyboard_get_time(kb_event),
+					keycode,
+					keystate ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED
 				);
+				if (changes & (XKB_STATE_MODS_EFFECTIVE | XKB_STATE_LAYOUT_EFFECTIVE)) {
+					// A modifier changed, so re-send the full modifiers event.
+					wl_keyboard_send_modifiers(
+						keyboard,
+						wl_display_next_serial(breezy->wayland.display),
+						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_DEPRESSED),
+						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LATCHED),
+						xkb_state_serialize_mods(xkbstate,   XKB_STATE_MODS_LOCKED),
+						xkb_state_serialize_layout(xkbstate, XKB_STATE_LAYOUT_EFFECTIVE)
+					);
+				}
 			}
-			kb_node = kb_node->next;
 		}
 	}
 }
@@ -270,7 +402,7 @@ static void bz_input_spawn_child(const char *socket_name, const char *program_pa
 {
 	const pid_t pid = fork();
 	if (pid == -1) {
-		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Failed to fork the child process.");
+		bz_error(BZ_LOG_INPUT, "Failed to fork the child process.");
 		return;
 	}
 
@@ -305,7 +437,7 @@ int bz_input_initialize(struct bz_breezy *breezy) {
 	// Initialize udev
 	breezy->input.udev = udev_new();
 	if (!breezy->input.udev) {
-		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Failed to create udev context.");
+		bz_error(BZ_LOG_INPUT, "Failed to create udev context.");
 		return -1;
 	}
 
@@ -316,21 +448,21 @@ int bz_input_initialize(struct bz_breezy *breezy) {
 		breezy->input.udev
 	);
 	if (!breezy->input.libinput) {
-		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Failed to create libinput context.");
+		bz_error(BZ_LOG_INPUT, "Failed to create libinput context.");
 		return -2;
 	}
 
 	// Assign the libinput seat
 	const char *seat_name = bz_seat_name(breezy);
 	if (libinput_udev_assign_seat(breezy->input.libinput, seat_name) != 0) {
-		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Failed to assign libinput seat.");
+		bz_error(BZ_LOG_INPUT, "Failed to assign libinput seat.");
 		return -3;
 	}
 
 	// Initialize the xkbcommon context
 	breezy->input.xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (!breezy->input.xkb_context) {
-		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Failed to initialize xkbcommon context.");
+		bz_error(BZ_LOG_INPUT, "Failed to initialize xkbcommon context.");
 		return -4;
 	}
 
@@ -341,20 +473,20 @@ int bz_input_initialize(struct bz_breezy *breezy) {
 		XKB_KEYMAP_COMPILE_NO_FLAGS
 	);
 	if (!breezy->input.xkb_keymap) {
-		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Failed to create xkbcommon keymap.");
+		bz_error(BZ_LOG_INPUT, "Failed to create xkbcommon keymap.");
 		return -5;
 	}
 
 	// Create the xkbcommon state
 	breezy->input.xkb_state = xkb_state_new(breezy->input.xkb_keymap);
 	if (!breezy->input.xkb_state) {
-		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__, "Failed to create xkbcommon state.");
+		bz_error(BZ_LOG_INPUT, "Failed to create xkbcommon state.");
 		return -6;
 	}
 
 	breezy->input.fd = libinput_get_fd(breezy->input.libinput);
 
-	bz_info(BZ_LOG_INPUT, __FILE__, __LINE__, "Successfully initialized our input system.");
+	bz_info(BZ_LOG_INPUT, "Successfully initialized our input system.");
 	return 0;
 }
 
@@ -404,15 +536,24 @@ int bz_input_process_events(int /*fd*/, uint32_t /*mask*/, void *data)
 {
 	struct bz_breezy *breezy = data;
 	if (libinput_dispatch(breezy->input.libinput) != 0) {
-		bz_error(BZ_LOG_INPUT, __FILE__, __LINE__,
-			"Failed to dispatch libinput: %s.", strerror(errno));
+		bz_error(BZ_LOG_INPUT, "Failed to dispatch libinput: %s.", strerror(errno));
 		return 0;
 	}
 
 	struct libinput_event *event;
 	while ((event = libinput_get_event(breezy->input.libinput)) != nullptr) {
-		if (libinput_event_get_type(event) == LIBINPUT_EVENT_KEYBOARD_KEY) {
+		if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_MOTION) {
+			bz_input_process_pointer_motion_event(breezy, libinput_event_get_pointer_event(event));
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_BUTTON) {
+			bz_input_process_pointer_button_event(breezy, libinput_event_get_pointer_event(event));
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_KEYBOARD_KEY) {
 			bz_input_process_kb_event(breezy, libinput_event_get_keyboard_event(event));
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL) {
+			bz_input_process_pointer_scroll_wheel_event(breezy, libinput_event_get_pointer_event(event));
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_SCROLL_FINGER) {
+			bz_warn(BZ_LOG_INPUT, "Scroll finger being ignored"); // TODO
+		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_SCROLL_CONTINUOUS) {
+			bz_warn(BZ_LOG_INPUT, "Scroll continuous being ignored"); // TODO
 		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_DEVICE_ADDED) {
 			bz_input_process_hotplug_event(breezy, libinput_event_get_device(event), 1);
 		} else if (libinput_event_get_type(event) == LIBINPUT_EVENT_DEVICE_REMOVED) {

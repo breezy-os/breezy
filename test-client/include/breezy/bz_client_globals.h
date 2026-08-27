@@ -31,12 +31,13 @@ struct bz_application_window {
 	uint8_t *pool_data;           // nullptr prior to mmap
 	struct wl_shm_pool *shm_pool; // nullptr prior to wl_shm_create_pool
 	uint8_t active_buffer;        // The index of the buffer we should write to
-	struct bz_buffer buffers[2];
+	struct bz_buffer *buffers;
 
 	struct bz_configure_sequence *pending;
 	struct bz_configure_sequence *finalized;
 
 	struct bz_dimension size;
+	uint32_t radius;
 	uint32_t bg_color;
 	uint32_t fg_color;
 	uint32_t prev_time; // Used for circle animation.
@@ -50,6 +51,14 @@ struct bz_application_window {
 	bool konami_active; // When switched to true, circle becomes square
 
 	struct wl_callback *frame_callback; // nullptr when not active
+};
+
+struct bz_cursor {
+	struct wl_surface *wlsurface;
+	size_t pool_size;
+	uint8_t *pool_data;           // nullptr prior to mmap
+	struct wl_shm_pool *shm_pool; // nullptr prior to wl_shm_create_pool
+	struct bz_buffer *buffer;
 };
 
 struct bz_seat {
@@ -87,6 +96,7 @@ struct bz_client_globals {
 
 	int is_quitting;
 	struct bz_application_window *window;
+	struct bz_cursor *cursor;
 
 };
 

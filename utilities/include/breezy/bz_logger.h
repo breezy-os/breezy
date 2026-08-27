@@ -11,7 +11,7 @@ enum bz_log_level { BZ_LOG_DEBUG, BZ_LOG_INFO, BZ_LOG_WARN, BZ_LOG_ERROR, BZ_LOG
 // -- Configuring the Logger --
 void bz_log_initialize(enum bz_log_level default_level);
 void bz_log_initialize_custom(enum bz_log_level default_level, FILE *out, FILE *err);
-void bz_log_set_level(uint8_t category, enum bz_log_level level);
+void bz_log_set_level(uint8_t category, char *file, int line, enum bz_log_level level);
 
 // -- Using the Logger --
 void bz_debug(uint8_t category, char *file, int line, const char *message_fmt, ...);
@@ -20,16 +20,16 @@ void bz_warn(uint8_t category, char *file, int line, const char *message_fmt, ..
 void bz_error(uint8_t category, char *file, int line, const char *message_fmt, ...);
 
 // -- Categories for Breezy --
-#define BZ_LOG_MAIN 0
-#define BZ_LOG_GRAPHICS 1
-#define BZ_LOG_INPUT 2
-#define BZ_LOG_SEAT 3
-#define BZ_LOG_WAYLAND 4
-#define BZ_LOG_LIST 5
-#define BZ_LOG_WINDOW_MGMT 6
-#define BZ_LOG_WL_DISPLAY 7
-#define BZ_LOG_WL_DEVICES 8
-#define BZ_LOG_WL_XDG_SHELL 9
+#define BZ_LOG_MAIN 0, __FILE__, __LINE__
+#define BZ_LOG_GRAPHICS 1, __FILE__, __LINE__
+#define BZ_LOG_INPUT 2, __FILE__, __LINE__
+#define BZ_LOG_SEAT 3, __FILE__, __LINE__
+#define BZ_LOG_WAYLAND 4, __FILE__, __LINE__
+#define BZ_LOG_LIST 5, __FILE__, __LINE__
+#define BZ_LOG_WINDOW_MGMT 6, __FILE__, __LINE__
+#define BZ_LOG_WL_DISPLAY 7, __FILE__, __LINE__
+#define BZ_LOG_WL_DEVICES 8, __FILE__, __LINE__
+#define BZ_LOG_WL_XDG_SHELL 9, __FILE__, __LINE__
 
 
 // #################################################################################################

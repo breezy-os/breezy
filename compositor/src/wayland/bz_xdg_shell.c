@@ -10,6 +10,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_math.h"
 #include "breezy/bz_wl_display.h"
+#include "breezy/bz_window_management.h"
 
 
 // =================================================================================================
@@ -62,7 +63,7 @@ static void bz_xdg_toplevel_set_minimized(struct wl_client *client, struct wl_re
 /** Gets executed whenever a client binds to xdg_wm_base. */
 void bz_xdg_wm_base_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "Binding a client to xdg_wm_base.");
+	bz_debug(BZ_LOG_WL_XDG_SHELL, "Binding a client to xdg_wm_base.");
 
 	struct wl_resource *res = wl_resource_create(client, &xdg_wm_base_interface, version, id);
 	if (res == nullptr) {
@@ -82,7 +83,7 @@ const struct xdg_wm_base_interface bz_xdg_wm_base_implementation = {
 
 static void bz_xdg_wm_base_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_wm_base.destroy not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_wm_base.destroy not implemented");
 	// TODO
 }
 
@@ -91,7 +92,7 @@ static void bz_xdg_wm_base_create_positioner(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_wm_base.create_positioner not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_wm_base.create_positioner not implemented");
 	// TODO
 }
 
@@ -147,7 +148,7 @@ static void bz_xdg_wm_base_get_xdg_surface(
 		free(xdgsurface);
 	surface_alloc_failed:
 	initial_checks_failed:
-		bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "Failed to construct a new xdg_surface.");
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to construct a new xdg_surface.");
 }
 
 static void bz_xdg_wm_base_pong(
@@ -155,7 +156,7 @@ static void bz_xdg_wm_base_pong(
 	struct wl_resource *resource,
 	uint32_t serial
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_wm_base.pong not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_wm_base.pong not implemented");
 	// TODO
 }
 
@@ -184,7 +185,7 @@ void bz_xdg_surface_dtor(struct wl_resource *data)
 
 static void bz_xdg_surface_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_surface.destroy not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_surface.destroy not implemented");
 	// TODO
 	// Role must be destroyed first. Otherwise, "defunct_role_object" error
 }
@@ -236,26 +237,15 @@ static void bz_xdg_surface_get_toplevel(
 	bzsurf->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
 	bzsurf->xdgtoplevel = xdgtoplevel;
 
-	// Track this surface as "activatable"
-	struct bz_client *client_data = wl_client_get_user_data(client);
-	struct bz_breezy *breezy = client_data->breezy;
-	int open_status = bz_mgmt_open_window(&breezy->window_mgmt, bzsurf);
-	if (open_status != 0) {
-		goto window_open_failed;
-	}
-
 	// Everything succeeded!
 	return;
 
 	// Error cleanup
-	window_open_failed:
-		bzsurf->xdgtoplevel = nullptr;
-		wl_resource_destroy(resource);
 	resource_failed:
 		free(xdgtoplevel);
 	surface_alloc_failed:
 	initial_checks_failed:
-		bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "Failed to construct a new xdg_toplevel.");
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to construct a new xdg_toplevel.");
 }
 
 static void bz_xdg_surface_get_popup(
@@ -265,7 +255,7 @@ static void bz_xdg_surface_get_popup(
 	struct wl_resource *parent,
 	struct wl_resource *positioner
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_surface.get_popup not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_surface.get_popup not implemented");
 	// TODO
 
 	// // Cannot assign a different role if the surface already has one.
@@ -277,7 +267,7 @@ static void bz_xdg_surface_get_popup(
 	//
 	// // Error cleanup
 	// initial_checks_failed:
-	// 	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "Failed to construct a new xdg_popup.");
+	// 	bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to construct a new xdg_popup.");
 }
 
 static void bz_xdg_surface_set_window_geometry(
@@ -288,7 +278,7 @@ static void bz_xdg_surface_set_window_geometry(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_surface.set_window_geometry not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_surface.set_window_geometry not implemented");
 	// TODO
 }
 
@@ -307,8 +297,7 @@ static void bz_xdg_surface_ack_configure(
 		bz_serial_matches
 	);
 	if (configevt == nullptr) {
-		bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__,
-			"Configure event not found for serial %d", serial);
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Configure event not found for serial %d", serial);
 		wl_resource_post_error(resource, XDG_SURFACE_ERROR_INVALID_SERIAL,
 			"Configure event not found for serial %d.", serial);
 		return;
@@ -324,8 +313,7 @@ static void bz_xdg_surface_ack_configure(
 	bz_list_remove(pending_configs, configevt, nullptr); // Remove current one first to avoid "free"
 	const int removed_items = bz_list_filter(pending_configs, &serial, bz_serial_is_newer, free);
 	if (removed_items > 0) {
-		bz_info(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__,
-			"Removed %d outdated configure events.", removed_items);
+		bz_info(BZ_LOG_WL_XDG_SHELL, "Removed %d outdated configure events.", removed_items);
 	}
 }
 
@@ -347,8 +335,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 	if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
 		// Safety checks
 		if (bzsurf->xdgtoplevel == nullptr) {
-			bz_warn(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__,
-				"XDG toplevel object does not exist on the surface.");
+			bz_warn(BZ_LOG_WL_XDG_SHELL, "XDG toplevel object does not exist on the surface.");
 			wl_resource_post_error(bzsurf->xdgsurface->resource, XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
 				"XDG toplevel object does not exist on the surface.");
 			goto null_toplevel;
@@ -379,8 +366,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		);
 	} else if (bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
 		// TODO
-		bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__,
-			"Configuring roles for XDG popups not yet supported.");
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Configuring roles for XDG popups not yet supported.");
 	}
 
 	bz_list_append(xdgsurface->pending_configures, configevt);
@@ -390,7 +376,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 	null_toplevel:
 		free(configevt);
 	configevt_alloc_failed:
-		bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "Failed to send initial configure sequence.");
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to send initial configure sequence.");
 }
 
 static bool bz_serial_matches(void *item, void *serial)
@@ -438,7 +424,7 @@ void bz_xdg_toplevel_dtor(struct wl_resource *data)
 
 static void bz_xdg_toplevel_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.destroy not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.destroy not implemented");
 	// TODO
 }
 
@@ -447,7 +433,7 @@ static void bz_xdg_toplevel_set_parent(
 	struct wl_resource *resource,
 	struct wl_resource *parent
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.set_parent not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_parent not implemented");
 	// TODO
 }
 
@@ -456,7 +442,7 @@ static void bz_xdg_toplevel_set_title(
 	struct wl_resource *resource,
 	const char *title
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.set_title not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_title not implemented");
 	// TODO
 }
 
@@ -465,7 +451,7 @@ static void bz_xdg_toplevel_set_app_id(
 	struct wl_resource *resource,
 	const char *app_id
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.set_app_id not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_app_id not implemented");
 	// TODO
 }
 
@@ -477,7 +463,7 @@ static void bz_xdg_toplevel_show_window_menu(
 	int32_t x,
 	int32_t y
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.show_window_menu not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.show_window_menu not implemented");
 	// TODO
 }
 
@@ -487,7 +473,7 @@ static void bz_xdg_toplevel_move(
 	struct wl_resource *seat,
 	uint32_t serial
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.move not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.move not implemented");
 	// TODO
 }
 
@@ -498,7 +484,7 @@ static void bz_xdg_toplevel_resize(
 	uint32_t serial,
 	uint32_t edges
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.resize not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.resize not implemented");
 	// TODO
 }
 
@@ -508,7 +494,7 @@ static void bz_xdg_toplevel_set_max_size(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.set_max_size not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_max_size not implemented");
 	// TODO
 }
 
@@ -518,19 +504,19 @@ static void bz_xdg_toplevel_set_min_size(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.set_min_size not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_min_size not implemented");
 	// TODO
 }
 
 static void bz_xdg_toplevel_set_maximized(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.set_maximized not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_maximized not implemented");
 	// TODO
 }
 
 static void bz_xdg_toplevel_unset_maximized(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.unset_maximized not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.unset_maximized not implemented");
 	// TODO
 }
 
@@ -539,19 +525,19 @@ static void bz_xdg_toplevel_set_fullscreen(
 	struct wl_resource *resource,
 	struct wl_resource *output
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.set_fullscreen not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_fullscreen not implemented");
 	// TODO
 }
 
 static void bz_xdg_toplevel_unset_fullscreen(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.unset_fullscreen not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.unset_fullscreen not implemented");
 	// TODO
 }
 
 static void bz_xdg_toplevel_set_minimized(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, __FILE__, __LINE__, "xdg_toplevel.set_minimized not implemented");
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_minimized not implemented");
 	// TODO
 }
 

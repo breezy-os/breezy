@@ -38,7 +38,7 @@ void bz_log_initialize_custom(const enum bz_log_level default_level, FILE *out, 
 	is_initialized = true;
 }
 
-void bz_log_set_level(const uint8_t category, const enum bz_log_level level)
+void bz_log_set_level(const uint8_t category, char *file, int line, const enum bz_log_level level)
 {
 	log_levels[category] = level;
 }

@@ -6,6 +6,7 @@
 
 void bz_run_event_loop(const struct bz_client_globals *globals);
 struct bz_application_window *bz_create_app_window(struct bz_client_globals *globals);
+struct bz_cursor *bz_create_cursor_surface(struct bz_client_globals *globals);
 
 // #################################################################################################
 #endif

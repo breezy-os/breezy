@@ -14,6 +14,7 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_window_management.h"
 
 
 int main(void)
@@ -40,47 +41,42 @@ int main(void)
 	breezy.wayland.event_sources = bz_list_create();
 	breezy.wayland.clients = bz_list_create();
 	if (breezy.input.device_lookup == nullptr) {
-		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__, "Failed to initialize device lookup list.");
+		bz_error(BZ_LOG_MAIN, "Failed to initialize device lookup list.");
 		return -1; // If we're already failing to malloc this early, let's just exit.
 	}
 
 	// Window management initialization
 	retval = bz_mgmt_initialize(&breezy.window_mgmt);
 	if (retval != 0) {
-		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__,
-			"Failed to initialize window management. Error: %d", retval);
+		bz_error(BZ_LOG_MAIN, "Failed to initialize window management. Error: %d", retval);
 		goto window_management_cleanup;
 	}
 
 	// Seat initialization
 	retval = bz_seat_initialize(&breezy);
 	if (retval != 0) {
-		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__,
-			"Failed to initialize seat code. Error: %d", retval);
+		bz_error(BZ_LOG_MAIN, "Failed to initialize seat code. Error: %d", retval);
 		goto seat_cleanup;
 	}
 
 	// Graphics initialization
 	retval = bz_graphics_initialize(&breezy);
 	if (retval != 0) {
-		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__,
-			"Failed to initialize graphics code. Error: %d", retval);
+		bz_error(BZ_LOG_MAIN, "Failed to initialize graphics code. Error: %d", retval);
 		goto graphics_cleanup;
 	}
 
 	// Input initialization
 	retval = bz_input_initialize(&breezy);
 	if (retval != 0) {
-		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__,
-			"Failed to initialize input code. Error: %d", retval);
+		bz_error(BZ_LOG_MAIN, "Failed to initialize input code. Error: %d", retval);
 		goto input_cleanup;
 	}
 
 	// Wayland initialization
 	retval = bz_wayland_initialize(&breezy);
 	if (retval != 0) {
-		bz_error(BZ_LOG_MAIN, __FILE__, __LINE__,
-			"Failed to initialize Wayland code. Error: %d", retval);
+		bz_error(BZ_LOG_MAIN, "Failed to initialize Wayland code. Error: %d", retval);
 		goto wayland_cleanup;
 	}
 
@@ -114,7 +110,7 @@ int main(void)
 	// Event loop!
 	bz_graphics_schedule_render(&breezy);
 	wl_display_run(breezy.wayland.display);
-	bz_info(BZ_LOG_MAIN, __FILE__, __LINE__, "Shutting down...");
+	bz_info(BZ_LOG_MAIN, "Shutting down...");
 
 	// Cleanup (backwards from initialization)
 wayland_cleanup:
