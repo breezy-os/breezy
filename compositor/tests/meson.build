@@ -29,6 +29,7 @@ foreach t : [
     'bz_wl_compositor',
     'bz_wl_keyboard',
     'bz_wl_pointer',
+    'bz_wl_region',
     'bz_wl_seat',
     'bz_wl_surface',
     'bz_xdg_wm_base',

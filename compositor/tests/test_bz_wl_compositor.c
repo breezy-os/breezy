@@ -25,8 +25,6 @@ FAKE_VALUE_FUNC(void *, wl_client_get_user_data, struct wl_client *)
 FAKE_VOID_FUNC(wl_resource_set_implementation, struct wl_resource *, const void *, void *, wl_resource_destroy_func_t)
 FAKE_VALUE_FUNC(struct wl_resource *, wl_resource_create, struct wl_client *, const struct wl_interface *, int, uint32_t)
 
-struct wl_resource *compositor;
-
 void setUp(void)
 {
 	RESET_FAKE(wl_client_post_no_memory);
@@ -35,89 +33,16 @@ void setUp(void)
 	FFF_RESET_HISTORY();
 
 	bz_log_initialize(BZ_LOG_OFF);
-	compositor = malloc(sizeof(*compositor));
 }
 
-void tearDown(void)
-{
-	free(compositor);
-	compositor = nullptr;
-}
+void tearDown(void) {}
 
 
 // =================================================================================================
 //  Helper functions for some of our tests
 // -------------------------------------------------------------------------------------------------
 
-/** Creates and bootstraps a fake wl_compositor resource, returning the interface implementation. */
-struct wl_compositor_interface *bz_bootstrap_compositor(void)
-{
-	wl_resource_create_fake.return_val = compositor;
-	bz_compositor_constructor(nullptr, nullptr, 0, 0);
-	struct wl_compositor_interface *compositor_impl = wl_resource_set_implementation_fake.arg1_val;
-	RESET_FAKE(wl_resource_create);
-	RESET_FAKE(wl_resource_set_implementation);
-	FFF_RESET_HISTORY();
-	return compositor_impl;
-}
-
-/** Creates and bootstraps a bz_client struct. When you're finished, call bz_client_free_data(). */
-struct bz_client *bz_client_create_data(struct bz_breezy *breezy)
-{
-	struct bz_client *client_data = calloc(1, sizeof(*client_data));
-	client_data->breezy = breezy;
-	return client_data;
-}
-
-/** Frees the memory allocated as part of bz_client_create_data(). */
-void bz_client_free_data(struct bz_client *data)
-{
-	free(data);
-}
-
-struct bz_create_surface_test_data {
-	struct wl_compositor_interface *compositor_impl;
-	struct bz_breezy *globals;
-	struct bz_client *client_data;
-	struct wl_resource *surface;
-};
-
-struct bz_create_surface_test_data *bz_bootstrap_create_surface_test()
-{
-	struct bz_create_surface_test_data *data = calloc(1, sizeof(*data));
-
-	// Compositor
-	data->compositor_impl = bz_bootstrap_compositor();
-
-	// Globals
-	struct bz_breezy *globals = calloc(1, sizeof(*globals));
-	globals->drm.mode_info.hdisplay = 1920;
-	globals->drm.mode_info.vdisplay = 1080;
-	data->globals = globals;
-
-	// Client Data
-	data->client_data = bz_client_create_data(globals);
-	wl_client_get_user_data_fake.return_val = data->client_data;
-
-	// Surface Resource
-	data->surface = calloc(1, sizeof(*data->surface));
-	wl_resource_create_fake.return_val = data->surface;
-
-	return data;
-}
-
-void bz_cleanup_create_surface_test(
-	struct bz_create_surface_test_data *test_data,
-	struct bz_surface *user_data
-) {
-	bz_free_surface_data(user_data);
-	if (test_data) {
-		if (test_data->client_data) { bz_client_free_data(test_data->client_data); }
-		if (test_data->surface)     { free(test_data->surface); }
-		if (test_data->globals)     { free(test_data->globals); }
-		free(test_data);
-	}
-}
+extern const struct wl_compositor_interface bz_compositor_implementation;
 
 
 // =================================================================================================
@@ -128,6 +53,7 @@ void bz_cleanup_create_surface_test(
 void test_compositor_constructor__initializes_resource(void)
 {
 	// Create a variable to house our wl_compositor handlers for direct execution
+	struct wl_resource *compositor = calloc(1, sizeof(*compositor));
 	wl_resource_create_fake.return_val = compositor;
 
 	// Run our test!
@@ -138,12 +64,15 @@ void test_compositor_constructor__initializes_resource(void)
 	TEST_ASSERT_EQUAL_INT(0, wl_client_post_no_memory_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
 	TEST_ASSERT_EQUAL_PTR(compositor, wl_resource_set_implementation_fake.arg0_val);
+
+	// Clean up!
+	free(compositor);
 }
 
 /** bz_compositor_constructor() posts a no memory error for failed Wayland resource creation. */
 void test_compositor_constructor__posts_no_mem_for_failed_resource(void)
 {
-	// Create a variable to house our wl_compositor handlers for direct execution
+	// Compositor creation should return a nullptr to trigger failure.
 	wl_resource_create_fake.return_val = nullptr;
 
 	// Run our test!
@@ -164,13 +93,13 @@ void test_compositor_constructor__posts_no_mem_for_failed_resource(void)
 void test_create_surface__initializes_properly(void)
 {
 	// Set up our mocks and data
-	struct bz_create_surface_test_data *test_data = bz_bootstrap_create_surface_test();
-	struct wl_compositor_interface *compositor_impl = test_data->compositor_impl;
-	struct bz_client *client_data = test_data->client_data;
-	struct wl_resource *surface = test_data->surface;
+	struct bz_client *client_data = bz_create_client_data();
+	wl_client_get_user_data_fake.return_val = client_data;
+	struct wl_resource *surface = calloc(1, sizeof(*surface));
+	wl_resource_create_fake.return_val = surface;
 
 	// Run our test!
-	compositor_impl->create_surface(nullptr, nullptr, 0);
+	bz_compositor_implementation.create_surface(nullptr, nullptr, 0);
 
 	// Make our assertions
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
@@ -180,34 +109,79 @@ void test_create_surface__initializes_properly(void)
 	TEST_ASSERT_NOT_NULL(wl_resource_set_implementation_fake.arg2_val);       // User Data
 
 	// Also verify some of our (more important) user data
-	struct bz_surface *user_data = wl_resource_set_implementation_fake.arg2_val;
-	TEST_ASSERT_EQUAL(surface, user_data->resource);
-	TEST_ASSERT_EQUAL(BZ_SURF_ROLE_NONE, user_data->role); // Surface does not start with a role.
-	TEST_ASSERT_NOT_NULL(user_data->pending_state);
-	TEST_ASSERT_NOT_NULL(user_data->active_state);
+	struct bz_surface *surface_data = wl_resource_set_implementation_fake.arg2_val;
+	TEST_ASSERT_EQUAL(surface, surface_data->resource);
+	TEST_ASSERT_EQUAL(BZ_SURF_ROLE_NONE, surface_data->role); // Surface does not start with a role.
+	TEST_ASSERT_NOT_NULL(surface_data->pending_state);
+	TEST_ASSERT_NOT_NULL(surface_data->active_state);
 
 	// Cleanup
-	bz_cleanup_create_surface_test(test_data, user_data);
+	free(surface);
+	bz_free_surface_data(surface_data);
+	bz_free_client_data(client_data);
 }
 
 /** bz_compositor_create_surface() should post no memory when the resource fails to create. */
 void test_create_surface__resource_failed(void)
 {
 	// Set up our mocks and data
-	struct bz_create_surface_test_data *test_data = bz_bootstrap_create_surface_test();
-	struct wl_compositor_interface *compositor_impl = test_data->compositor_impl;
 	wl_resource_create_fake.return_val = nullptr;
 
 	// Run our test!
-	compositor_impl->create_surface(nullptr, nullptr, 0);
+	bz_compositor_implementation.create_surface(nullptr, nullptr, 0);
 
 	// Make our assertions
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(1, wl_client_post_no_memory_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_set_implementation_fake.call_count);
+}
+
+
+// =================================================================================================
+//  Test bz_compositor_create_region()
+// -------------------------------------------------------------------------------------------------
+
+/** bz_compositor_create_region() should properly create and configure our region. */
+void test_create_region__initializes_properly(void)
+{
+	// Set up our mocks and data
+	struct wl_resource *region = calloc(1, sizeof(*region));
+	wl_resource_create_fake.return_val = region;
+
+	// Run our test!
+	bz_compositor_implementation.create_region(nullptr, nullptr, 0);
+
+	// Make our assertions
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
+	TEST_ASSERT_EQUAL(region, wl_resource_set_implementation_fake.arg0_val); // Resource
+	TEST_ASSERT_NOT_NULL(wl_resource_set_implementation_fake.arg1_val);       // Interface
+	TEST_ASSERT_NOT_NULL(wl_resource_set_implementation_fake.arg2_val);       // User Data
+
+	// Also verify some of our (more important) user data
+	struct bz_region *region_data = wl_resource_set_implementation_fake.arg2_val;
+	TEST_ASSERT_EQUAL(region, region_data->resource);
+	TEST_ASSERT_NOT_NULL(region_data->mutations);
+	TEST_ASSERT_EQUAL_INT(0, region_data->mutations->length);
 
 	// Cleanup
-	bz_cleanup_create_surface_test(test_data, nullptr);
+	free(region);
+	bz_free_region_data(region_data);
+}
+
+/** bz_compositor_create_region() should post no memory when the resource fails to create. */
+void test_create_region__resource_failed(void)
+{
+	// Set up our mocks and data
+	wl_resource_create_fake.return_val = nullptr;
+
+	// Run our test!
+	bz_compositor_implementation.create_region(nullptr, nullptr, 0);
+
+	// Make our assertions
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_client_post_no_memory_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_set_implementation_fake.call_count);
 }
 
 
@@ -227,7 +201,8 @@ int main(void) {
 	RUN_TEST(test_create_surface__resource_failed);
 
 	// Test bz_compositor_create_region()
-	// TODO
+	RUN_TEST(test_create_region__initializes_properly);
+	RUN_TEST(test_create_region__resource_failed);
 
 	return UNITY_END();
 }

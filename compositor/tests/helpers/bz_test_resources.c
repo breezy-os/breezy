@@ -20,6 +20,10 @@ void bz_free_breezy_data(struct bz_breezy *data);
 struct bz_client *bz_create_client_data(void);
 void bz_free_client_data(struct bz_client *data);
 
+// -- bz_region --
+struct bz_region *bz_create_region_data(void);
+void bz_free_region_data(struct bz_region *data);
+
 // -- bz_surface --
 struct bz_surface *bz_create_surface_data(void);
 void bz_free_surface_data(struct bz_surface *data);
@@ -49,6 +53,8 @@ struct bz_breezy *bz_create_breezy_data(void)
 {
 	struct bz_breezy *data = calloc(1, sizeof(*data));
 
+	data->drm.mode_info.hdisplay = 1920;
+	data->drm.mode_info.vdisplay = 1080;
 	data->window_mgmt.activable_surfaces = bz_list_create();
 	data->wayland.clients = bz_list_create();
 
@@ -88,6 +94,30 @@ void bz_free_client_data(struct bz_client *data)
 	if (data) {
 		if (data->breezy != nullptr) { bz_free_breezy_data(data->breezy); }
 		if (data->seats != nullptr)  { bz_list_free(data->seats, nullptr); }
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_region
+// -------------------------------------------------------------------------------------------------
+
+struct bz_region *bz_create_region_data(void)
+{
+	struct bz_region *data = calloc(1, sizeof(*data));
+
+	data->mutations = bz_list_create();
+
+	return data;
+}
+
+void bz_free_region_data(struct bz_region *data)
+{
+	if (data) {
+		if (data->mutations) {
+			bz_list_free(data->mutations, free);
+		}
 		free(data);
 	}
 }

@@ -21,7 +21,7 @@
 
 // -- wl_compositor --
 
-static const struct wl_compositor_interface bz_compositor_implementation;
+const struct wl_compositor_interface bz_compositor_implementation;
 static void bz_compositor_create_surface(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_compositor_create_region(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 // Helpers
@@ -30,12 +30,23 @@ static void bz_surface_state_free(struct bz_surface_state *state);
 
 // -- wl_subcompositor --
 
-static const struct wl_subcompositor_interface bz_subcompositor_implementation;
+const struct wl_subcompositor_interface bz_subcompositor_implementation;
 static void bz_subcompositor_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_subcompositor_get_subsurface(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface, struct wl_resource *parent);
 
+// -- wl_region --
+
+void bz_region_dtor(struct wl_resource *data);
+const struct wl_region_interface bz_region_implementation;
+static void bz_region_destroy(struct wl_client *client, struct wl_resource *resource);
+static void bz_region_add(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
+static void bz_region_subtract(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
+// Helpers
+static void bz_region_append_mutation(struct wl_client *client, struct bz_region *region_data, enum bz_region_op operation, int32_t x, int32_t y, int32_t width, int32_t height);
+
 // -- wl_surface --
 
+void bz_surface_dtor(struct wl_resource *data);
 const struct wl_surface_interface bz_surface_implementation;
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_surface_attach(struct wl_client *client, struct wl_resource *resource, struct wl_resource *buffer, int32_t x, int32_t y);
@@ -70,7 +81,7 @@ void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t ve
 	wl_resource_set_implementation(res, &bz_compositor_implementation, nullptr, nullptr);
 }
 
-static const struct wl_compositor_interface bz_compositor_implementation = {
+const struct wl_compositor_interface bz_compositor_implementation = {
 	.create_surface = bz_compositor_create_surface,
 	.create_region = bz_compositor_create_region,
 };
@@ -121,8 +132,10 @@ static void bz_compositor_create_surface(
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
-	surface->renderable.position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
-	surface->renderable.position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
+	// surface->renderable.position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
+	// surface->renderable.position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
+	surface->renderable.position.x = 200;
+	surface->renderable.position.y = 200;
 
 	// Everything succeeded!
 	return;
@@ -143,8 +156,49 @@ static void bz_compositor_create_region(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_compositor.create_region not implemented");
-	// TODO
+	// Allocate our user data
+	struct bz_region *region_data = calloc(1, sizeof(*region_data));
+	if (region_data == nullptr) {
+		wl_client_post_no_memory(client);
+		goto region_alloc_failed;
+	}
+	region_data->mutations = bz_list_create();
+	if (region_data->mutations == nullptr) {
+		wl_client_post_no_memory(client);
+		goto mutations_alloc_failed;
+	}
+
+	// Create the resource, bound to the data
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_region_interface,
+		BZ_REGION_VERSION,
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_region_implementation,
+		region_data,
+		bz_region_dtor
+	);
+
+	// Populate the region's user data
+	region_data->resource = res;
+
+	// Everything succeeded!
+	return;
+
+	// Error cleanups
+	resource_failed:
+		bz_list_free(region_data->mutations, nullptr);
+	mutations_alloc_failed:
+		free(region_data);
+	region_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to construct a new region.");
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------
@@ -199,7 +253,7 @@ void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t
 	wl_resource_set_implementation(res, &bz_subcompositor_implementation, nullptr, nullptr);
 }
 
-static const struct wl_subcompositor_interface bz_subcompositor_implementation = {
+const struct wl_subcompositor_interface bz_subcompositor_implementation = {
 	.destroy = bz_subcompositor_destroy,
 	.get_subsurface = bz_subcompositor_get_subsurface,
 };
@@ -223,22 +277,92 @@ static void bz_subcompositor_get_subsurface(
 
 
 // =================================================================================================
-//  wl_surface
+//  wl_region
 // -------------------------------------------------------------------------------------------------
 
-const struct wl_surface_interface bz_surface_implementation = {
-	.destroy = bz_surface_destroy,
-	.attach = bz_surface_attach,
-	.damage = bz_surface_damage,
-	.frame = bz_surface_frame,
-	.set_opaque_region = bz_surface_set_opaque_region,
-	.set_input_region = bz_surface_set_input_region,
-	.commit = bz_surface_commit,
-	.set_buffer_transform = bz_surface_set_buffer_transform,
-	.set_buffer_scale = bz_surface_set_buffer_scale,
-	.damage_buffer = bz_surface_damage_buffer,
-	.offset = bz_surface_offset,
+void bz_region_dtor(struct wl_resource *data)
+{
+	struct bz_region *region_data = wl_resource_get_user_data(data);
+	bz_list_free(region_data->mutations, free);
+	free(region_data);
+}
+
+const struct wl_region_interface bz_region_implementation = {
+	.destroy = bz_region_destroy,
+	.add = bz_region_add,
+	.subtract = bz_region_subtract,
 };
+
+static void bz_region_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static void bz_region_add(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height
+) {
+	struct bz_region *region_data = wl_resource_get_user_data(resource);
+	bz_region_append_mutation(client, region_data, OP_ADD, x, y, width, height);
+}
+
+static void bz_region_subtract(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height
+) {
+	struct bz_region *region_data = wl_resource_get_user_data(resource);
+	bz_region_append_mutation(client, region_data, OP_SUBTRACT, x, y, width, height);
+}
+
+static void bz_region_append_mutation(
+	struct wl_client *client,
+	struct bz_region *region_data,
+	enum bz_region_op operation,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height
+) {
+	// Create the mutation
+	struct bz_region_mutation *mutation = calloc(1, sizeof(*mutation));
+	if (mutation == nullptr) {
+		wl_client_post_no_memory(client);
+		goto calloc_failed;
+	}
+
+	// Populate the mutation
+	mutation->op = operation;
+	mutation->x = x;
+	mutation->y = y;
+	mutation->w = width;
+	mutation->h = height;
+
+	// Add it to our region's list
+	if (bz_list_append(region_data->mutations, mutation) < 0) {
+		wl_client_post_no_memory(client);
+		goto append_failed;
+	}
+
+	return;
+
+	append_failed:
+		free(mutation);
+	calloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to add or subtract rectangle to wl_region.");
+}
+
+
+// =================================================================================================
+//  wl_surface
+// -------------------------------------------------------------------------------------------------
 
 void bz_surface_dtor(struct wl_resource *data)
 {
@@ -257,10 +381,24 @@ void bz_surface_dtor(struct wl_resource *data)
 	bz_graphics_schedule_render(client_data->breezy);
 }
 
+const struct wl_surface_interface bz_surface_implementation = {
+	.destroy = bz_surface_destroy,
+	.attach = bz_surface_attach,
+	.damage = bz_surface_damage,
+	.frame = bz_surface_frame,
+	.set_opaque_region = bz_surface_set_opaque_region,
+	.set_input_region = bz_surface_set_input_region,
+	.commit = bz_surface_commit,
+	.set_buffer_transform = bz_surface_set_buffer_transform,
+	.set_buffer_scale = bz_surface_set_buffer_scale,
+	.damage_buffer = bz_surface_damage_buffer,
+	.offset = bz_surface_offset,
+};
+
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource)
 {
 	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.destroy not implemented");
-	// TODO
+	// TODO-dl12
 	// wl_resource_destroy(resource);
 	// Role must be destroyed first. Otherwise, "defunct_role_object" error
 }

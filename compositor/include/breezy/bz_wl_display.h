@@ -25,16 +25,38 @@ void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t ve
 void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
 
+// -- wl_region --
+
+#define BZ_REGION_VERSION 7
+
+struct bz_region {
+	struct wl_resource *resource;
+	struct bz_list *mutations; // List of "struct bz_region_mutation *"
+};
+
+enum bz_region_op { OP_ADD, OP_SUBTRACT };
+struct bz_region_mutation {
+	enum bz_region_op op;
+	int32_t x;
+	int32_t y;
+	int32_t w;
+	int32_t h;
+};
+
+void bz_region_dtor(struct wl_resource *data);
+
+
 // -- wl_surface --
 
 #define BZ_SURFACE_VERSION 6
 
 enum bz_surface_role {
 	BZ_SURF_ROLE_NONE,
-	BZ_SURF_ROLE_XDG_TOPLEVEL,
-	BZ_SURF_ROLE_XDG_POPUP,
-	BZ_SURF_ROLE_WL_CURSOR,
-	// ...etc...
+	BZ_SURF_ROLE_XDG_TOPLEVEL,  // xdg_surface      :: get_toplevel()
+	BZ_SURF_ROLE_XDG_POPUP,     // xdg_surface      :: get_popup()
+	BZ_SURF_ROLE_WL_CURSOR,     // wl_pointer       :: set_cursor()
+	BZ_SURF_ROLE_WL_SUBSURFACE, // wl_subcompositor :: get_subsurface()
+	BZ_SURF_ROLE_WL_DRAG_ICON,  // wl_data_device   :: start_drag()
 };
 
 struct bz_surface_state {
