@@ -28,6 +28,10 @@ void bz_free_region_data(struct bz_region *data);
 struct bz_surface *bz_create_surface_data(void);
 void bz_free_surface_data(struct bz_surface *data);
 
+// -- bz_subsurface --
+struct bz_subsurface *bz_create_subsurface_data(void);
+void bz_free_subsurface_data(struct bz_subsurface *data);
+
 // -- bz_wl_seat --
 struct bz_wl_seat *bz_create_seat_data(void);
 void bz_free_seat_data(struct bz_wl_seat *data);
@@ -139,6 +143,9 @@ struct bz_surface *bz_create_surface_data(void)
 	data->active_state  = calloc(1, sizeof(*data->active_state));
 	data->active_state->frame_callbacks = bz_list_create();
 
+	data->surface_stack = bz_list_create();
+	bz_list_insert(data->surface_stack, data, nullptr);
+
 	return data;
 }
 
@@ -153,8 +160,30 @@ void bz_free_surface_data(struct bz_surface *data)
 			bz_list_free(data->active_state->frame_callbacks, nullptr);
 			free(data->active_state);
 		}
+		if (data->surface_stack) {
+			bz_list_free(data->surface_stack, nullptr);
+		}
 		free(data);
 	}
+}
+
+
+// =================================================================================================
+//  bz_subsurface
+// -------------------------------------------------------------------------------------------------
+
+struct bz_subsurface *bz_create_subsurface_data(void)
+{
+	struct bz_subsurface *data = calloc(1, sizeof(*data));
+
+	data->is_sync = true; // This is the default in our code.
+
+	return data;
+}
+
+void bz_free_subsurface_data(struct bz_subsurface *data)
+{
+	free(data);
 }
 
 

@@ -33,6 +33,8 @@ static void bz_surface_state_free(struct bz_surface_state *state);
 const struct wl_subcompositor_interface bz_subcompositor_implementation;
 static void bz_subcompositor_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_subcompositor_get_subsurface(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface, struct wl_resource *parent);
+// Helpers
+static bool bz_surface_stack_contains_surface(struct bz_surface *source, struct bz_surface *target);
 
 // -- wl_region --
 
@@ -61,6 +63,17 @@ static void bz_surface_damage_buffer(struct wl_client *client, struct wl_resourc
 static void bz_surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
 // Helpers
 static void bz_write_surface_texture(struct bz_surface *surface_data);
+
+// -- wl_subsurface --
+
+void bz_subsurface_dtor(struct wl_resource *subsurface);
+const struct wl_subsurface_interface bz_subsurface_implementation;
+static void bz_subsurface_destroy(struct wl_client *client, struct wl_resource *resource);
+static void bz_subsurface_set_position(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
+static void bz_subsurface_place_above(struct wl_client *client, struct wl_resource *resource, struct wl_resource *sibling);
+static void bz_subsurface_place_below(struct wl_client *client, struct wl_resource *resource, struct wl_resource *sibling);
+static void bz_subsurface_set_sync(struct wl_client *client, struct wl_resource *resource);
+static void bz_subsurface_set_desync(struct wl_client *client, struct wl_resource *resource);
 
 
 // =================================================================================================
@@ -107,6 +120,11 @@ static void bz_compositor_create_surface(
 		wl_client_post_no_memory(client);
 		goto active_state_alloc_failed;
 	}
+	struct bz_list *surface_stack = bz_list_create();
+	if (surface_stack == nullptr) {
+		wl_client_post_no_memory(client);
+		goto surface_stack_alloc_failed;
+	}
 
 	// Create the resource, bound to the data
 	struct wl_resource *res = wl_resource_create(
@@ -127,21 +145,27 @@ static void bz_compositor_create_surface(
 	);
 
 	// Populate the surface's user data
-	const struct bz_client *client_data = wl_client_get_user_data(client);
+	// const struct bz_client *client_data = wl_client_get_user_data(client);
 	surface->resource = res;
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
+	surface->surface_stack = surface_stack;
 	// surface->renderable.position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
 	// surface->renderable.position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
 	surface->renderable.position.x = 200;
 	surface->renderable.position.y = 200;
+
+	// Starts with only itself in its stack of surfaces.
+	bz_list_append(surface->surface_stack, surface);
 
 	// Everything succeeded!
 	return;
 
 	// Error cleanups
 	resource_failed:
+		bz_list_free(surface_stack, nullptr);
+	surface_stack_alloc_failed:
 		bz_surface_state_free(active);
 	active_state_alloc_failed:
 		bz_surface_state_free(pending);
@@ -260,8 +284,7 @@ const struct wl_subcompositor_interface bz_subcompositor_implementation = {
 
 static void bz_subcompositor_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subcompositor.destroy not implemented");
-	// TODO
+	wl_resource_destroy(resource);
 }
 
 static void bz_subcompositor_get_subsurface(
@@ -271,8 +294,90 @@ static void bz_subcompositor_get_subsurface(
 	struct wl_resource *surface,
 	struct wl_resource *parent
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subcompositor.get_subsurface not implemented");
-	// TODO
+	// Validate the provided surface
+	struct bz_surface *surface_data = wl_resource_get_user_data(surface);
+	if (surface_data->role != BZ_SURF_ROLE_NONE && surface_data->role != BZ_SURF_ROLE_WL_SUBSURFACE) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+			"Surface role cannot be changed.");
+		goto validation_error;
+	}
+	if (surface_data->subsurface != nullptr) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+			"Surface already has an assigned subsurface.");
+		goto validation_error;
+	}
+
+	// Validate the provided parent
+	struct bz_surface *parent_data = wl_resource_get_user_data(parent);
+	if (parent_data == surface_data) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_PARENT,
+			"Parent and child surfaces cannot be the same surface.");
+		goto validation_error;
+	}
+	if (bz_surface_stack_contains_surface(surface_data, parent_data)) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_PARENT,
+			"Parent surface cannot descend from one of its children.");
+		goto validation_error;
+	}
+
+	// Allocate our user data
+	struct bz_subsurface *subsurface_data = calloc(1, sizeof(*subsurface_data));
+	if (subsurface_data == nullptr) {
+		wl_client_post_no_memory(client);
+		goto subsurface_alloc_failed;
+	}
+
+	// Create the resource, bound to the data
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_subsurface_interface,
+		BZ_SUBSURFACE_VERSION,
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_subsurface_implementation,
+		subsurface_data,
+		bz_subsurface_dtor
+	);
+
+	// Populate the surface's user data
+	subsurface_data->resource = res;
+	subsurface_data->surface = surface_data;
+	subsurface_data->parent = parent_data;
+	subsurface_data->is_sync = true;
+
+	// And update other, related data
+	surface_data->role = BZ_SURF_ROLE_WL_SUBSURFACE;
+	surface_data->subsurface = subsurface_data;
+	bz_list_append(parent_data->surface_stack, surface_data);
+
+	// Everything succeeded!
+	return;
+
+	// Error cleanups
+	resource_failed:
+		free(subsurface_data);
+	subsurface_alloc_failed:
+	validation_error:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to construct a new subsurface.");
+}
+
+static bool bz_surface_stack_contains_surface(
+	struct bz_surface *source,
+	struct bz_surface *target
+) {
+	struct bz_surface *current; bz_list_foreach(current, source->surface_stack) {
+		if (current == source) { continue; }
+		if (current == target || bz_surface_stack_contains_surface(current, target)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 
@@ -370,6 +475,7 @@ void bz_surface_dtor(struct wl_resource *data)
 
 	bz_surface_state_free(bzsurf->pending_state);
 	bz_surface_state_free(bzsurf->active_state);
+	bz_list_free(bzsurf->surface_stack, nullptr);
 
 	glDeleteTextures(1, &bzsurf->renderable.texture);
 
@@ -613,4 +719,70 @@ static void bz_write_surface_texture(struct bz_surface *surface_data)
 
 	// --- Buffer Access End -----------------------------------------------------------------------
 	wl_shm_buffer_end_access(shmbuf);
+}
+
+
+// =================================================================================================
+//  wl_subsurface
+// -------------------------------------------------------------------------------------------------
+
+void bz_subsurface_dtor(struct wl_resource *subsurface)
+{
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(subsurface);
+
+	struct bz_surface *parent_data = subsurface_data->parent;
+	bz_list_remove(parent_data->surface_stack, subsurface_data, nullptr);
+
+	free(subsurface_data);
+}
+
+const struct wl_subsurface_interface bz_subsurface_implementation = {
+	.destroy = bz_subsurface_destroy,
+	.set_position = bz_subsurface_set_position,
+	.place_above = bz_subsurface_place_above,
+	.place_below = bz_subsurface_place_below,
+	.set_sync = bz_subsurface_set_sync,
+	.set_desync = bz_subsurface_set_desync,
+};
+
+const struct wl_subsurface_interface bz_subsurface_implementation;
+
+static void bz_subsurface_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static void bz_subsurface_set_position(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t x,
+	int32_t y
+) {
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.set_position not implemented.");
+}
+
+static void bz_subsurface_place_above(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	struct wl_resource *sibling
+) {
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.place_above not implemented.");
+}
+
+static void bz_subsurface_place_below(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	struct wl_resource *sibling
+) {
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.place_below not implemented.");
+}
+
+static void bz_subsurface_set_sync(struct wl_client *client, struct wl_resource *resource)
+{
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.set_sync not implemented.");
+}
+
+static void bz_subsurface_set_desync(struct wl_client *client, struct wl_resource *resource)
+{
+	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.set_desync not implemented.");
 }

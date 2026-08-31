@@ -52,7 +52,7 @@ extern const struct wl_compositor_interface bz_compositor_implementation;
 /** bz_compositor_constructor() properly initializes our resource. */
 void test_compositor_constructor__initializes_resource(void)
 {
-	// Create a variable to house our wl_compositor handlers for direct execution
+	// Set up our mocks
 	struct wl_resource *compositor = calloc(1, sizeof(*compositor));
 	wl_resource_create_fake.return_val = compositor;
 

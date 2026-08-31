@@ -60,6 +60,7 @@ static char *bz_get_egl_error_text(EGLint error);
 static void bz_gles_print_egl_error(char *function_name, EGLint error);
 static void bz_gles_render_and_commit(void *data);
 static void bz_gles_render_applications(struct bz_breezy *breezy);
+static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surface *surface);
 static void bz_gles_render_cursor(struct bz_breezy *breezy);
 // Shaders
 static GLuint bz_gles_create_client_shader_program(void);
@@ -837,31 +838,41 @@ static void bz_gles_render_applications(struct bz_breezy *breezy)
 	glEnableVertexAttribArray(1);
 
 	// ...then render each activable surface
-	struct bz_node *curr_surf = breezy->window_mgmt.activable_surfaces->head;
-	while (curr_surf != nullptr) {
-		struct bz_surface *surf_data = curr_surf->data;
-		struct bz_renderable renderable = surf_data->renderable;
-		if (renderable.texture != 0 && surf_data->active_state->buffer != nullptr) {
-			// Load our surface projection matrix
-			bz_mat3 projection = {0};
-			bz_fill_projection_matrix(projection,
-				0, 0, 1, 1,
-				renderable.position.x, renderable.position.y,
-				renderable.size.w, renderable.size.h
-			);
-			GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
-			glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+	struct bz_surface *main_surface;
+	bz_list_foreach(main_surface, breezy->window_mgmt.activable_surfaces) {
+		bz_gles_render_surface_stack(client_program, main_surface);
+	}
+}
 
-			// Prep the texture
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, renderable.texture);
-			GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
-			glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surface *surface)
+{
+	struct bz_surface *rendered_surface;
+	bz_list_foreach(rendered_surface, surface->surface_stack) {
+		if (rendered_surface != surface) {
+			bz_gles_render_surface_stack(client_program, rendered_surface);
+		} else {
+			struct bz_renderable renderable = rendered_surface->renderable;
+			if (renderable.texture != 0 && rendered_surface->active_state->buffer != nullptr) {
+				// Load our surface projection matrix
+				bz_mat3 projection = {0};
+				bz_fill_projection_matrix(projection,
+					0, 0, 1, 1,
+					renderable.position.x, renderable.position.y,
+					renderable.size.w, renderable.size.h
+				);
+				GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+				glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
 
-			// Render!
-			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+				// Prep the texture
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, renderable.texture);
+				GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+				glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+				// Render!
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			}
 		}
-		curr_surf = curr_surf->next;
 	}
 }
 

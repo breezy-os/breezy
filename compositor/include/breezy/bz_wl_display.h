@@ -75,19 +75,40 @@ struct bz_surface {
 	union {
 		struct bz_xdg_toplevel *xdgtoplevel;
 		struct bz_xdg_popup *xdgpopup;
+		struct bz_subsurface *subsurface;
 		// (no data needed for "cursor")
 		// ...etc...
 	};
 
 	// Double-buffered state management
 	struct bz_surface_state *pending_state;
+	// TODO-dl12: Add a queue for Content Updates
 	struct bz_surface_state *active_state;
+
+	/** First item is "on top". Includes the current surface and all child subsurfaces. */
+	struct bz_list *surface_stack; // List of "struct bz_surface *".
 
 	// Display data
 	struct bz_renderable renderable;
 };
 
 void bz_surface_dtor(struct wl_resource *data);
+
+
+// -- wl_subsurface --
+
+#define BZ_SUBSURFACE_VERSION 1
+
+struct bz_subsurface {
+	struct wl_resource *resource;
+	struct bz_surface *surface;
+	struct bz_surface *parent;
+
+	bool is_sync;
+};
+
+void bz_subsurface_dtor(struct wl_resource *subsurface);
+
 
 // #################################################################################################
 #endif
