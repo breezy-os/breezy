@@ -140,6 +140,8 @@ struct bz_surface *bz_create_surface_data(void)
 	data->pending_state = calloc(1, sizeof(*data->pending_state));
 	data->pending_state->frame_callbacks = bz_list_create();
 
+	data->content_updates = bz_list_create();
+
 	data->active_state  = calloc(1, sizeof(*data->active_state));
 	data->active_state->frame_callbacks = bz_list_create();
 
@@ -159,6 +161,9 @@ void bz_free_surface_data(struct bz_surface *data)
 		if (data->active_state) {
 			bz_list_free(data->active_state->frame_callbacks, nullptr);
 			free(data->active_state);
+		}
+		if (data->content_updates) {
+			bz_list_free(data->content_updates, nullptr);
 		}
 		if (data->surface_stack) {
 			bz_list_free(data->surface_stack, nullptr);

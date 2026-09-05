@@ -138,6 +138,72 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 }
 
 /**
+ * Removes and returns the first item on the list. If the list is uninitialized or empty, nullptr
+ * is returned.
+ */
+void *bz_list_shift(struct bz_list *list)
+{
+	// TODO-dl12: Test
+	if (list == nullptr) {
+		bz_error(BZ_LOG_LIST, "List shift failed: list was not initialized.");
+		return nullptr;
+	}
+	if (list->length == 0) {
+		return nullptr;
+	}
+
+	struct bz_node *first = list->head;
+	void *data = first->data;
+
+	if (list->length == 1) {
+		list->head = nullptr;
+		list->tail = nullptr;
+		list->length--;
+	} else {
+		struct bz_node *next = first->next;
+		next->prev = nullptr;
+		list->head = next;
+		list->length--;
+	}
+
+	free(first);
+	return data;
+}
+
+/**
+ * Removes and returns the last item on the list. If the list is uninitialized or empty, nullptr
+ * is returned.
+ */
+void *bz_list_pop(struct bz_list *list)
+{
+	// TODO-dl12: Test
+	if (list == nullptr) {
+		bz_error(BZ_LOG_LIST, "List pop failed: list was not initialized.");
+		return nullptr;
+	}
+	if (list->length == 0) {
+		return nullptr;
+	}
+
+	struct bz_node *last = list->tail;
+	void *data = last->data;
+
+	if (list->length == 1) {
+		list->head = nullptr;
+		list->tail = nullptr;
+		list->length--;
+	} else {
+		struct bz_node *prev = last->prev;
+		prev->next = nullptr;
+		list->tail = prev;
+		list->length--;
+	}
+
+	free(last);
+	return data;
+}
+
+/**
  * Replaces the first instance of "search_data" in the provided list with "replacement", returning
  * 0 on success or a negative value on failure. If a function is provided for "free_data", then the
  * replaced data will be freed via that function if the replacement occurs.
@@ -458,7 +524,7 @@ void *bz_list_get_neighbor(struct bz_list *list, void *item)
  * empty list. If either list is null, a value of -1 will be returned. Otherwise, the number of
  * moved items will be returned.
  */
-int bz_list_move_to_end(struct bz_list *list_dest, struct bz_list *list_src)
+int bz_list_move_to_end(struct bz_list *list_src, struct bz_list *list_dest)
 {
 	// Validation checks
 	if (list_dest == nullptr) {

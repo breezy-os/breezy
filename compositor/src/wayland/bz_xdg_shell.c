@@ -10,7 +10,6 @@
 #include "breezy/bz_logger.h"
 #include "breezy/bz_math.h"
 #include "breezy/bz_wl_display.h"
-#include "breezy/bz_window_management.h"
 
 
 // =================================================================================================
@@ -27,6 +26,7 @@ static void bz_xdg_wm_base_pong(struct wl_client *client, struct wl_resource *re
 
 // -- xdg_surface --
 
+void bz_xdg_surface_dtor(struct wl_resource *data);
 const struct xdg_surface_interface bz_xdg_surface_implementation;
 static void bz_xdg_surface_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_xdg_surface_get_toplevel(struct wl_client *client, struct wl_resource *resource, uint32_t id);
@@ -36,10 +36,12 @@ static void bz_xdg_surface_ack_configure(struct wl_client *client, struct wl_res
 // Helpers
 static bool bz_serial_matches(void *item, void *serial);
 static bool bz_serial_is_newer(void *item, void *serial);
+static void bz_free_xdg_surface_configure(void *xdg_surface_configure);
 
 // -- xdg_toplevel --
 
-static const struct xdg_toplevel_interface bz_xdg_toplevel_implementation;
+void bz_xdg_toplevel_dtor(struct wl_resource *data);
+const struct xdg_toplevel_interface bz_xdg_toplevel_implementation;
 static void bz_xdg_toplevel_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_xdg_toplevel_set_parent(struct wl_client *client, struct wl_resource *resource, struct wl_resource *parent);
 static void bz_xdg_toplevel_set_title(struct wl_client *client, struct wl_resource *resource, const char *title);
@@ -165,6 +167,21 @@ static void bz_xdg_wm_base_pong(
 //  xdg_surface
 // -------------------------------------------------------------------------------------------------
 
+void bz_xdg_surface_dtor(struct wl_resource *data)
+{
+	struct bz_xdg_surface *xdgsurf = wl_resource_get_user_data(data);
+
+	// If the surface dtor was called first, then the wl_surface's reference to this was already severed.
+	if (xdgsurf->wlsurface != nullptr) {
+		xdgsurf->wlsurface->xdgsurface = nullptr;
+	}
+
+	bz_list_free(xdgsurf->pending_configures, bz_free_xdg_surface_configure);
+	bz_free_xdg_surface_configure(xdgsurf->last_acked_configure);
+
+	free(xdgsurf);
+}
+
 const struct xdg_surface_interface bz_xdg_surface_implementation = {
 	.destroy = bz_xdg_surface_destroy,
 	.get_toplevel = bz_xdg_surface_get_toplevel,
@@ -173,21 +190,23 @@ const struct xdg_surface_interface bz_xdg_surface_implementation = {
 	.ack_configure = bz_xdg_surface_ack_configure,
 };
 
-void bz_xdg_surface_dtor(struct wl_resource *data)
-{
-	struct bz_xdg_surface *xdgsurf = wl_resource_get_user_data(data);
-
-	bz_list_free(xdgsurf->pending_configures, free);
-	free(xdgsurf->last_acked_configure);
-
-	free(xdgsurf);
-}
-
 static void bz_xdg_surface_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_surface.destroy not implemented");
-	// TODO
+	struct bz_xdg_surface *xdg_surface_data = wl_resource_get_user_data(resource);
+	struct bz_surface *surface_data = xdg_surface_data->wlsurface;
+
 	// Role must be destroyed first. Otherwise, "defunct_role_object" error
+	if (
+		(surface_data->role == BZ_SURF_ROLE_XDG_TOPLEVEL && surface_data->xdgtoplevel != nullptr) ||
+		(surface_data->role == BZ_SURF_ROLE_XDG_POPUP && surface_data->xdgpopup != nullptr)
+	) {
+		bz_error(BZ_LOG_WL_DISPLAY, "Surface role must be destroyed before the XDG surface.");
+		wl_resource_post_error(resource, XDG_SURFACE_ERROR_DEFUNCT_ROLE_OBJECT,
+			"Surface role must be destroyed before the XDG surface.");
+		return;
+	}
+
+	wl_resource_destroy(resource);
 }
 
 static void bz_xdg_surface_get_toplevel(
@@ -395,12 +414,37 @@ static bool bz_serial_is_newer(void *item, void *serial)
 	return item_data->serial > *serial_int;
 }
 
+/** "void *state" is of type "struct bz_xdg_surface_configure *". */
+static void bz_free_xdg_surface_configure(void *xdg_surface_configure)
+{
+	struct bz_xdg_surface_configure *configure = xdg_surface_configure;
+
+	if (configure->type == BZ_XDG_SURF_TOPLEVEL) {
+		wl_array_release(&configure->toplevel.states);
+	} else if (configure->type == BZ_XDG_SURF_POPUP) {
+		// TODO-dl12
+	}
+
+	free(configure);
+}
+
 
 // =================================================================================================
 //  xdg_toplevel
 // -------------------------------------------------------------------------------------------------
 
-static const struct xdg_toplevel_interface bz_xdg_toplevel_implementation = {
+void bz_xdg_toplevel_dtor(struct wl_resource *data)
+{
+	struct bz_xdg_toplevel *toplevel_data = wl_resource_get_user_data(data);
+
+	if (toplevel_data->wlsurface != nullptr) {
+		toplevel_data->wlsurface->xdgtoplevel = nullptr;
+	}
+
+	free(toplevel_data);
+}
+
+const struct xdg_toplevel_interface bz_xdg_toplevel_implementation = {
 	.destroy = bz_xdg_toplevel_destroy,
 	.set_parent = bz_xdg_toplevel_set_parent,
 	.set_title = bz_xdg_toplevel_set_title,
@@ -417,17 +461,9 @@ static const struct xdg_toplevel_interface bz_xdg_toplevel_implementation = {
 	.set_minimized = bz_xdg_toplevel_set_minimized,
 };
 
-void bz_xdg_toplevel_dtor(struct wl_resource *data)
-{
-	struct bz_xdg_toplevel *xdgtoplevel = wl_resource_get_user_data(data);
-
-	free(xdgtoplevel);
-}
-
 static void bz_xdg_toplevel_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.destroy not implemented");
-	// TODO
+	wl_resource_destroy(resource);
 }
 
 static void bz_xdg_toplevel_set_parent(

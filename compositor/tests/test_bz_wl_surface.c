@@ -8,31 +8,16 @@
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_logger.h"
 #include "helpers/bz_test_resources.c"
+#include "helpers/bz_test_fakes.c"
 
 
 // =================================================================================================
 //  Set up / tear down / globals
 // -------------------------------------------------------------------------------------------------
 
-DEFINE_FFF_GLOBALS
-// -- wl_client --
-FAKE_VOID_FUNC(wl_client_post_no_memory, struct wl_client *)
-// -- wl_resource --
-FAKE_VALUE_FUNC(void *, wl_resource_get_user_data, struct wl_resource *)
-FAKE_VALUE_FUNC(struct wl_resource *, wl_resource_create, struct wl_client *, const struct wl_interface *, int, uint32_t)
-FAKE_VOID_FUNC_VARARG(wl_resource_post_event, struct wl_resource *, uint32_t, ...)
-FAKE_VOID_FUNC(wl_resource_destroy, struct wl_resource *)
-// -- wl_callback --
-
 void setUp(void)
 {
-	RESET_FAKE(wl_client_post_no_memory);
-	RESET_FAKE(wl_resource_get_user_data);
-	RESET_FAKE(wl_resource_create);
-	RESET_FAKE(wl_resource_post_event);
-	RESET_FAKE(wl_resource_destroy);
-	FFF_RESET_HISTORY();
-
+	bz_reset_fakes();
 	bz_log_initialize(BZ_LOG_OFF);
 }
 
@@ -50,17 +35,62 @@ extern const struct wl_surface_interface bz_surface_implementation;
 //  Test bz_surface_destroy()
 // -------------------------------------------------------------------------------------------------
 
-/** Deletes the surface and invalidates the objectId. */
-void test_surface_destroy__deletes_surface(void)
+/** Deletes the surface when it never held a role. */
+void test_surface_destroy__succeeds_with_no_role(void)
 {
-	// (Surface should not have a role for this test.)
-	// TODO
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	// Run our test
+	bz_surface_implementation.destroy(nullptr, nullptr);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_destroy_fake.call_count);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
+}
+
+/** Deletes the surface when it had a role which has since been destroyed. */
+void test_surface_destroy__succeeds_with_destroyed_role(void)
+{
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	// Surface should have a role, but not a role object.
+	surface_data->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
+	surface_data->xdgtoplevel = nullptr;
+
+	// Run our test
+	bz_surface_implementation.destroy(nullptr, nullptr);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_destroy_fake.call_count);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
 }
 
 /** The client must destroy the role object first. Otherwise, a defunct_role_object error is sent. */
 void test_surface_destroy__with_role_sends_error(void)
 {
-	// TODO
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	// Surface should have both a role and role object.
+	surface_data->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
+	surface_data->xdgtoplevel = bz_create_xdg_toplevel_data();
+
+	// Run our test
+	bz_surface_implementation.destroy(nullptr, nullptr);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_destroy_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(WL_SURFACE_ERROR_DEFUNCT_ROLE_OBJECT, wl_resource_post_error_fake.arg1_val);
+
+	// Clean up
+	bz_free_xdg_toplevel_data(surface_data->xdgtoplevel);
+	bz_free_surface_data(surface_data);
 }
 
 
@@ -205,8 +235,8 @@ void test_surface_frame__multiple_frame_requests(void)
 
 	// Promote to active state. (Not doing a commit because that does a lot more things.)
 	bz_list_move_to_end(
-		surf_data->active_state->frame_callbacks,
-		surf_data->pending_state->frame_callbacks
+		surf_data->pending_state->frame_callbacks,
+		surf_data->active_state->frame_callbacks
 	);
 	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->frame_callbacks->length);
 	TEST_ASSERT_EQUAL_INT(2, surf_data->active_state->frame_callbacks->length);
@@ -241,8 +271,8 @@ void test_surface_frame__callback_is_destroyed_immediately(void)
 
 	// Promote to active state. (Not doing a commit because that does a lot more things.)
 	bz_list_move_to_end(
-		surf_data->active_state->frame_callbacks,
-		surf_data->pending_state->frame_callbacks
+		surf_data->pending_state->frame_callbacks,
+		surf_data->active_state->frame_callbacks
 	);
 	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->frame_callbacks->length);
 	TEST_ASSERT_EQUAL_INT(1, surf_data->active_state->frame_callbacks->length);
@@ -354,8 +384,9 @@ int main(void) {
 	UNITY_BEGIN();
 
 	// Test bz_surface_destroy()
-	RUN_TEST(test_surface_destroy__deletes_surface); // TODO
-	RUN_TEST(test_surface_destroy__with_role_sends_error); // TODO
+	RUN_TEST(test_surface_destroy__succeeds_with_no_role);
+	RUN_TEST(test_surface_destroy__succeeds_with_destroyed_role);
+	RUN_TEST(test_surface_destroy__with_role_sends_error);
 
 	// Test bz_surface_attach()
 	RUN_TEST(test_surface_attach__contents_are_double_buffered);

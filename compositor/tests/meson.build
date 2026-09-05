@@ -35,6 +35,7 @@ foreach t : [
     'bz_wl_surface',
     'bz_xdg_wm_base',
     'bz_xdg_surface',
+    'bz_xdg_toplevel',
 ]
     exe = executable('test_' + t,
         'test_' + t + '.c',

@@ -1176,20 +1176,16 @@ int bz_graphics_deactivate(struct bz_breezy *breezy)
  *
  * (Exposed as "public" for testing purposes only.)
  */
-void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp) {
-	struct bz_node *curr_surf = surfaces->head;
-
-	// TODO: Only emit for surfaces that are visible.
-	while (curr_surf != nullptr) {
-		struct bz_surface *bzsurf = curr_surf->data;
-		struct bz_node *curr_callback = bzsurf->active_state->frame_callbacks->head;
-
-		while (curr_callback != nullptr) {
-			wl_callback_send_done(curr_callback->data, timestamp);
-			wl_resource_destroy(curr_callback->data);
-			curr_callback = curr_callback->next;
+void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp)
+{
+	// TODO-dl??: Only emit for surfaces that are visible.
+	struct bz_surface *parent_surf; bz_list_foreach(parent_surf, surfaces) {
+		struct bz_surface *child_surf; bz_list_foreach(child_surf, parent_surf->surface_stack) {
+			struct wl_resource *curr_cb; bz_list_foreach(curr_cb, child_surf->active_state->frame_callbacks) {
+				wl_callback_send_done(curr_cb, timestamp);
+				wl_resource_destroy(curr_cb);
+			}
+			bz_list_clear(child_surf->active_state->frame_callbacks, nullptr);
 		}
-		bz_list_clear(bzsurf->active_state->frame_callbacks, nullptr);
-		curr_surf = curr_surf->next;
 	}
 }

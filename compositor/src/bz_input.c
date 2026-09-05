@@ -168,7 +168,7 @@ static void bz_input_process_pointer_motion_event(
 	// Otherwise, sent the action into the client.
 	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE);
 	if (super_held) {
-		// TODO-dl13ish : This is all temporary nonsense. It'll be removed when we add tiling.
+		// TODO-dl?? : This is all temporary nonsense. It'll be removed when we add tiling.
 		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
 		if (focused_surf != nullptr) {
 			focused_surf->renderable.position.x += delta_x;

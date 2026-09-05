@@ -5,33 +5,21 @@
 
 #include "unity.h"
 #include "fff.h"
-#include "breezy/bz_breezy.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wayland.h"
 
 #include "helpers/bz_test_resources.c"
+#include "helpers/bz_test_fakes.c"
 
 
 // =================================================================================================
 //  Set up / tear down / globals
 // -------------------------------------------------------------------------------------------------
 
-DEFINE_FFF_GLOBALS
-// -- wl_client --
-FAKE_VOID_FUNC(wl_client_post_no_memory, struct wl_client *)
-FAKE_VALUE_FUNC(void *, wl_client_get_user_data, struct wl_client *)
-// -- wl_resource --
-FAKE_VOID_FUNC(wl_resource_set_implementation, struct wl_resource *, const void *, void *, wl_resource_destroy_func_t)
-FAKE_VALUE_FUNC(struct wl_resource *, wl_resource_create, struct wl_client *, const struct wl_interface *, int, uint32_t)
-
 void setUp(void)
 {
-	RESET_FAKE(wl_client_post_no_memory);
-	RESET_FAKE(wl_resource_set_implementation);
-	RESET_FAKE(wl_resource_create);
-	FFF_RESET_HISTORY();
-
+	bz_reset_fakes();
 	bz_log_initialize(BZ_LOG_OFF);
 }
 
@@ -114,6 +102,8 @@ void test_create_surface__initializes_properly(void)
 	TEST_ASSERT_EQUAL(BZ_SURF_ROLE_NONE, surface_data->role); // Surface does not start with a role.
 	TEST_ASSERT_NOT_NULL(surface_data->pending_state);
 	TEST_ASSERT_NOT_NULL(surface_data->active_state);
+	TEST_ASSERT_NOT_NULL(surface_data->content_updates);
+	TEST_ASSERT_NOT_NULL(surface_data->surface_stack);
 
 	// Cleanup
 	free(surface);

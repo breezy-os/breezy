@@ -6,27 +6,18 @@
 
 #include "unity.h"
 #include "fff.h"
-#include "../include/breezy/bz_wl_display.h"
-#include "breezy/bz_graphics.h"
 #include "breezy/bz_logger.h"
 #include "helpers/bz_test_resources.c"
+#include "helpers/bz_test_fakes.c"
 
 
 // =================================================================================================
 //  Set up / tear down / globals
 // -------------------------------------------------------------------------------------------------
 
-DEFINE_FFF_GLOBALS
-// -- wl_resource --
-FAKE_VALUE_FUNC(void *, wl_resource_get_user_data, struct wl_resource *)
-FAKE_VOID_FUNC(wl_resource_destroy, struct wl_resource *)
-
 void setUp(void)
 {
-	RESET_FAKE(wl_resource_get_user_data);
-	RESET_FAKE(wl_resource_destroy);
-	FFF_RESET_HISTORY();
-
+	bz_reset_fakes();
 	bz_log_initialize(BZ_LOG_OFF);
 }
 

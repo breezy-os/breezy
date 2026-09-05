@@ -62,6 +62,8 @@ enum bz_surface_role {
 struct bz_surface_state {
 	struct wl_resource *buffer;
 	struct bz_list *frame_callbacks; // List of "struct wl_resource *" (wl_callback objects)
+	// TODO-dl12: damage, opaque region, input region, etc.
+	// TODO-dl12: set_position, place_above, place_below
 };
 
 struct bz_surface {
@@ -73,16 +75,17 @@ struct bz_surface {
 	// Role tracking
 	enum bz_surface_role role;
 	union {
+		// We use these pointers to know if the role object was destroyed. (nullptr == destroyed)
 		struct bz_xdg_toplevel *xdgtoplevel;
 		struct bz_xdg_popup *xdgpopup;
 		struct bz_subsurface *subsurface;
-		// (no data needed for "cursor")
+		// (No role object for cursors)
 		// ...etc...
 	};
 
 	// Double-buffered state management
 	struct bz_surface_state *pending_state;
-	// TODO-dl12: Add a queue for Content Updates
+	struct bz_list *content_updates; // List of "struct bz_content_update *"
 	struct bz_surface_state *active_state;
 
 	/** First item is "on top". Includes the current surface and all child subsurfaces. */
@@ -90,6 +93,16 @@ struct bz_surface {
 
 	// Display data
 	struct bz_renderable renderable;
+};
+
+struct bz_content_update {
+	struct bz_surface *surface;
+	struct bz_surface_state *state;
+
+	bool is_sync;
+
+	struct bz_content_update *depended_on_by; // Nullptr when not claimed.
+	struct bz_list *dependencies; // List of "struct bz_content_update *".
 };
 
 void bz_surface_dtor(struct wl_resource *data);

@@ -58,6 +58,7 @@ int main(void)
 	// Set up our logger
 	bz_log_initialize(BZ_LOG_INFO);
 	bz_log_set_level(BZ_LOG_WAYLAND, BZ_LOG_DEBUG);
+	bz_log_set_level(BZ_LOG_TEMP, BZ_LOG_DEBUG);
 
 	client_globals.is_quitting = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 

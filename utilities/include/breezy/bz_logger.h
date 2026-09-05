@@ -20,16 +20,17 @@ void bz_warn(uint8_t category, char *file, int line, const char *message_fmt, ..
 void bz_error(uint8_t category, char *file, int line, const char *message_fmt, ...);
 
 // -- Categories for Breezy --
-#define BZ_LOG_MAIN 0, __FILE__, __LINE__
-#define BZ_LOG_GRAPHICS 1, __FILE__, __LINE__
-#define BZ_LOG_INPUT 2, __FILE__, __LINE__
-#define BZ_LOG_SEAT 3, __FILE__, __LINE__
-#define BZ_LOG_WAYLAND 4, __FILE__, __LINE__
-#define BZ_LOG_LIST 5, __FILE__, __LINE__
-#define BZ_LOG_WINDOW_MGMT 6, __FILE__, __LINE__
-#define BZ_LOG_WL_DISPLAY 7, __FILE__, __LINE__
-#define BZ_LOG_WL_DEVICES 8, __FILE__, __LINE__
-#define BZ_LOG_WL_XDG_SHELL 9, __FILE__, __LINE__
+#define BZ_LOG_TEMP 0, __FILE__, __LINE__
+#define BZ_LOG_MAIN 1, __FILE__, __LINE__
+#define BZ_LOG_GRAPHICS 2, __FILE__, __LINE__
+#define BZ_LOG_INPUT 3, __FILE__, __LINE__
+#define BZ_LOG_SEAT 4, __FILE__, __LINE__
+#define BZ_LOG_WAYLAND 5, __FILE__, __LINE__
+#define BZ_LOG_LIST 6, __FILE__, __LINE__
+#define BZ_LOG_WINDOW_MGMT 7, __FILE__, __LINE__
+#define BZ_LOG_WL_DISPLAY 8, __FILE__, __LINE__
+#define BZ_LOG_WL_DEVICES 9, __FILE__, __LINE__
+#define BZ_LOG_WL_XDG_SHELL 10, __FILE__, __LINE__
 
 
 // #################################################################################################
