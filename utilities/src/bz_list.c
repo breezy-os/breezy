@@ -143,7 +143,6 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
  */
 void *bz_list_shift(struct bz_list *list)
 {
-	// TODO-dl12: Test
 	if (list == nullptr) {
 		bz_error(BZ_LOG_LIST, "List shift failed: list was not initialized.");
 		return nullptr;
@@ -176,7 +175,6 @@ void *bz_list_shift(struct bz_list *list)
  */
 void *bz_list_pop(struct bz_list *list)
 {
-	// TODO-dl12: Test
 	if (list == nullptr) {
 		bz_error(BZ_LOG_LIST, "List pop failed: list was not initialized.");
 		return nullptr;

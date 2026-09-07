@@ -32,6 +32,10 @@ void bz_free_surface_data(struct bz_surface *data);
 struct bz_subsurface *bz_create_subsurface_data(void);
 void bz_free_subsurface_data(struct bz_subsurface *data);
 
+// -- bz_content_update --
+struct bz_content_update *bz_create_content_update_data(void);
+void bz_free_content_update_data(struct bz_content_update *data);
+
 // -- bz_wl_seat --
 struct bz_wl_seat *bz_create_seat_data(void);
 void bz_free_seat_data(struct bz_wl_seat *data);
@@ -139,11 +143,13 @@ struct bz_surface *bz_create_surface_data(void)
 
 	data->pending_state = calloc(1, sizeof(*data->pending_state));
 	data->pending_state->frame_callbacks = bz_list_create();
+	data->pending_state->subsurface_states = bz_list_create();
 
 	data->content_updates = bz_list_create();
 
 	data->active_state  = calloc(1, sizeof(*data->active_state));
 	data->active_state->frame_callbacks = bz_list_create();
+	data->active_state->subsurface_states = bz_list_create();
 
 	data->surface_stack = bz_list_create();
 	bz_list_insert(data->surface_stack, data, nullptr);
@@ -156,10 +162,12 @@ void bz_free_surface_data(struct bz_surface *data)
 	if (data) {
 		if (data->pending_state) {
 			bz_list_free(data->pending_state->frame_callbacks, nullptr);
+			bz_list_free(data->pending_state->subsurface_states, free);
 			free(data->pending_state);
 		}
 		if (data->active_state) {
 			bz_list_free(data->active_state->frame_callbacks, nullptr);
+			bz_list_free(data->active_state->subsurface_states, free);
 			free(data->active_state);
 		}
 		if (data->content_updates) {
@@ -188,7 +196,34 @@ struct bz_subsurface *bz_create_subsurface_data(void)
 
 void bz_free_subsurface_data(struct bz_subsurface *data)
 {
-	free(data);
+	if (data != nullptr) {
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_content_update
+// -------------------------------------------------------------------------------------------------
+
+struct bz_content_update *bz_create_content_update_data(void)
+{
+	struct bz_content_update *data = calloc(1, sizeof(*data));
+
+	data->is_sync = false;
+	data->dependencies = bz_list_create();
+
+	return data;
+}
+
+void bz_free_content_update_data(struct bz_content_update *data)
+{
+	if (data != nullptr) {
+		if (data->dependencies != nullptr) {
+			bz_list_free(data->dependencies, nullptr);
+		}
+		free(data);
+	}
 }
 
 

@@ -67,6 +67,7 @@ static bool bz_is_effectively_sync(struct bz_surface *surface_data);
 static void bz_walk_content_update_queue(struct bz_content_update *cu);
 static bool bz_is_content_update_satisfied(struct bz_content_update *cu);
 static struct bz_list *bz_apply_content_update(struct bz_content_update *cu);
+static void bz_apply_subsurface_cu_state(struct bz_list *subsurface_states, struct bz_surface *surface);
 static void bz_free_content_update(struct bz_content_update *content_update);
 
 // -- wl_subsurface --
@@ -79,6 +80,9 @@ static void bz_subsurface_place_above(struct wl_client *client, struct wl_resour
 static void bz_subsurface_place_below(struct wl_client *client, struct wl_resource *resource, struct wl_resource *sibling);
 static void bz_subsurface_set_sync(struct wl_client *client, struct wl_resource *resource);
 static void bz_subsurface_set_desync(struct wl_client *client, struct wl_resource *resource);
+// Helpers
+static struct bz_subsurface_state *bz_subsurface_get_pending_state(struct bz_subsurface *for_child);
+static bool bz_subsurface_state_matches(void *list_item, void *match_data);
 
 
 // =================================================================================================
@@ -162,10 +166,8 @@ static void bz_compositor_create_surface(
 	surface->active_state = active;
 	surface->content_updates = content_updates;
 	surface->surface_stack = surface_stack;
-	// surface->renderable.position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
-	// surface->renderable.position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
-	surface->renderable.position.x = 200;
-	surface->renderable.position.y = 200;
+	surface->renderable.position.x = 0;
+	surface->renderable.position.y = 0;
 
 	// Starts with only itself in its stack of surfaces.
 	bz_list_append(surface->surface_stack, surface);
@@ -251,9 +253,18 @@ static struct bz_surface_state *bz_init_surface_state(void)
 	if (state->frame_callbacks == nullptr) {
 		goto callback_list_failed;
 	}
+
+	state->subsurface_states = bz_list_create();
+	if (state->subsurface_states == nullptr) {
+		goto subsurface_list_failed;
+	}
+
+	// All is good!
 	return state;
 
 	// Error cleanups
+	subsurface_list_failed:
+		bz_list_free(state->frame_callbacks, nullptr);
 	callback_list_failed:
 		free(state);
 	state_alloc_failed:
@@ -267,6 +278,9 @@ static void bz_free_surface_state(struct bz_surface_state *state)
 
 	if (state->frame_callbacks != nullptr) {
 		bz_list_free(state->frame_callbacks, nullptr);
+	}
+	if (state->subsurface_states != nullptr) {
+		bz_list_free(state->subsurface_states, free);
 	}
 	free(state);
 }
@@ -662,6 +676,7 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	}
 	cu_state->buffer = bzsurf->pending_state->buffer;
 	bz_list_move_to_end(bzsurf->pending_state->frame_callbacks, cu_state->frame_callbacks);
+	bz_list_move_to_end(bzsurf->pending_state->subsurface_states, cu_state->subsurface_states);
 
 	// Create that content update
 	struct bz_content_update *cu = calloc(1, sizeof(*cu));
@@ -685,17 +700,17 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	bz_list_append(bzsurf->content_updates, cu);
 
 	// This CU depends on the item before it in the queue
-	if (preceding_cu != nullptr && preceding_cu->depended_on_by == nullptr) {
+	if (preceding_cu != nullptr) {
 		preceding_cu->depended_on_by = cu;
 		bz_list_append(cu->dependencies, preceding_cu);
 	}
-	// This CU depends on all SCU's at the end of each direct child's queue.
+	// This CU claims on all SCU's at the end of each direct child's queue.
 	struct bz_surface *child; bz_list_foreach(child, bzsurf->surface_stack) {
 		if (child == bzsurf) { continue; } // Ignore self.
 		if (child->content_updates->tail != nullptr) {
 			struct bz_content_update *child_cu = child->content_updates->tail->data;
-			if (child_cu->is_sync && child_cu->depended_on_by == nullptr) {
-				child_cu->depended_on_by = cu;
+			if (child_cu->is_sync && child_cu->claimed_by == nullptr) {
+				child_cu->claimed_by = cu;
 				bz_list_append(cu->dependencies, child_cu);
 			}
 		}
@@ -755,6 +770,7 @@ static void bz_surface_offset(
 ) {
 	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.offset not implemented");
 	// TODO
+	// TODO: Make sure to ignore this request for subsurfaces.
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------
@@ -820,21 +836,28 @@ static bool bz_is_effectively_sync(struct bz_surface *surface_data)
 static void bz_walk_content_update_queue(struct bz_content_update *cu)
 {
 	// Walk upwards to find the root-level DCU
-	struct bz_content_update *root_dcu = cu;
-	while (root_dcu != nullptr && root_dcu->is_sync) {
-		root_dcu = root_dcu->depended_on_by;
+	struct bz_content_update *root_cu = nullptr;
+	struct bz_content_update *parent_cu = cu;
+	while (parent_cu != nullptr) {
+		root_cu = parent_cu;
+		parent_cu = (parent_cu->claimed_by != nullptr)
+			? parent_cu->claimed_by
+			: parent_cu->depended_on_by;
 	}
-	if (root_dcu == nullptr) {
-		return; // We hit a deadend. There is no parent DCU, just some SCUs.
+	if (root_cu->is_sync) {
+		return; // We hit a dead end. There is no parent DCU, just some SCUs.
+	}
+	if (root_cu->surface->content_updates->head->data != root_cu) {
+		return; // This graph depends on another graph to complete first.
 	}
 
 	// Walk all the branches claimed by the root DCU, checking if their dependencies are satisfied.
-	if (bz_is_content_update_satisfied(root_dcu)) {
+	if (bz_is_content_update_satisfied(root_cu)) {
 		struct wl_client *client = wl_resource_get_client(cu->surface->resource);
 		struct bz_client *client_data = wl_client_get_user_data(client);
 
 		// Apply our content updates, and then prune them out of our treelists.
-		struct bz_list *processed_CUs = bz_apply_content_update(root_dcu);
+		struct bz_list *processed_CUs = bz_apply_content_update(root_cu);
 		struct bz_content_update *curr_cu;
 		while ((curr_cu = bz_list_shift(processed_CUs)) != nullptr) {
 			bz_free_content_update(curr_cu);
@@ -860,18 +883,9 @@ static bool bz_is_content_update_satisfied(struct bz_content_update *cu)
 		}
 	}
 
-	// If a CU comes before the current CU, and the current CU isn't "depended on by" it, then this CU is blocked by it.
-	bool reached_current = false;
-	struct bz_content_update *last_cu = cu;
-	struct bz_content_update *cu_iter; bz_list_foreach_rev(cu_iter, cu->surface->content_updates) {
-		if (reached_current) {
-			if (cu_iter->depended_on_by != last_cu) {
-				return false; // We're blocked by this CU
-			}
-			last_cu = cu_iter;
-		} else if (cu_iter == cu) {
-			reached_current = true;
-		}
+	// Synchronized commits that haven't been claimed are blockers.
+	if (cu->is_sync && cu->claimed_by == nullptr && cu->depended_on_by == nullptr) {
+		return false;
 	}
 
 	// If we made it here, all constraints have been satisfied!
@@ -889,7 +903,7 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 {
 	struct bz_list *applied_CUs = bz_list_create();
 
-	// First, apply all the CUs this depends on.
+	// First, apply all the CUs this depends on, starting at the leaf nodes.
 	struct bz_content_update *cu_node; bz_list_foreach(cu_node, cu->dependencies) {
 		struct bz_list *dep_CUs = bz_apply_content_update(cu_node);
 		bz_list_move_to_end(dep_CUs, applied_CUs);
@@ -900,6 +914,7 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	struct bz_surface *surface = cu->surface;
 	surface->active_state->buffer = cu->state->buffer;
 	bz_list_move_to_end(cu->state->frame_callbacks, surface->active_state->frame_callbacks);
+	bz_apply_subsurface_cu_state(cu->state->subsurface_states, surface);
 
 	// When a CU is applied, the buffer is applied first. This means all other coordinates are
 	//   relative to the new buffer. If there is no new buffer, the coordinates are relative to
@@ -930,10 +945,43 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	return applied_CUs;
 }
 
+static void bz_apply_subsurface_cu_state(
+	struct bz_list *subsurface_states,
+	struct bz_surface *surface
+) {
+	struct bz_subsurface_state *subsurf_state; bz_list_foreach(subsurf_state, subsurface_states) {
+		// Update the relative render position
+		subsurf_state->subsurface->surface->renderable.position.x = subsurf_state->position.x;
+		subsurf_state->subsurface->surface->renderable.position.y = subsurf_state->position.y;
+		// Update the z-index relative to its other siblings
+		if (subsurf_state->sibling != nullptr) {
+			if (subsurf_state->placement == BZ_SUBSURFACE_PLACE_BELOW) {
+				// Subsurface should be placed BEFORE the sibling in parent's stack
+				bz_list_remove(surface->surface_stack, subsurf_state->subsurface, nullptr);
+				struct bz_surface *after_sibling = nullptr;
+				struct bz_surface *data; bz_list_foreach(data, surface->surface_stack) {
+					if (data == subsurf_state->sibling) {
+						break;
+					}
+					after_sibling = data;
+				}
+				bz_list_insert(surface->surface_stack, subsurf_state->subsurface, after_sibling);
+			} else if (subsurf_state->placement == BZ_SUBSURFACE_PLACE_ABOVE) {
+				// Surface should be placed AFTER the sibling in parent's stack
+				bz_list_remove(surface->surface_stack, subsurf_state->subsurface, nullptr);
+				bz_list_insert(surface->surface_stack, subsurf_state->subsurface, subsurf_state->sibling);
+			}
+		}
+	}
+}
+
 static void bz_free_content_update(struct bz_content_update *content_update)
 {
 	struct bz_content_update *cu = content_update;
 
+	if (cu->claimed_by != nullptr) {
+		bz_list_remove(cu->claimed_by->dependencies, cu, nullptr);
+	}
 	if (cu->depended_on_by != nullptr) {
 		bz_list_remove(cu->depended_on_by->dependencies, cu, nullptr);
 	}
@@ -958,6 +1006,12 @@ void bz_subsurface_dtor(struct wl_resource *subsurface)
 	struct bz_surface *parent = subsurface_data->parent;
 	if (parent != nullptr) {
 		bz_list_remove(parent->surface_stack, subsurface_data->surface, nullptr);
+		struct bz_list *subsurface_states = parent->pending_state->subsurface_states;
+		bz_list_filter(subsurface_states, subsurface_data, bz_subsurface_state_matches, free);
+		struct bz_content_update *cu; bz_list_foreach(cu, parent->content_updates) {
+			struct bz_list *subsurface_states = cu->state->subsurface_states;
+			bz_list_filter(subsurface_states, subsurface_data, bz_subsurface_state_matches, free);
+		}
 	}
 
 	subsurface_data->surface->subsurface = nullptr;
@@ -987,7 +1041,18 @@ static void bz_subsurface_set_position(
 	int32_t x,
 	int32_t y
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.set_position not implemented.");
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+	struct bz_subsurface_state *state = bz_subsurface_get_pending_state(subsurface_data);
+
+	if (state == nullptr) {
+		wl_resource_post_no_memory(resource);
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to look up state on parent surface.");
+		return;
+	}
+
+	// (No restrictions on these. Negative values are allowed.)
+	state->position.x = x;
+	state->position.y = y;
 }
 
 static void bz_subsurface_place_above(
@@ -995,7 +1060,36 @@ static void bz_subsurface_place_above(
 	struct wl_resource *resource,
 	struct wl_resource *sibling
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.place_above not implemented.");
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+	struct bz_surface *sibling_data = wl_resource_get_user_data(sibling);
+
+	// Make sure the sibling is not itself
+	if (subsurface_data->surface == sibling_data) {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"Sibling cannot equal self.");
+		goto validation_failure;
+	}
+
+	// Make sure the given sibling is in the parent's surface stack.
+	if (!bz_list_contains(subsurface_data->parent->surface_stack, sibling_data)) {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"Sibling not found in parent surface.");
+		goto validation_failure;
+	}
+
+	// Look up the subsurface's state on the parent
+	struct bz_subsurface_state *state = bz_subsurface_get_pending_state(subsurface_data);
+	if (state == nullptr) {
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	// Make the change
+	state->placement = BZ_SUBSURFACE_PLACE_ABOVE;
+	state->sibling = sibling_data;
+
+	validation_failure:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to place subsurface above sibling.");
 }
 
 static void bz_subsurface_place_below(
@@ -1003,16 +1097,132 @@ static void bz_subsurface_place_below(
 	struct wl_resource *resource,
 	struct wl_resource *sibling
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.place_below not implemented.");
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+	struct bz_surface *sibling_data = wl_resource_get_user_data(sibling);
+
+	// Make sure the sibling is not itself
+	if (subsurface_data->surface == sibling_data) {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"Sibling cannot equal self.");
+		goto validation_failure;
+	}
+
+	// Make sure the given sibling is in the parent's surface stack.
+	if (!bz_list_contains(subsurface_data->parent->surface_stack, sibling_data)) {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"Sibling not found in parent surface.");
+		goto validation_failure;
+	}
+
+	// Look up the subsurface's state on the parent
+	struct bz_subsurface_state *state = bz_subsurface_get_pending_state(subsurface_data);
+	if (state == nullptr) {
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	// Make the change
+	state->placement = BZ_SUBSURFACE_PLACE_BELOW;
+	state->sibling = sibling_data;
+
+	validation_failure:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to place subsurface below sibling.");
 }
 
 static void bz_subsurface_set_sync(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.set_sync not implemented.");
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+
+	// Already sync.
+	if (subsurface_data->is_sync) {
+		return;
+	}
+
+	subsurface_data->is_sync = true;
 }
 
 static void bz_subsurface_set_desync(struct wl_client *client, struct wl_resource *resource)
 {
-	// TODO-dl12: CU sync/desync determined at commit time, but the surface becoming desync can change this if the SCU is not reachable/claimed
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subsurface.set_desync not implemented.");
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+
+	// Already desync.
+	if (!subsurface_data->is_sync) {
+		return;
+	}
+
+	subsurface_data->is_sync = false;
+
+	// When a surface changes to desync, all UNREACHABLE SCUs in its CU queue become desync, and
+	//   any dependencies leading into these CUs are severed.
+	struct bz_list *eval_candidates = nullptr;
+	struct bz_content_update *cu; bz_list_foreach(cu, subsurface_data->surface->content_updates) {
+		// First, check itself. If it's already desync, then it doesn't matter.
+		if (!cu->is_sync) { continue; }
+
+		// Next, walk up its content update tree, looking for a DCU.
+		struct bz_content_update *parent_cu = cu;
+		while (parent_cu != nullptr) {
+			if (!parent_cu->is_sync) { break; }
+			parent_cu = parent_cu->claimed_by != nullptr
+				? parent_cu->claimed_by
+				: parent_cu->depended_on_by;
+		}
+		if (parent_cu != nullptr && !parent_cu->is_sync) {
+			continue; // Found a desync, so no need to change the current CU into a DCU.
+		}
+
+		// If we made it here, then it's unreachable. Change its type, and sever its dependencies.
+		cu->is_sync = false;
+		if (cu->claimed_by != nullptr) {
+			bz_list_remove(cu->claimed_by->dependencies, cu, nullptr);
+			cu->claimed_by = nullptr;
+		}
+
+		// Record all DCU candidates for possible evaluation once we exit this loop.
+		if (eval_candidates == nullptr) {
+			eval_candidates = bz_list_create();
+			if (eval_candidates == nullptr) {
+				wl_resource_post_no_memory(resource);
+				bz_error(BZ_LOG_WL_DISPLAY, "Failed to allocate memory for eval list.");
+				return;
+			}
+		}
+		bz_list_append(eval_candidates, cu);
+	}
+
+	// Try evaluating all of our candidates. Since they're now desync, maybe they can activate.
+	if (eval_candidates != nullptr) {
+		struct bz_content_update *eval_cu; bz_list_foreach(eval_cu, eval_candidates) {
+			bz_walk_content_update_queue(eval_cu);
+		}
+		bz_list_free(eval_candidates, nullptr);
+	}
+}
+
+// ---  Helpers  -----------------------------------------------------------------------------------
+
+static struct bz_subsurface_state *bz_subsurface_get_pending_state(struct bz_subsurface *for_child)
+{
+	// Look up the state object on the parent
+	struct bz_surface *parent = for_child->parent;
+	if (parent != nullptr) {
+		struct bz_subsurface_state *state = bz_list_find(parent->pending_state->subsurface_states, for_child, bz_subsurface_state_matches);
+		if (state == nullptr) {
+			state = calloc(1, sizeof(*state));
+			state->subsurface = for_child;
+			bz_list_append(parent->pending_state->subsurface_states, state);
+		}
+		return state;
+	}
+
+	// Shouldn't be able to get here. Return null to indicate an error.
+	return nullptr;
+}
+
+static bool bz_subsurface_state_matches(void *list_item, void *match_data)
+{
+	struct bz_subsurface *subsurface = match_data;
+	struct bz_subsurface_state *state = list_item;
+
+	return state->subsurface == subsurface;
 }

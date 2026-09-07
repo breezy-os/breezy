@@ -32,6 +32,7 @@ foreach t : [
     'bz_wl_region',
     'bz_wl_seat',
     'bz_wl_subcompositor',
+    'bz_wl_subsurface',
     'bz_wl_surface',
     'bz_xdg_wm_base',
     'bz_xdg_surface',

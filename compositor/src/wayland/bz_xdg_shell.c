@@ -256,6 +256,10 @@ static void bz_xdg_surface_get_toplevel(
 	bzsurf->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
 	bzsurf->xdgtoplevel = xdgtoplevel;
 
+	// TODO-dl??: Temp toplevel positioning
+	bzsurf->renderable.position.x = 200;
+	bzsurf->renderable.position.y = 200;
+
 	// Everything succeeded!
 	return;
 

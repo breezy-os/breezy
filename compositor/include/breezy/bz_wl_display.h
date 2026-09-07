@@ -63,7 +63,23 @@ struct bz_surface_state {
 	struct wl_resource *buffer;
 	struct bz_list *frame_callbacks; // List of "struct wl_resource *" (wl_callback objects)
 	// TODO-dl12: damage, opaque region, input region, etc.
-	// TODO-dl12: set_position, place_above, place_below
+
+	// These are SUBsurface settings that need to be applied when the PARENT's CU is applied:
+	struct bz_list *subsurface_states; // List of "struct bz_subsurface_state *"
+};
+
+enum bz_subsurface_placement {
+	BZ_SUBSURFACE_PLACE_ABOVE,
+	BZ_SUBSURFACE_PLACE_BELOW,
+};
+struct bz_subsurface_state {
+	struct bz_subsurface *subsurface; // So the parent knows what subsurface to apply this state to.
+	// For x/y positioning (subsurface.set_position)
+	struct bz_position position;
+
+	// For placement (subsurface.place_above/place_below)
+	enum bz_subsurface_placement placement;
+	struct bz_surface *sibling; // nullptr when placement change not requested
 };
 
 struct bz_surface {
@@ -88,7 +104,7 @@ struct bz_surface {
 	struct bz_list *content_updates; // List of "struct bz_content_update *"
 	struct bz_surface_state *active_state;
 
-	/** First item is "on top". Includes the current surface and all child subsurfaces. */
+	/** Last item is "on top". Includes the current surface and all child subsurfaces. */
 	struct bz_list *surface_stack; // List of "struct bz_surface *".
 
 	// Display data
@@ -101,7 +117,8 @@ struct bz_content_update {
 
 	bool is_sync;
 
-	struct bz_content_update *depended_on_by; // Nullptr when not claimed.
+	struct bz_content_update *claimed_by; // Nullptr when not claimed.
+	struct bz_content_update *depended_on_by; // Nullptr when nothing comes after it in its queue
 	struct bz_list *dependencies; // List of "struct bz_content_update *".
 };
 

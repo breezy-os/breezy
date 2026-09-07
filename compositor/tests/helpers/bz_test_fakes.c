@@ -38,5 +38,6 @@ void bz_reset_fakes()
 	RESET_FAKE(wl_resource_post_error);
 	RESET_FAKE(wl_resource_post_event);
 	RESET_FAKE(wl_resource_set_implementation);
+
 	FFF_RESET_HISTORY();
 }

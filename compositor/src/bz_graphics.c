@@ -852,12 +852,18 @@ static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surfac
 			bz_gles_render_surface_stack(client_program, rendered_surface);
 		} else {
 			struct bz_renderable renderable = rendered_surface->renderable;
+			// A subsurface's position is relative to its parent's
+			struct bz_position rel_pos = { .x = 0, .y = 0 };
+			if (rendered_surface->role == BZ_SURF_ROLE_WL_SUBSURFACE) {
+				rel_pos = rendered_surface->subsurface->parent->renderable.position;
+			}
+
 			if (renderable.texture != 0 && rendered_surface->active_state->buffer != nullptr) {
 				// Load our surface projection matrix
 				bz_mat3 projection = {0};
 				bz_fill_projection_matrix(projection,
 					0, 0, 1, 1,
-					renderable.position.x, renderable.position.y,
+					rel_pos.x + renderable.position.x, rel_pos.y + renderable.position.y,
 					renderable.size.w, renderable.size.h
 				);
 				GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
