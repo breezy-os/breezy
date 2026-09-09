@@ -309,7 +309,7 @@ static void bz_input_process_kb_event(
 		// Start / Stop Applications
 		case XKB_KEY_d:
 			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/git/breezy/build/test-client/test-client");
-			break;
+			return;
 		case XKB_KEY_t:
 			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/bin/bins/bzfoot");
 			return;

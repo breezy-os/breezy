@@ -41,6 +41,8 @@ struct bz_application_window {
 	uint32_t bg_color;
 	uint32_t fg_color;
 	uint32_t prev_time; // Used for circle animation.
+	bool has_been_drawn;
+	struct bz_position last_circle_center;
 	struct bz_position circle_center;
 	float circle_speed_x;
 	float circle_speed_y;

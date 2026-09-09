@@ -48,7 +48,7 @@ void bz_region_dtor(struct wl_resource *data);
 
 // -- wl_surface --
 
-#define BZ_SURFACE_VERSION 6
+#define BZ_SURFACE_VERSION 6 // TODO: latest is 7
 
 enum bz_surface_role {
 	BZ_SURF_ROLE_NONE,
@@ -62,10 +62,22 @@ enum bz_surface_role {
 struct bz_surface_state {
 	struct wl_resource *buffer;
 	struct bz_list *frame_callbacks; // List of "struct wl_resource *" (wl_callback objects)
-	// TODO-dl12: damage, opaque region, input region, etc.
 
 	// These are SUBsurface settings that need to be applied when the PARENT's CU is applied:
 	struct bz_list *subsurface_states; // List of "struct bz_subsurface_state *"
+
+	struct bz_list *surface_damage;  // List of "struct bz_rect *"
+	struct bz_list *buffer_damage;   // List of "struct bz_rect *"
+
+	// TODO: Make use of opaque regions
+	bool dirty_opaque_region;
+	struct bz_list *opaque_region;   // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
+	// TODO-dl12: Make use of input regions
+	bool dirty_input_region;
+	struct bz_list *input_region;    // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
+
+	enum wl_output_transform transform;
+	int32_t scale;
 };
 
 enum bz_subsurface_placement {

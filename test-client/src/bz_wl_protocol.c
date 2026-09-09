@@ -79,6 +79,7 @@ static void bz_initialize_surface_buffers(struct bz_client_globals *globals, str
 static void bz_update_circle(struct bz_application_window *window, uint32_t new_time);
 static void bz_control_circle(struct bz_application_window *window, uint32_t new_time);
 static void bz_draw_frame(struct bz_application_window *window);
+static void bz_draw_area(struct bz_application_window *window, int start_x, int start_y, int end_x, int end_y, int circle_x, int circle_y);
 static void bz_submit_frame(struct bz_application_window* window);
 static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t callback_data);
 
@@ -722,8 +723,33 @@ static void bz_draw_frame(struct bz_application_window *window)
 		? window->circle_center.y
 		: (window->size.h - (window->circle_center.y - window->size.h));
 
-	for (int y = 0; y < buffer->size.h; y++) {
-		for (int x = 0; x < buffer->size.w; x++) {
+	if (!window->has_been_drawn) {
+		bz_draw_area(window, 0, 0, buffer->size.w, buffer->size.h, circle_x, circle_y);
+		window->has_been_drawn = true;
+	} else {
+		bz_draw_area(window, window->last_circle_center.x - window->radius, window->last_circle_center.y - window->radius, window->last_circle_center.x + window->radius, window->last_circle_center.y + window->radius, circle_x, circle_y);
+		bz_draw_area(window, circle_x - window->radius, circle_y - window->radius, circle_x + window->radius, circle_y + window->radius, circle_x, circle_y);
+	}
+}
+
+static void bz_draw_area(struct bz_application_window *window, int start_x, int start_y, int end_x, int end_y, int circle_x, int circle_y)
+{
+	const struct bz_buffer *buffer = &window->buffers[window->active_buffer];
+	if (!buffer->is_released) {
+		bz_error(BZ_LOG_WAYLAND, "Cannot draw frame on an unreleased buffer.");
+		return;
+	}
+
+	struct bz_position start = {
+		.x = bz_clamp(start_x, 0, buffer->size.w),
+		.y = bz_clamp(start_y, 0, buffer->size.h),
+	};
+	struct bz_position end = {
+		.x = bz_clamp(end_x, 0, buffer->size.w),
+		.y = bz_clamp(end_y, 0, buffer->size.h),
+	};
+	for (int y = start.y; y < end.y; y++) {
+		for (int x = start.x; x < end.x; x++) {
 			if (window->is_focused && (
 				x < BZ_BORDER_WIDTH ||
 				x > (buffer->size.w - BZ_BORDER_WIDTH) ||
@@ -753,7 +779,6 @@ static void bz_submit_frame(struct bz_application_window *window)
 	bzbuffer->is_released = false;
 
 	wl_surface_attach(window->wlsurface, bzbuffer->buffer, 0, 0);
-	// TODO-dl12: wl_surface_damage(window->wlsurface, 0, 0, INT32_MAX, INT32_MAX);
 
 	// Set up our frame callback to get notified when our next frame should be drawn
 	window->frame_callback = wl_surface_frame(window->wlsurface);
@@ -778,6 +803,35 @@ static void bz_render(void *data, struct wl_callback *wl_callback, uint32_t call
 		bz_control_circle(window, callback_data);
 	}
 	bz_draw_frame(window);
+
+	// Damage the region bounding the circle
+	wl_surface_damage_buffer(
+		window->wlsurface,
+		window->last_circle_center.x - window->radius,
+		window->last_circle_center.y - window->radius,
+		window->radius + window->radius,
+		window->radius + window->radius
+	);
+	int circle_x = (window->circle_center.x < window->size.w)
+		? window->circle_center.x
+		: (window->size.w - (window->circle_center.x - window->size.w));
+	int circle_y = (window->circle_center.y < window->size.h)
+		? window->circle_center.y
+		: (window->size.h - (window->circle_center.y - window->size.h));
+	wl_surface_damage_buffer(
+		window->wlsurface,
+		circle_x - window->radius,
+		circle_y - window->radius,
+		window->radius + window->radius,
+		window->radius + window->radius
+	);
+	window->last_circle_center.x = circle_x;
+	window->last_circle_center.y = circle_y;
+
+	// // Full buffer damage (for debugging)
+	// wl_surface_damage_buffer(window->wlsurface, 0, 0, window->size.w, window->size.h);
+	// window->has_been_drawn = false;
+
 	bz_submit_frame(window);
 }
 

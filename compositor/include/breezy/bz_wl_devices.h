@@ -19,7 +19,7 @@ struct bz_wl_seat {
 };
 
 // -- wl_pointer --
-#define BZ_POINTER_VERSION 10
+#define BZ_POINTER_VERSION 10 // TODO: version 11 exists - upgrade?
 void bz_pointer_dtor(struct wl_resource *data);
 
 // -- wl_keyboard --

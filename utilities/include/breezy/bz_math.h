@@ -6,6 +6,7 @@
 
 struct bz_position  { int32_t x; int32_t y; };
 struct bz_dimension { int32_t w; int32_t h; };
+struct bz_rect { int32_t x; int32_t y; int32_t w; int32_t h; };
 
 // -- Matrix format --
 // [0  3  6]

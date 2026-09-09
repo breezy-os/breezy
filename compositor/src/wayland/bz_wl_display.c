@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <wayland-server.h>
 
@@ -63,12 +64,14 @@ static void bz_surface_damage_buffer(struct wl_client *client, struct wl_resourc
 static void bz_surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
 // Helpers
 static void bz_write_surface_texture(struct bz_surface *surface_data);
+static void bz_apply_buffer_damage(uint32_t *shm_data, int32_t buff_w, int32_t buff_h, struct bz_list *damage);
 static bool bz_is_effectively_sync(struct bz_surface *surface_data);
 static void bz_walk_content_update_queue(struct bz_content_update *cu);
 static bool bz_is_content_update_satisfied(struct bz_content_update *cu);
 static struct bz_list *bz_apply_content_update(struct bz_content_update *cu);
 static void bz_apply_subsurface_cu_state(struct bz_list *subsurface_states, struct bz_surface *surface);
 static void bz_free_content_update(struct bz_content_update *content_update);
+static void *bz_clone_region_mutation(void *input);
 
 // -- wl_subsurface --
 
@@ -254,16 +257,38 @@ static struct bz_surface_state *bz_init_surface_state(void)
 		goto callback_list_failed;
 	}
 
+	state->surface_damage = bz_list_create();
+	if (state->surface_damage == nullptr) {
+		goto surface_damage_failed;
+	}
+
+	state->buffer_damage = bz_list_create();
+	if (state->buffer_damage == nullptr) {
+		goto buffer_damage_failed;
+	}
+
 	state->subsurface_states = bz_list_create();
 	if (state->subsurface_states == nullptr) {
 		goto subsurface_list_failed;
 	}
+
+	state->dirty_opaque_region = false;
+	state->opaque_region = nullptr;
+	state->dirty_input_region = false;
+	state->input_region = nullptr;
+
+	state->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	state->scale = 1;
 
 	// All is good!
 	return state;
 
 	// Error cleanups
 	subsurface_list_failed:
+		bz_list_free(state->buffer_damage, nullptr);
+	buffer_damage_failed:
+		bz_list_free(state->surface_damage, nullptr);
+	surface_damage_failed:
 		bz_list_free(state->frame_callbacks, nullptr);
 	callback_list_failed:
 		free(state);
@@ -278,6 +303,18 @@ static void bz_free_surface_state(struct bz_surface_state *state)
 
 	if (state->frame_callbacks != nullptr) {
 		bz_list_free(state->frame_callbacks, nullptr);
+	}
+	if (state->surface_damage != nullptr) {
+		bz_list_free(state->surface_damage, free);
+	}
+	if (state->buffer_damage != nullptr) {
+		bz_list_free(state->buffer_damage, free);
+	}
+	if (state->opaque_region != nullptr) {
+		bz_list_free(state->opaque_region, free);
+	}
+	if (state->input_region != nullptr) {
+		bz_list_free(state->input_region, free);
 	}
 	if (state->subsurface_states != nullptr) {
 		bz_list_free(state->subsurface_states, free);
@@ -594,8 +631,24 @@ static void bz_surface_damage(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.damage not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	struct bz_rect *damage = calloc(1, sizeof(*damage));
+	if (damage == nullptr) {
+		wl_resource_post_no_memory(resource);
+		goto damage_alloc_failed;
+	}
+	damage->x = x;
+	damage->y = y;
+	damage->w = width;
+	damage->h = height;
+
+	bz_list_append(surface_data->pending_state->surface_damage, damage);
+
+	return;
+
+	damage_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to record surface damage.");
 }
 
 static void bz_surface_frame(
@@ -631,8 +684,30 @@ static void bz_surface_set_opaque_region(
 	struct wl_resource *resource,
 	struct wl_resource *region
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_opaque_region not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	// The current data gets replaced
+	if (surface_data->pending_state->opaque_region != nullptr) {
+		bz_list_free(surface_data->pending_state->opaque_region, free);
+	}
+
+	// A null region is allowed and meaningful for this handler.
+	if (region == nullptr) {
+		surface_data->pending_state->opaque_region = nullptr;
+		surface_data->pending_state->dirty_opaque_region = true;
+		return;
+	}
+
+	// Non-null value supplied, so copy the mutations over
+	struct bz_region *region_data = wl_resource_get_user_data(region);
+	struct bz_list *mutations = bz_list_clone(region_data->mutations, bz_clone_region_mutation);
+	if (mutations == nullptr) {
+		wl_resource_post_no_memory(resource);
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to clone opaque region mutation list.");
+		return;
+	}
+	surface_data->pending_state->opaque_region = mutations;
+	surface_data->pending_state->dirty_opaque_region = true;
 }
 
 static void bz_surface_set_input_region(
@@ -640,8 +715,30 @@ static void bz_surface_set_input_region(
 	struct wl_resource *resource,
 	struct wl_resource *region
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_input_region not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	// The current data gets replaced
+	if (surface_data->pending_state->input_region != nullptr) {
+		bz_list_free(surface_data->pending_state->input_region, free);
+	}
+
+	// A null region is allowed and meaningful for this handler.
+	if (region == nullptr) {
+		surface_data->pending_state->input_region = nullptr;
+		surface_data->pending_state->dirty_input_region = true;
+		return;
+	}
+
+	// Non-null value supplied, so copy the mutations over
+	struct bz_region *region_data = wl_resource_get_user_data(region);
+	struct bz_list *mutations = bz_list_clone(region_data->mutations, bz_clone_region_mutation);
+	if (mutations == nullptr) {
+		wl_resource_post_no_memory(resource);
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to clone input region mutation list.");
+		return;
+	}
+	surface_data->pending_state->input_region = mutations;
+	surface_data->pending_state->dirty_input_region = true;
 }
 
 static void bz_surface_commit(struct wl_client *client, struct wl_resource *resource)
@@ -677,6 +774,20 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	cu_state->buffer = bzsurf->pending_state->buffer;
 	bz_list_move_to_end(bzsurf->pending_state->frame_callbacks, cu_state->frame_callbacks);
 	bz_list_move_to_end(bzsurf->pending_state->subsurface_states, cu_state->subsurface_states);
+	bz_list_move_to_end(bzsurf->pending_state->surface_damage, cu_state->surface_damage);
+	bz_list_move_to_end(bzsurf->pending_state->buffer_damage, cu_state->buffer_damage);
+	if (bzsurf->pending_state->dirty_opaque_region) {
+		bzsurf->pending_state->dirty_opaque_region = false; // Clear the dirty flag.
+		cu_state->dirty_opaque_region = true;
+		cu_state->opaque_region = bz_list_clone(bzsurf->pending_state->opaque_region, bz_clone_region_mutation);
+	}
+	if (bzsurf->pending_state->dirty_input_region) {
+		bzsurf->pending_state->dirty_input_region = false; // Clear the dirty flag.
+		cu_state->dirty_input_region = true;
+		cu_state->input_region = bz_list_clone(bzsurf->pending_state->input_region, bz_clone_region_mutation);
+	}
+	cu_state->transform = bzsurf->pending_state->transform;
+	cu_state->scale = bzsurf->pending_state->scale;
 
 	// Create that content update
 	struct bz_content_update *cu = calloc(1, sizeof(*cu));
@@ -737,8 +848,16 @@ static void bz_surface_set_buffer_transform(
 	struct wl_resource *resource,
 	int32_t transform
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_buffer_transform not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	if (transform < 0 || transform > 7) {
+		wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_TRANSFORM,
+			"Invalid transform supplied to surface.");
+		bz_warn(BZ_LOG_WL_DISPLAY, "Invalid transform supplied to surface: %d", transform);
+		return;
+	}
+	enum wl_output_transform xform = transform;
+	surface_data->pending_state->transform = xform;
 }
 
 static void bz_surface_set_buffer_scale(
@@ -746,8 +865,15 @@ static void bz_surface_set_buffer_scale(
 	struct wl_resource *resource,
 	int32_t scale
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_buffer_scale not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	if (scale <= 0) {
+		wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SCALE,
+			"Invalid scale supplied to surface.");
+		bz_warn(BZ_LOG_WL_DISPLAY, "Invalid scale supplied to surface: %d", scale);
+		return;
+	}
+	surface_data->pending_state->scale = scale;
 }
 
 static void bz_surface_damage_buffer(
@@ -758,8 +884,24 @@ static void bz_surface_damage_buffer(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.damage_buffer not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	struct bz_rect *damage = calloc(1, sizeof(*damage));
+	if (damage == nullptr) {
+		wl_resource_post_no_memory(resource);
+		goto damage_alloc_failed;
+	}
+	damage->x = x;
+	damage->y = y;
+	damage->w = width;
+	damage->h = height;
+
+	bz_list_append(surface_data->pending_state->buffer_damage, damage);
+
+	return;
+
+	damage_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to record buffer damage.");
 }
 
 static void bz_surface_offset(
@@ -778,7 +920,8 @@ static void bz_surface_offset(
 static void bz_write_surface_texture(struct bz_surface *surface_data)
 {
 	// Initialize the texture
-	if (surface_data->renderable.texture == 0) {
+	bool init_needed = surface_data->renderable.texture == 0;
+	if (init_needed) {
 		bz_info(BZ_LOG_WL_DEVICES, "Initializing OpenGL texture for surface.");
 		glGenTextures(1, &surface_data->renderable.texture);
 		glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
@@ -799,24 +942,69 @@ static void bz_write_surface_texture(struct bz_surface *surface_data)
 	// --- Buffer Access Begin ---------------------------------------------------------------------
 
 	uint32_t *data = wl_shm_buffer_get_data(shmbuf);
-	int32_t width = wl_shm_buffer_get_width(shmbuf);
+	int32_t width = wl_shm_buffer_get_width(shmbuf); // Pixels per row, not bytes
 	int32_t height = wl_shm_buffer_get_height(shmbuf);
 	glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
-	glTexImage2D(
-		GL_TEXTURE_2D,
-		0,                // mipmap level
-		GL_BGRA_EXT,      // format
-		width,
-		height,
-		0,                // border
-		GL_BGRA_EXT,      // format
-		GL_UNSIGNED_BYTE, // type
-		data              // pointer to new data
-	);
+
+	if (init_needed) {
+		// TODO-dl12: This needs to be rerun whenever the buffer size changes
+		glTexImage2D(
+			GL_TEXTURE_2D,
+			0,                // mipmap level
+			GL_BGRA_EXT,      // format
+			width,
+			height,
+			0,                // border
+			GL_BGRA_EXT,      // format
+			GL_UNSIGNED_BYTE, // type
+			data              // pointer to new data
+		);
+	} else {
+		// First, we'll apply buffer damage (no transformation needed here)
+		bz_apply_buffer_damage(data, width, height, surface_data->active_state->buffer_damage);
+
+		// Then, apply surface damage, first transforming the damage into buffer coords.
+		struct bz_list *transformed_damage = bz_list_create();
+		struct bz_rect *rect; bz_list_foreach(rect, surface_data->active_state->surface_damage) {
+			struct bz_rect transformed = *rect;
+			// TODO-dl12: Modify the rectangle as needed (scale + transform)
+			bz_list_append(transformed_damage, &transformed);
+		}
+		bz_apply_buffer_damage(data, width, height, transformed_damage);
+		bz_list_free(transformed_damage, nullptr);
+	}
 
 	// --- Buffer Access End -----------------------------------------------------------------------
 	wl_shm_buffer_end_access(shmbuf);
+}
+
+static void bz_apply_buffer_damage(
+	uint32_t *shm_data,
+	int32_t buff_w,
+	int32_t buff_h,
+	struct bz_list *damage
+) {
+	struct bz_rect *rect; bz_list_foreach(rect, damage) {
+		// May want to update these..?
+		int32_t x = bz_clamp(rect->x, 0, buff_w);
+		int32_t y = bz_clamp(rect->y, 0, buff_h);
+		int32_t w = bz_clamp(rect->w, 0, buff_w - x); // minux 'x' so it doesn't overflow when copying
+		int32_t h = bz_clamp(rect->h, 0, buff_h - y); // minux 'y' so it doesn't overflow when copying
+		glPixelStorei(GL_UNPACK_SKIP_PIXELS, x);
+		glPixelStorei(GL_UNPACK_SKIP_ROWS, y);
+		glTexSubImage2D(
+			GL_TEXTURE_2D,
+			0,          // Mipmap level
+			x, y, w, h, // Area to update
+			GL_BGRA_EXT,
+			GL_UNSIGNED_BYTE,
+			shm_data
+		);
+	}
+	// Safety cleanup
+	glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+	glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 }
 
 static bool bz_is_effectively_sync(struct bz_surface *surface_data)
@@ -915,6 +1103,22 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	surface->active_state->buffer = cu->state->buffer;
 	bz_list_move_to_end(cu->state->frame_callbacks, surface->active_state->frame_callbacks);
 	bz_apply_subsurface_cu_state(cu->state->subsurface_states, surface);
+	// Move damage
+	bz_list_clear(surface->active_state->surface_damage, free);
+	bz_list_move_to_end(cu->state->surface_damage, surface->active_state->surface_damage);
+	bz_list_clear(surface->active_state->buffer_damage, free);
+	bz_list_move_to_end(cu->state->buffer_damage, surface->active_state->buffer_damage);
+	// Move opaque/input regions
+	if (cu->state->dirty_opaque_region) {
+		surface->active_state->dirty_opaque_region = true;
+		surface->active_state->opaque_region = bz_list_clone(cu->state->opaque_region, bz_clone_region_mutation);
+	}
+	if (cu->state->dirty_input_region) {
+		surface->active_state->dirty_input_region = true;
+		surface->active_state->input_region = bz_list_clone(cu->state->input_region, bz_clone_region_mutation);
+	}
+	surface->active_state->transform = cu->state->transform;
+	surface->active_state->scale = cu->state->scale;
 
 	// When a CU is applied, the buffer is applied first. This means all other coordinates are
 	//   relative to the new buffer. If there is no new buffer, the coordinates are relative to
@@ -991,6 +1195,19 @@ static void bz_free_content_update(struct bz_content_update *content_update)
 	bz_free_surface_state(cu->state);
 
 	free(cu);
+}
+
+/** Parameter and return type are both "struct bz_region_mutation *". */
+static void *bz_clone_region_mutation(void *input)
+{
+	struct bz_region_mutation *in = input;
+	struct bz_region_mutation *result = calloc(1, sizeof(*result));
+	result->op = in->op;
+	result->x = in->x;
+	result->y = in->y;
+	result->w = in->w;
+	result->h = in->h;
+	return result;
 }
 
 

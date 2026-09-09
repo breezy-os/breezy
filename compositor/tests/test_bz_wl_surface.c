@@ -29,6 +29,7 @@ void tearDown(void) {}
 // -------------------------------------------------------------------------------------------------
 
 extern const struct wl_surface_interface bz_surface_implementation;
+extern const struct wl_compositor_interface bz_compositor_implementation;
 
 
 // =================================================================================================
@@ -158,15 +159,22 @@ void test_surface_attach__x_y_for_v4_is_allowed(void)
 /** Damage is double-buffered state. */
 void test_surface_damage__damage_is_double_buffered()
 {
-	// TODO
-}
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
 
-/**
- * Coordinates are specified in SURFACE-local coords. X and Y specify upper-left of the rectangle.
- */
-void test_surface_damage__x_y_are_surface_local_upper_left()
-{
-	// TODO
+	// Run the test, making sure it's saved on pending state and not active state
+	bz_surface_implementation.damage(nullptr, nullptr, 1, 2, 3, 4);
+	TEST_ASSERT_EQUAL_INT(0, surface_data->active_state->surface_damage->length);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->surface_damage->length);
+	struct bz_rect *damage = surface_data->pending_state->surface_damage->head->data;
+	TEST_ASSERT_EQUAL_INT(1, damage->x);
+	TEST_ASSERT_EQUAL_INT(2, damage->y);
+	TEST_ASSERT_EQUAL_INT(3, damage->w);
+	TEST_ASSERT_EQUAL_INT(4, damage->h);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
 }
 
 /**
@@ -174,13 +182,43 @@ void test_surface_damage__x_y_are_surface_local_upper_left()
  */
 void test_surface_damage__multiple_calls_are_unioned()
 {
-	// TODO
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	// Run the test, making sure it's saved on pending state and not active state
+	bz_surface_implementation.damage(nullptr, nullptr, 1, 2, 3, 4);
+	bz_surface_implementation.damage(nullptr, nullptr, 5, 6, 7, 8);
+	TEST_ASSERT_EQUAL_INT(0, surface_data->active_state->surface_damage->length);
+	TEST_ASSERT_EQUAL_INT(2, surface_data->pending_state->surface_damage->length);
+	struct bz_rect *damage1 = surface_data->pending_state->surface_damage->head->data;
+	TEST_ASSERT_EQUAL_INT(1, damage1->x);
+	TEST_ASSERT_EQUAL_INT(2, damage1->y);
+	TEST_ASSERT_EQUAL_INT(3, damage1->w);
+	TEST_ASSERT_EQUAL_INT(4, damage1->h);
+	struct bz_rect *damage2 = surface_data->pending_state->surface_damage->head->next->data;
+	TEST_ASSERT_EQUAL_INT(5, damage2->x);
+	TEST_ASSERT_EQUAL_INT(6, damage2->y);
+	TEST_ASSERT_EQUAL_INT(7, damage2->w);
+	TEST_ASSERT_EQUAL_INT(8, damage2->h);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
 }
 
 /** Initial value is "no damage". */
 void test_surface_damage__starts_out_no_damage()
 {
-	// TODO
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	// Make sure our surfaces start out with no damage.
+	TEST_ASSERT_EQUAL_INT(0, surface_data->active_state->surface_damage->length);
+	TEST_ASSERT_EQUAL_INT(0, surface_data->pending_state->surface_damage->length);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
 }
 
 
@@ -308,10 +346,250 @@ void test_surface_frame__posts_no_mem_for_failed_resource(void)
 //  Test bz_surface_set_opaque_region()
 // -------------------------------------------------------------------------------------------------
 
+void test_surface_set_opaque_region__requests_are_double_buffered(void)
+{
+	// Set up our test data
+	struct wl_resource *region = calloc(1, sizeof(*region));
+	struct bz_region *region_data = bz_create_region_data();
+	region_data->resource = region;
+
+	struct bz_region_mutation *mut1 = calloc(1, sizeof(*mut1));
+	*mut1 = (struct bz_region_mutation){ .op = OP_ADD, .x = 1, .y = 2, .w = 3, .h = 4 };
+	bz_list_append(region_data->mutations, mut1);
+
+	struct bz_surface *surface_data = bz_create_surface_data();
+
+	// Set up our mocks
+	void *ret_vals[2] = { surface_data, region_data };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 2);
+
+	// Run our test
+	TEST_ASSERT_FALSE(surface_data->pending_state->dirty_opaque_region);
+	bz_surface_implementation.set_opaque_region(nullptr, nullptr, region);
+	TEST_ASSERT_TRUE(surface_data->pending_state->dirty_opaque_region);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->opaque_region->length);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
+	bz_free_region_data(region_data);
+	free(region);
+}
+
+void test_surface_set_opaque_region__initial_value_is_null(void)
+{
+	// Set up our mocks and data
+	struct bz_client *client_data = bz_create_client_data();
+	wl_client_get_user_data_fake.return_val = client_data;
+	struct wl_resource *surface = calloc(1, sizeof(*surface));
+	wl_resource_create_fake.return_val = surface;
+
+	// Run our test!
+	bz_compositor_implementation.create_surface(nullptr, nullptr, 0);
+	struct bz_surface *surface_data = wl_resource_set_implementation_fake.arg2_val;
+	TEST_ASSERT_NULL(surface_data->pending_state->opaque_region);
+
+	// Clean up
+	free(surface);
+	bz_free_surface_data(surface_data);
+	bz_free_client_data(client_data);
+}
+
+void test_surface_set_opaque_region__null_value_can_be_given(void)
+{
+	// Set up our test data
+	struct wl_resource *region = calloc(1, sizeof(*region));
+	struct bz_region *region_data = bz_create_region_data();
+	region_data->resource = region;
+
+	struct bz_region_mutation *mut1 = calloc(1, sizeof(*mut1));
+	*mut1 = (struct bz_region_mutation){ .op = OP_ADD, .x = 1, .y = 2, .w = 3, .h = 4 };
+	bz_list_append(region_data->mutations, mut1);
+
+	struct bz_surface *surface_data = bz_create_surface_data();
+
+	// Set up our mocks
+	void *ret_vals[4] = {
+		surface_data, region_data, // First call
+		surface_data, region_data, // Second call
+	};
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 4);
+
+	// First, give it a non-NULL value
+	bz_surface_implementation.set_opaque_region(nullptr, nullptr, region);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->opaque_region->length);
+
+	// Now test the NULL case
+	bz_surface_implementation.set_opaque_region(nullptr, nullptr, nullptr);
+	TEST_ASSERT_NULL(surface_data->pending_state->opaque_region);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
+	bz_free_region_data(region_data);
+	free(region);
+}
+
+void test_surface_set_opaque_region__region_has_copy_semantics(void)
+{
+	// Set up our test data
+	struct wl_resource *region = calloc(1, sizeof(*region));
+	struct bz_region *region_data = bz_create_region_data();
+	region_data->resource = region;
+
+	struct bz_region_mutation *mut1 = calloc(1, sizeof(*mut1));
+	*mut1 = (struct bz_region_mutation){ .op = OP_ADD, .x = 1, .y = 2, .w = 3, .h = 4 };
+	bz_list_append(region_data->mutations, mut1);
+
+	struct bz_surface *surface_data = bz_create_surface_data();
+
+	// Set up our mocks
+	void *ret_vals[2] = { surface_data, region_data };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 2);
+
+	// Run our test
+	bz_surface_implementation.set_opaque_region(nullptr, nullptr, region);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->opaque_region->length);
+	// Verify the pointers aren't equal
+	TEST_ASSERT_NOT_EQUAL(region_data->mutations, surface_data->pending_state->opaque_region);
+	TEST_ASSERT_NOT_EQUAL(mut1, surface_data->pending_state->opaque_region->head->data);
+	// Destroying the region should be OK because of the copy semantics
+	bz_free_region_data(region_data);
+	free(region);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->opaque_region->length);
+	struct bz_region_mutation *mut = surface_data->pending_state->opaque_region->head->data;
+	TEST_ASSERT_EQUAL_INT(OP_ADD, mut->op);
+	TEST_ASSERT_EQUAL_INT(1, mut->x);
+	TEST_ASSERT_EQUAL_INT(2, mut->y);
+	TEST_ASSERT_EQUAL_INT(3, mut->w);
+	TEST_ASSERT_EQUAL_INT(4, mut->h);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
+}
+
 
 // =================================================================================================
 //  Test bz_surface_set_input_region()
 // -------------------------------------------------------------------------------------------------
+
+void test_surface_set_input_region__requests_are_double_buffered(void)
+{
+	// Set up our test data
+	struct wl_resource *region = calloc(1, sizeof(*region));
+	struct bz_region *region_data = bz_create_region_data();
+	region_data->resource = region;
+
+	struct bz_region_mutation *mut1 = calloc(1, sizeof(*mut1));
+	*mut1 = (struct bz_region_mutation){ .op = OP_ADD, .x = 1, .y = 2, .w = 3, .h = 4 };
+	bz_list_append(region_data->mutations, mut1);
+
+	struct bz_surface *surface_data = bz_create_surface_data();
+
+	// Set up our mocks
+	void *ret_vals[2] = { surface_data, region_data };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 2);
+
+	// Run our test
+	TEST_ASSERT_FALSE(surface_data->pending_state->dirty_input_region);
+	bz_surface_implementation.set_input_region(nullptr, nullptr, region);
+	TEST_ASSERT_TRUE(surface_data->pending_state->dirty_input_region);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->input_region->length);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
+	bz_free_region_data(region_data);
+	free(region);
+}
+
+void test_surface_set_input_region__initial_value_is_null(void)
+{
+	// Set up our mocks and data
+	struct bz_client *client_data = bz_create_client_data();
+	wl_client_get_user_data_fake.return_val = client_data;
+	struct wl_resource *surface = calloc(1, sizeof(*surface));
+	wl_resource_create_fake.return_val = surface;
+
+	// Run our test!
+	bz_compositor_implementation.create_surface(nullptr, nullptr, 0);
+	struct bz_surface *surface_data = wl_resource_set_implementation_fake.arg2_val;
+	TEST_ASSERT_NULL(surface_data->pending_state->input_region);
+
+	// Clean up
+	free(surface);
+	bz_free_surface_data(surface_data);
+	bz_free_client_data(client_data);
+}
+
+void test_surface_set_input_region__null_value_can_be_given(void)
+{
+	// Set up our test data
+	struct wl_resource *region = calloc(1, sizeof(*region));
+	struct bz_region *region_data = bz_create_region_data();
+	region_data->resource = region;
+
+	struct bz_region_mutation *mut1 = calloc(1, sizeof(*mut1));
+	*mut1 = (struct bz_region_mutation){ .op = OP_ADD, .x = 1, .y = 2, .w = 3, .h = 4 };
+	bz_list_append(region_data->mutations, mut1);
+
+	struct bz_surface *surface_data = bz_create_surface_data();
+
+	// Set up our mocks
+	void *ret_vals[4] = {
+		surface_data, region_data, // First call
+		surface_data, region_data, // Second call
+	};
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 4);
+
+	// First, give it a non-NULL value
+	bz_surface_implementation.set_input_region(nullptr, nullptr, region);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->input_region->length);
+
+	// Now test the NULL case
+	bz_surface_implementation.set_input_region(nullptr, nullptr, nullptr);
+	TEST_ASSERT_NULL(surface_data->pending_state->input_region);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
+	bz_free_region_data(region_data);
+	free(region);
+}
+
+void test_surface_set_input_region__region_has_copy_semantics(void)
+{
+	// Set up our test data
+	struct wl_resource *region = calloc(1, sizeof(*region));
+	struct bz_region *region_data = bz_create_region_data();
+	region_data->resource = region;
+
+	struct bz_region_mutation *mut1 = calloc(1, sizeof(*mut1));
+	*mut1 = (struct bz_region_mutation){ .op = OP_ADD, .x = 1, .y = 2, .w = 3, .h = 4 };
+	bz_list_append(region_data->mutations, mut1);
+
+	struct bz_surface *surface_data = bz_create_surface_data();
+
+	// Set up our mocks
+	void *ret_vals[2] = { surface_data, region_data };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 2);
+
+	// Run our test
+	bz_surface_implementation.set_input_region(nullptr, nullptr, region);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->input_region->length);
+	// Verify the pointers aren't equal
+	TEST_ASSERT_NOT_EQUAL(region_data->mutations, surface_data->pending_state->input_region);
+	TEST_ASSERT_NOT_EQUAL(mut1, surface_data->pending_state->input_region->head->data);
+	// Destroying the region should be OK because of the copy semantics
+	bz_free_region_data(region_data);
+	free(region);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->input_region->length);
+	struct bz_region_mutation *mut = surface_data->pending_state->input_region->head->data;
+	TEST_ASSERT_EQUAL_INT(OP_ADD, mut->op);
+	TEST_ASSERT_EQUAL_INT(1, mut->x);
+	TEST_ASSERT_EQUAL_INT(2, mut->y);
+	TEST_ASSERT_EQUAL_INT(3, mut->w);
+	TEST_ASSERT_EQUAL_INT(4, mut->h);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
+}
 
 
 // =================================================================================================
@@ -323,10 +601,100 @@ void test_surface_frame__posts_no_mem_for_failed_resource(void)
 //  Test bz_surface_set_buffer_transform()
 // -------------------------------------------------------------------------------------------------
 
+void test_surface_set_buffer_transform__is_double_buffered(void)
+{
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	bz_surface_implementation.set_buffer_transform(nullptr, nullptr, WL_OUTPUT_TRANSFORM_90);
+	TEST_ASSERT_EQUAL_INT(WL_OUTPUT_TRANSFORM_90, surface_data->pending_state->transform);
+	TEST_ASSERT_EQUAL_INT(WL_OUTPUT_TRANSFORM_NORMAL, surface_data->active_state->transform);
+
+	bz_free_surface_data(surface_data);
+}
+
+void test_surface_set_buffer_transform__initial_value_is_normal(void)
+{
+	// Set up our mocks and data
+	struct bz_client *client_data = bz_create_client_data();
+	wl_client_get_user_data_fake.return_val = client_data;
+	struct wl_resource *surface = calloc(1, sizeof(*surface));
+	wl_resource_create_fake.return_val = surface;
+
+	// Run our test!
+	bz_compositor_implementation.create_surface(nullptr, nullptr, 0);
+	struct bz_surface *surface_data = wl_resource_set_implementation_fake.arg2_val;
+	TEST_ASSERT_EQUAL_INT(WL_OUTPUT_TRANSFORM_NORMAL, surface_data->pending_state->transform);
+	TEST_ASSERT_EQUAL_INT(WL_OUTPUT_TRANSFORM_NORMAL, surface_data->active_state->transform);
+
+	// Clean up
+	free(surface);
+	bz_free_surface_data(surface_data);
+	bz_free_client_data(client_data);
+}
+
+void test_surface_set_buffer_transform__invalid_value_raises_error(void)
+{
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	bz_surface_implementation.set_buffer_transform(nullptr, nullptr, -1);
+	TEST_ASSERT_EQUAL_INT(WL_OUTPUT_TRANSFORM_NORMAL, surface_data->pending_state->transform);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(WL_SURFACE_ERROR_INVALID_TRANSFORM, wl_resource_post_error_fake.arg1_val);
+
+	bz_free_surface_data(surface_data);
+}
+
 
 // =================================================================================================
 //  Test bz_surface_set_buffer_scale()
 // -------------------------------------------------------------------------------------------------
+
+void test_surface_set_buffer_scale__is_double_buffered(void)
+{
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	bz_surface_implementation.set_buffer_scale(nullptr, nullptr, 2);
+	TEST_ASSERT_EQUAL_INT(2, surface_data->pending_state->scale);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->active_state->scale);
+
+	bz_free_surface_data(surface_data);
+}
+
+void test_surface_set_buffer_scale__initial_value_is_one(void)
+{
+	// Set up our mocks and data
+	struct bz_client *client_data = bz_create_client_data();
+	wl_client_get_user_data_fake.return_val = client_data;
+	struct wl_resource *surface = calloc(1, sizeof(*surface));
+	wl_resource_create_fake.return_val = surface;
+
+	// Run our test!
+	bz_compositor_implementation.create_surface(nullptr, nullptr, 0);
+	struct bz_surface *surface_data = wl_resource_set_implementation_fake.arg2_val;
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->scale);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->active_state->scale);
+
+	// Clean up
+	free(surface);
+	bz_free_surface_data(surface_data);
+	bz_free_client_data(client_data);
+}
+
+void test_surface_set_buffer_scale__invalid_value_raises_error(void)
+{
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	bz_surface_implementation.set_buffer_scale(nullptr, nullptr, -1);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->scale);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(WL_SURFACE_ERROR_INVALID_SCALE, wl_resource_post_error_fake.arg1_val);
+
+	bz_free_surface_data(surface_data);
+}
 
 
 // =================================================================================================
@@ -334,40 +702,102 @@ void test_surface_frame__posts_no_mem_for_failed_resource(void)
 // -------------------------------------------------------------------------------------------------
 
 /** Damage is double-buffered state. */
-void test_surface_damage_buffer__damage_is_double_buffered()
+void test_surface_damage_buffer__damage_is_double_buffered(void)
 {
-	// TODO
-}
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
 
-/**
- * Coordinates are specified in BUFFER-local coords. X and Y specify upper-left of the rectangle.
- */
-void test_surface_damage_buffer__x_y_are_buffer_local_upper_left()
-{
-	// TODO
+	// Run the test, making sure it's saved on pending state and not active state
+	bz_surface_implementation.damage_buffer(nullptr, nullptr, 1, 2, 3, 4);
+	TEST_ASSERT_EQUAL_INT(0, surface_data->active_state->buffer_damage->length);
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->buffer_damage->length);
+	struct bz_rect *damage = surface_data->pending_state->buffer_damage->head->data;
+	TEST_ASSERT_EQUAL_INT(1, damage->x);
+	TEST_ASSERT_EQUAL_INT(2, damage->y);
+	TEST_ASSERT_EQUAL_INT(3, damage->w);
+	TEST_ASSERT_EQUAL_INT(4, damage->h);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
 }
 
 /**
  * Each call ADDS pending damage. Use the union of all provided damage rectangles in the commit.
  */
-void test_surface_damage_buffer__multiple_calls_are_unioned()
+void test_surface_damage_buffer__multiple_calls_are_unioned(void)
 {
-	// TODO
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	// Run the test, making sure it's saved on pending state and not active state
+	bz_surface_implementation.damage_buffer(nullptr, nullptr, 1, 2, 3, 4);
+	bz_surface_implementation.damage_buffer(nullptr, nullptr, 5, 6, 7, 8);
+	TEST_ASSERT_EQUAL_INT(0, surface_data->active_state->buffer_damage->length);
+	TEST_ASSERT_EQUAL_INT(2, surface_data->pending_state->buffer_damage->length);
+	struct bz_rect *damage1 = surface_data->pending_state->buffer_damage->head->data;
+	TEST_ASSERT_EQUAL_INT(1, damage1->x);
+	TEST_ASSERT_EQUAL_INT(2, damage1->y);
+	TEST_ASSERT_EQUAL_INT(3, damage1->w);
+	TEST_ASSERT_EQUAL_INT(4, damage1->h);
+	struct bz_rect *damage2 = surface_data->pending_state->buffer_damage->head->next->data;
+	TEST_ASSERT_EQUAL_INT(5, damage2->x);
+	TEST_ASSERT_EQUAL_INT(6, damage2->y);
+	TEST_ASSERT_EQUAL_INT(7, damage2->w);
+	TEST_ASSERT_EQUAL_INT(8, damage2->h);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
 }
 
 /** Initial value is "no damage". */
-void test_surface_damage_buffer__starts_out_no_damage()
+void test_surface_damage_buffer__starts_out_no_damage(void)
 {
-	// TODO
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	// Make sure our surfaces start out with no damage.
+	TEST_ASSERT_EQUAL_INT(0, surface_data->active_state->buffer_damage->length);
+	TEST_ASSERT_EQUAL_INT(0, surface_data->pending_state->buffer_damage->length);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
 }
 
 /**
  * It is impossible to convert between buffer and surface coordinates until commit time due to
  * buffer transformation changes, so both must be tracked independently. (damage vs damage_buffer)
  */
-void test_surface_damage_buffer__tracked_independently_from_surface_damage()
+void test_surface_damage_buffer__tracked_independently_from_surface_damage(void)
 {
-	// TODO
+	// Set up our test data
+	struct bz_surface *surface_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surface_data;
+
+	// Run the test, making sure it's saved on pending state and not active state
+	bz_surface_implementation.damage(nullptr, nullptr, 1, 2, 3, 4);
+	bz_surface_implementation.damage_buffer(nullptr, nullptr, 5, 6, 7, 8);
+	TEST_ASSERT_EQUAL_INT(0, surface_data->active_state->surface_damage->length);
+	TEST_ASSERT_EQUAL_INT(0, surface_data->active_state->buffer_damage->length);
+	// First, check surface damage is set.
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->surface_damage->length);
+	struct bz_rect *damage1 = surface_data->pending_state->surface_damage->head->data;
+	TEST_ASSERT_EQUAL_INT(1, damage1->x);
+	TEST_ASSERT_EQUAL_INT(2, damage1->y);
+	TEST_ASSERT_EQUAL_INT(3, damage1->w);
+	TEST_ASSERT_EQUAL_INT(4, damage1->h);
+	// Next, verify buffer damage is separate.
+	TEST_ASSERT_EQUAL_INT(1, surface_data->pending_state->buffer_damage->length);
+	struct bz_rect *damage2 = surface_data->pending_state->buffer_damage->head->data;
+	TEST_ASSERT_EQUAL_INT(5, damage2->x);
+	TEST_ASSERT_EQUAL_INT(6, damage2->y);
+	TEST_ASSERT_EQUAL_INT(7, damage2->w);
+	TEST_ASSERT_EQUAL_INT(8, damage2->h);
+
+	// Clean up
+	bz_free_surface_data(surface_data);
 }
 
 
@@ -396,10 +826,9 @@ int main(void) {
 	RUN_TEST(test_surface_attach__x_y_for_v4_is_allowed); // TODO
 
 	// Test bz_surface_damage()
-	RUN_TEST(test_surface_damage__damage_is_double_buffered); // TODO
-	RUN_TEST(test_surface_damage__x_y_are_surface_local_upper_left); // TODO
-	RUN_TEST(test_surface_damage__multiple_calls_are_unioned); // TODO
-	RUN_TEST(test_surface_damage__starts_out_no_damage); // TODO
+	RUN_TEST(test_surface_damage__damage_is_double_buffered);
+	RUN_TEST(test_surface_damage__multiple_calls_are_unioned);
+	RUN_TEST(test_surface_damage__starts_out_no_damage);
 
 	// // Test bz_surface_frame()
 	RUN_TEST(test_surface_frame__requests_are_double_buffered);
@@ -409,31 +838,36 @@ int main(void) {
 	RUN_TEST(test_surface_frame__posts_no_mem_for_failed_resource);
 
 	// Test bz_surface_set_opaque_region()
-	// RUN_TEST(test_surface_set_opaque_region_...);
-	// TODO
+	RUN_TEST(test_surface_set_opaque_region__requests_are_double_buffered);
+	RUN_TEST(test_surface_set_opaque_region__initial_value_is_null);
+	RUN_TEST(test_surface_set_opaque_region__null_value_can_be_given);
+	RUN_TEST(test_surface_set_opaque_region__region_has_copy_semantics);
 
 	// Test bz_surface_set_input_region()
-	// RUN_TEST(test_surface_set_input_region_...);
-	// TODO
+	RUN_TEST(test_surface_set_input_region__requests_are_double_buffered);
+	RUN_TEST(test_surface_set_input_region__initial_value_is_null);
+	RUN_TEST(test_surface_set_input_region__null_value_can_be_given);
+	RUN_TEST(test_surface_set_input_region__region_has_copy_semantics);
 
 	// Test bz_surface_commit()
 	// RUN_TEST(test_surface_commit__);
 	// TODO
 
 	// Test bz_surface_set_buffer_transform()
-	// RUN_TEST(test_surface_set_buffer_transform_...);
-	// TODO
+	RUN_TEST(test_surface_set_buffer_transform__is_double_buffered);
+	RUN_TEST(test_surface_set_buffer_transform__initial_value_is_normal);
+	RUN_TEST(test_surface_set_buffer_transform__invalid_value_raises_error);
 
 	// Test bz_surface_set_buffer_scale()
-	// RUN_TEST(test_surface_set_buffer_scale_...);
-	// TODO
+	RUN_TEST(test_surface_set_buffer_scale__is_double_buffered);
+	RUN_TEST(test_surface_set_buffer_scale__initial_value_is_one);
+	RUN_TEST(test_surface_set_buffer_scale__invalid_value_raises_error);
 
 	// Test bz_surface_damage_buffer()
-	RUN_TEST(test_surface_damage_buffer__damage_is_double_buffered); // TODO
-	RUN_TEST(test_surface_damage_buffer__x_y_are_buffer_local_upper_left); // TODO
-	RUN_TEST(test_surface_damage_buffer__multiple_calls_are_unioned); // TODO
-	RUN_TEST(test_surface_damage_buffer__starts_out_no_damage); // TODO
-	RUN_TEST(test_surface_damage_buffer__tracked_independently_from_surface_damage); // TODO
+	RUN_TEST(test_surface_damage_buffer__damage_is_double_buffered);
+	RUN_TEST(test_surface_damage_buffer__multiple_calls_are_unioned);
+	RUN_TEST(test_surface_damage_buffer__starts_out_no_damage);
+	RUN_TEST(test_surface_damage_buffer__tracked_independently_from_surface_damage);
 
 	// Test bz_surface_offset()
 	// RUN_TEST(test_surface_offset_...);
