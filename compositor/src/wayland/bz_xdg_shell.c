@@ -421,6 +421,10 @@ static bool bz_serial_is_newer(void *item, void *serial)
 /** "void *state" is of type "struct bz_xdg_surface_configure *". */
 static void bz_free_xdg_surface_configure(void *xdg_surface_configure)
 {
+	if (xdg_surface_configure == nullptr) {
+		return;
+	}
+
 	struct bz_xdg_surface_configure *configure = xdg_surface_configure;
 
 	if (configure->type == BZ_XDG_SURF_TOPLEVEL) {

@@ -14,6 +14,7 @@ void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version,
 void bz_seat_dtor(struct wl_resource *data);
 struct bz_wl_seat {
 	struct wl_resource *resource; // The "wl_seat"
+	struct bz_list *data_devices; // List of "struct bz_data_device *"
 	struct bz_list *keyboards;    // List of "struct wl_resource *"
 	struct bz_list *pointers;     // List of "struct wl_resource *"
 };
@@ -34,6 +35,12 @@ void bz_output_constructor(struct wl_client *client, void *data, uint32_t versio
 #define BZ_DATA_DEVICE_MANAGER_VERSION 3 // TODO: version 4 exists - upgrade?
 void bz_data_device_manager_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
+// -- wl_data_device --
+#define BZ_DATA_DEVICE_VERSION 3 // TODO: version 4 exists - upgrade?
+struct bz_data_device {
+	struct wl_resource *resource; // The "wl_data_device"
+	struct bz_wl_seat *seat;
+};
 
 // #################################################################################################
 #endif

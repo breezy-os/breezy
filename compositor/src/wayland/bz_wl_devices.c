@@ -45,14 +45,22 @@ static void bz_keyboard_release(struct wl_client *client, struct wl_resource *re
 
 // -- wl_output --
 
-static const struct wl_output_interface bz_output_implementation;
+const struct wl_output_interface bz_output_implementation;
 static void bz_output_release(struct wl_client *client, struct wl_resource *resource);
 
 // -- wl_data_device_manager --
 
-static const struct wl_data_device_manager_interface bz_data_device_manager_implementation;
+const struct wl_data_device_manager_interface bz_data_device_manager_implementation;
 static void bz_data_device_manager_create_data_source(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_data_device_manager_get_data_device(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *seat);
+
+// -- wl_data_device --
+
+void bz_data_device_dtor(struct wl_resource *data);
+const struct wl_data_device_interface bz_data_device_implementation;
+static void bz_data_device_start_drag(struct wl_client *client, struct wl_resource *resource, struct wl_resource *source, struct wl_resource *origin, struct wl_resource *icon, uint32_t serial);
+static void bz_data_device_set_selection(struct wl_client *client, struct wl_resource *resource, struct wl_resource *source, uint32_t serial);
+static void bz_data_device_release(struct wl_client *client, struct wl_resource *resource);
 
 
 // =================================================================================================
@@ -67,8 +75,13 @@ void bz_seat_dtor(struct wl_resource *data)
 	struct bz_wl_seat *seat_data = wl_resource_get_user_data(data);
 	bz_list_remove(client_data->seats, seat_data, nullptr);
 
+	struct bz_data_device *data_device; bz_list_foreach(data_device, seat_data->data_devices) {
+		data_device->seat = nullptr;
+	}
+
 	bz_list_free(seat_data->keyboards, nullptr);
 	bz_list_free(seat_data->pointers, nullptr);
+	bz_list_free(seat_data->data_devices, nullptr);
 
 	free(seat_data);
 }
@@ -93,6 +106,11 @@ void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version,
 	if (seat_data->pointers == nullptr) {
 		wl_client_post_no_memory(client);
 		goto pointer_alloc_failed;
+	}
+	seat_data->data_devices = bz_list_create();
+	if (seat_data->data_devices == nullptr) {
+		wl_client_post_no_memory(client);
+		goto data_device_alloc_failed;
 	}
 
 	// Set up the wl_seat resource
@@ -126,6 +144,8 @@ void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version,
 	seat_append_failed:
 		wl_resource_destroy(res);
 	resource_failed:
+		bz_list_free(seat_data->data_devices, nullptr);
+	data_device_alloc_failed:
 		bz_list_free(seat_data->pointers, nullptr);
 	pointer_alloc_failed:
 		bz_list_free(seat_data->keyboards, nullptr);
@@ -414,9 +434,19 @@ void bz_output_constructor(struct wl_client *client, void *data, uint32_t versio
 	}
 
 	wl_resource_set_implementation(res, &bz_output_implementation, nullptr, nullptr);
+
+	// Emit events describing the output.
+	// TODO-dl12: Currently just filler data Some of this we can get from the DRM mode connector.
+	struct bz_breezy *breezy = data;
+	wl_output_send_geometry(res, 0, 0, 500, 330, WL_OUTPUT_SUBPIXEL_UNKNOWN, "Dell", "Monitor", WL_OUTPUT_TRANSFORM_NORMAL);
+	wl_output_send_mode(res, WL_OUTPUT_MODE_CURRENT, breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay, breezy->drm.mode_info.vrefresh);
+	wl_output_send_scale(res, 1);
+	wl_output_send_name(res, breezy->drm.mode_info.name); // TODO: This isn't a good name..
+	// wl_output_send_description(res, "I am a monitor.");
+	wl_output_send_done(res);
 }
 
-static const struct wl_output_interface bz_output_implementation = {
+const struct wl_output_interface bz_output_implementation = {
 	.release = bz_output_release
 };
 
@@ -449,11 +479,9 @@ void bz_data_device_manager_constructor(struct wl_client *client, void *data, ui
 	wl_resource_set_implementation(res, &bz_data_device_manager_implementation, nullptr, nullptr);
 }
 
-static const struct wl_data_device_manager_interface bz_data_device_manager_implementation = {
+const struct wl_data_device_manager_interface bz_data_device_manager_implementation = {
 	.create_data_source = bz_data_device_manager_create_data_source,
 	.get_data_device = bz_data_device_manager_get_data_device,
-	// TODO: This is only defined in version 4, yet I have version 3 installed. Upgrade local install?
-	// .release = bz_data_device_manager_release,
 };
 
 static void bz_data_device_manager_create_data_source(
@@ -471,6 +499,100 @@ static void bz_data_device_manager_get_data_device(
 	uint32_t id,
 	struct wl_resource *seat
 ) {
-	bz_error(BZ_LOG_WL_DEVICES, "wl_data_device_manager.get_data_device not implemented");
+	// Allocate our new user data
+	struct bz_data_device *data_device_data = calloc(1, sizeof(*data_device_data));
+	if (data_device_data == nullptr) {
+		bz_error(BZ_LOG_WL_DEVICES, "Failed to allocate memory for the data device.");
+		goto data_device_alloc_failed;
+	}
+
+	// Create the resource
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_data_device_interface,
+		BZ_DATA_DEVICE_VERSION,
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_data_device_implementation,
+		data_device_data,
+		bz_data_device_dtor
+	);
+
+	struct bz_wl_seat *seat_data = wl_resource_get_user_data(seat);
+
+	// Save our user data
+	data_device_data->resource = res;
+	data_device_data->seat = seat_data;
+
+	// Add it to our seat's user data
+	if (bz_list_append(seat_data->data_devices, data_device_data) != 0) {
+		wl_client_post_no_memory(client);
+		goto append_data_device_failed;
+	}
+
+	// Everything succeeded!
+	return;
+
+	append_data_device_failed:
+		wl_resource_destroy(res);
+	resource_failed:
+		free(data_device_data);
+	data_device_alloc_failed:
+		bz_error(BZ_LOG_WL_DEVICES, "Failed to construct a new wl_data_device.");
+}
+
+
+// =================================================================================================
+//  wl_data_device
+// -------------------------------------------------------------------------------------------------
+
+void bz_data_device_dtor(struct wl_resource *data)
+{
+	struct bz_data_device *data_device_data = wl_resource_get_user_data(data);
+
+	if (data_device_data->seat != nullptr) {
+		bz_list_remove(data_device_data->seat->data_devices, data_device_data, nullptr);
+	}
+
+	free(data_device_data);
+}
+
+const struct wl_data_device_interface bz_data_device_implementation = {
+	.start_drag = bz_data_device_start_drag,
+	.set_selection = bz_data_device_set_selection,
+	.release = bz_data_device_release,
+};
+
+static void bz_data_device_start_drag(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	struct wl_resource *source,
+	struct wl_resource *origin,
+	struct wl_resource *icon,
+	uint32_t serial
+) {
+	bz_error(BZ_LOG_WL_DEVICES, "wl_data_device.start_drag not implemented");
+	// TODO
+}
+
+static void bz_data_device_set_selection(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	struct wl_resource *source,
+	uint32_t serial
+) {
+	bz_error(BZ_LOG_WL_DEVICES, "wl_data_device.set_selection not implemented");
+	// TODO
+}
+
+static void bz_data_device_release(struct wl_client *client, struct wl_resource *resource)
+{
+	bz_error(BZ_LOG_WL_DEVICES, "wl_data_device.release not implemented");
 	// TODO
 }

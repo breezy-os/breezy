@@ -76,6 +76,10 @@ struct bz_surface_state {
 	bool dirty_input_region;
 	struct bz_list *input_region;    // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
 
+	// Viewport state
+	struct bz_rect_dbl *vp_source;
+	struct bz_dimension *vp_dest;
+
 	enum wl_output_transform transform;
 	int32_t scale;
 };
@@ -121,6 +125,7 @@ struct bz_surface {
 
 	// Display data
 	struct bz_renderable renderable;
+	struct bz_wp_viewport *viewport; // Nullable
 };
 
 struct bz_content_update {

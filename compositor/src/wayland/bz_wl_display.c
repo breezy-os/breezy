@@ -14,6 +14,7 @@
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_window_management.h"
 #include "breezy/bz_xdg_shell.h"
+#include "breezy/bz_wp_viewporter.h"
 
 
 // =================================================================================================
@@ -319,6 +320,8 @@ static void bz_free_surface_state(struct bz_surface_state *state)
 	if (state->subsurface_states != nullptr) {
 		bz_list_free(state->subsurface_states, free);
 	}
+	if (state->vp_source != nullptr) { free(state->vp_source); }
+	if (state->vp_dest != nullptr)   { free(state->vp_dest);   }
 	free(state);
 }
 
@@ -538,7 +541,7 @@ void bz_surface_dtor(struct wl_resource *data)
 	struct bz_surface *bzsurf = wl_resource_get_user_data(data);
 
 	// If a wl_surface was destroyed before its (subsurface) role, sever ties with our parent.
-	if (bzsurf->role == BZ_SURF_ROLE_WL_SUBSURFACE && bzsurf->subsurface != nullptr) {
+	if (bzsurf->role == BZ_SURF_ROLE_WL_SUBSURFACE && bzsurf->subsurface != nullptr && bzsurf->subsurface->parent != nullptr) {
 		bz_list_remove(bzsurf->subsurface->parent->surface_stack, bzsurf, nullptr);
 	}
 
@@ -567,6 +570,12 @@ void bz_surface_dtor(struct wl_resource *data)
 		bz_free_content_update(cu);
 	}
 	bz_list_free(bzsurf->content_updates, nullptr);
+
+	// Remove the association with the viewporter (if present)
+	if (bzsurf->viewport != nullptr) {
+		bzsurf->viewport->surface = nullptr;
+		bzsurf->viewport = nullptr;
+	}
 
 	glDeleteTextures(1, &bzsurf->renderable.texture);
 
@@ -786,6 +795,8 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 		cu_state->dirty_input_region = true;
 		cu_state->input_region = bz_list_clone(bzsurf->pending_state->input_region, bz_clone_region_mutation);
 	}
+	cu_state->vp_source = bz_clone_rect_dbl(bzsurf->pending_state->vp_source);
+	cu_state->vp_dest = bz_clone_dimension(bzsurf->pending_state->vp_dest);
 	cu_state->transform = bzsurf->pending_state->transform;
 	cu_state->scale = bzsurf->pending_state->scale;
 
@@ -1117,6 +1128,8 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 		surface->active_state->dirty_input_region = true;
 		surface->active_state->input_region = bz_list_clone(cu->state->input_region, bz_clone_region_mutation);
 	}
+	surface->active_state->vp_source = bz_clone_rect_dbl(cu->state->vp_source);
+	surface->active_state->vp_dest = bz_clone_dimension(cu->state->vp_dest);
 	surface->active_state->transform = cu->state->transform;
 	surface->active_state->scale = cu->state->scale;
 
@@ -1305,6 +1318,8 @@ static void bz_subsurface_place_above(
 	state->placement = BZ_SUBSURFACE_PLACE_ABOVE;
 	state->sibling = sibling_data;
 
+	return;
+
 	validation_failure:
 		bz_error(BZ_LOG_WL_DISPLAY, "Failed to place subsurface above sibling.");
 }
@@ -1341,6 +1356,8 @@ static void bz_subsurface_place_below(
 	// Make the change
 	state->placement = BZ_SUBSURFACE_PLACE_BELOW;
 	state->sibling = sibling_data;
+
+	return;
 
 	validation_failure:
 		bz_error(BZ_LOG_WL_DISPLAY, "Failed to place subsurface below sibling.");

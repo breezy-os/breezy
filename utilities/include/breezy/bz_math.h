@@ -7,6 +7,10 @@
 struct bz_position  { int32_t x; int32_t y; };
 struct bz_dimension { int32_t w; int32_t h; };
 struct bz_rect { int32_t x; int32_t y; int32_t w; int32_t h; };
+struct bz_rect_dbl { double x; double y; double w; double h; };
+
+struct bz_rect_dbl *bz_clone_rect_dbl(struct bz_rect_dbl *source);
+struct bz_dimension *bz_clone_dimension(struct bz_dimension *source);
 
 // -- Matrix format --
 // [0  3  6]

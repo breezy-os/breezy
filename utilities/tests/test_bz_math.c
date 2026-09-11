@@ -1,5 +1,6 @@
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "unity.h"
 
@@ -16,8 +17,58 @@ void setUp(void)
 	bz_log_initialize(BZ_LOG_OFF);
 }
 
-void tearDown(void)
+void tearDown(void) {}
+
+
+// =================================================================================================
+//  Test bz_clone_rect_dbl()
+// -------------------------------------------------------------------------------------------------
+
+void test_clone_rect_dbl__deep_copies_data(void)
 {
+	struct bz_rect_dbl source = { .x = 1.0, .y = 2.0, .w = 3.0, .h = 4.0 };
+	struct bz_rect_dbl *result = bz_clone_rect_dbl(&source);
+	TEST_ASSERT_NOT_EQUAL(&source, result);
+	TEST_ASSERT_TRUE(1.0 == result->x);
+	TEST_ASSERT_TRUE(2.0 == result->y);
+	TEST_ASSERT_TRUE(3.0 == result->w);
+	TEST_ASSERT_TRUE(4.0 == result->h);
+	// Sanity check: change a source value, and make sure result doesn't change.
+	source.x = 5.0;
+	TEST_ASSERT_TRUE(5.0 == source.x);
+	TEST_ASSERT_TRUE(1.0 == result->x);
+	free(result);
+}
+
+void test_clone_rect_dbl__succeeds_for_null_source(void)
+{
+	struct bz_rect_dbl *result = bz_clone_rect_dbl(nullptr);
+	TEST_ASSERT_NULL(result);
+}
+
+
+// =================================================================================================
+//  Test bz_clone_dimension()
+// -------------------------------------------------------------------------------------------------
+
+void test_clone_dimension__deep_copies_data(void)
+{
+	struct bz_dimension source = { .w = 1, .h = 2 };
+	struct bz_dimension *result = bz_clone_dimension(&source);
+	TEST_ASSERT_NOT_EQUAL(&source, result);
+	TEST_ASSERT_EQUAL_INT(1, result->w);
+	TEST_ASSERT_EQUAL_INT(2, result->h);
+	// Sanity check: change a source value, and make sure result doesn't change.
+	source.w = 3;
+	TEST_ASSERT_EQUAL_INT(3, source.w);
+	TEST_ASSERT_EQUAL_INT(1, result->w);
+	free(result);
+}
+
+void test_clone_dimension__succeeds_for_null_source(void)
+{
+	struct bz_dimension *result = bz_clone_dimension(nullptr);
+	TEST_ASSERT_NULL(result);
 }
 
 
@@ -147,6 +198,14 @@ void test_contains_point__false_cases(void)
 
 int main(void) {
 	UNITY_BEGIN();
+
+	// -- bz_clone_rect_dbl() --
+	RUN_TEST(test_clone_rect_dbl__deep_copies_data);
+	RUN_TEST(test_clone_rect_dbl__succeeds_for_null_source);
+
+	// -- bz_clone_dimension() --
+	RUN_TEST(test_clone_dimension__deep_copies_data);
+	RUN_TEST(test_clone_dimension__succeeds_for_null_source);
 
 	// -- bz_distance() --
 	RUN_TEST(test_distance__returns_correct_distance);

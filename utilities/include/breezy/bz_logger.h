@@ -31,6 +31,7 @@ void bz_error(uint8_t category, char *file, int line, const char *message_fmt, .
 #define BZ_LOG_WL_DISPLAY 8, __FILE__, __LINE__
 #define BZ_LOG_WL_DEVICES 9, __FILE__, __LINE__
 #define BZ_LOG_WL_XDG_SHELL 10, __FILE__, __LINE__
+#define BZ_LOG_WL_WP_VIEWPORTER 11, __FILE__, __LINE__
 
 
 // #################################################################################################
