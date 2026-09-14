@@ -38,7 +38,7 @@ static void bz_wp_viewport_set_destination(struct wl_client *client, struct wl_r
 /** Gets executed whenever a client binds to wp_viewporter. */
 void bz_wp_viewporter_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_WP_VIEWPORTER, "Binding a client to wp_viewporter.");
+	bz_debug(BZ_LOG_WL_WP_VIEWPORTER, "Binding a client to wp_viewporter with version %d.", version);
 
 	struct wl_resource *res = wl_resource_create(client, &wp_viewporter_interface, version, id);
 	if (res == nullptr) {
@@ -86,7 +86,7 @@ static void bz_wp_viewporter_get_viewport(
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&wp_viewport_interface,
-		BZ_WP_VIEWPORT_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {

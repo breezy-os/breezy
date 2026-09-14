@@ -99,6 +99,7 @@ void test_seat_capabilities__sent_when_bound_to_seat(void)
 	wl_resource_create_fake.return_val = seat_res;
 	struct bz_client *client_data = bz_create_client_data();
 	wl_client_get_user_data_fake.return_val = client_data;
+	wl_resource_get_version_fake.return_val = BZ_SEAT_VERSION;
 
 	// Run our test!
 	bz_seat_constructor(nullptr, nullptr, 0, 0);
@@ -382,6 +383,8 @@ void test_seat_get_keyboard__sends_keymap_and_repeat_info(void)
 	char *keymap = calloc(strlen("keymap") + 1, sizeof(char));
 	strcpy(keymap, "keymap");
 	xkb_keymap_get_as_string_fake.return_val = keymap;
+
+	wl_resource_get_version_fake.return_val = BZ_SEAT_VERSION;
 
 	// Run our test
 	bz_seat_implementation.get_keyboard(nullptr, nullptr, 0);

@@ -40,7 +40,8 @@ struct bz_surface *prep_subsurface_placement_test()
 	surface_data_1->subsurface = subsurface_data_1;
 	subsurface_data_1->parent = parent_data;
 	subsurface_data_1->surface = surface_data_1;
-	bz_list_append(parent_data->surface_stack, surface_data_1);
+	bz_list_append(parent_data->pending_state->surface_stack, surface_data_1);
+	bz_list_append(parent_data->active_state->surface_stack, surface_data_1);
 
 	// Child 2
 	struct bz_surface *surface_data_2 = bz_create_surface_data();
@@ -48,7 +49,8 @@ struct bz_surface *prep_subsurface_placement_test()
 	surface_data_2->subsurface = subsurface_data_2;
 	subsurface_data_2->parent = parent_data;
 	subsurface_data_2->surface = surface_data_2;
-	bz_list_append(parent_data->surface_stack, surface_data_2);
+	bz_list_append(parent_data->pending_state->surface_stack, surface_data_2);
+	bz_list_append(parent_data->active_state->surface_stack, surface_data_2);
 
 	// Child 3
 	struct bz_surface *surface_data_3 = bz_create_surface_data();
@@ -56,17 +58,20 @@ struct bz_surface *prep_subsurface_placement_test()
 	surface_data_3->subsurface = subsurface_data_3;
 	subsurface_data_3->parent = parent_data;
 	subsurface_data_3->surface = surface_data_3;
-	bz_list_append(parent_data->surface_stack, surface_data_3);
+	bz_list_append(parent_data->pending_state->surface_stack, surface_data_3);
+	bz_list_append(parent_data->active_state->surface_stack, surface_data_3);
 
 	return parent_data;
 }
 
 void tear_down_subsurface_placement_test(struct bz_surface *parent)
 {
-	struct bz_surface *child; bz_list_foreach(child, parent->surface_stack) {
+	struct bz_surface *child; bz_list_foreach(child, parent->active_state->surface_stack) {
 		if (child == parent) continue;
 		bz_free_subsurface_data(child->subsurface);
 		bz_free_surface_data(child);
+		bz_list_remove(parent->pending_state->surface_stack, child, nullptr);
+		// (anything added to just pending_state by the test should be removed by the test.)
 	}
 	bz_free_surface_data(parent);
 }
@@ -95,7 +100,7 @@ void test_subsurface_set_position__is_buffered_on_parent_state(void)
 	struct bz_subsurface *subsurface_data = bz_create_subsurface_data();
 	subsurface_data->parent = parent_data;
 	subsurface_data->surface = surface_data;
-	bz_list_append(parent_data->surface_stack, surface_data);
+	bz_list_append(parent_data->pending_state->surface_stack, surface_data);
 
 	// And our mocks
 	wl_resource_get_user_data_fake.return_val = subsurface_data;
@@ -121,7 +126,7 @@ void test_subsurface_set_position__negative_values_are_allowed(void)
 	struct bz_subsurface *subsurface_data = bz_create_subsurface_data();
 	subsurface_data->parent = parent_data;
 	subsurface_data->surface = surface_data;
-	bz_list_append(parent_data->surface_stack, surface_data);
+	bz_list_append(parent_data->pending_state->surface_stack, surface_data);
 
 	// And our mocks
 	wl_resource_get_user_data_fake.return_val = subsurface_data;
@@ -147,7 +152,7 @@ void test_subsurface_set_position__multiple_calls_updates_prev_value(void)
 	struct bz_subsurface *subsurface_data = bz_create_subsurface_data();
 	subsurface_data->parent = parent_data;
 	subsurface_data->surface = surface_data;
-	bz_list_append(parent_data->surface_stack, surface_data);
+	bz_list_append(parent_data->pending_state->surface_stack, surface_data);
 
 	// And our mocks
 	wl_resource_get_user_data_fake.return_val = subsurface_data;
@@ -175,9 +180,9 @@ void test_subsurface_place_above__is_buffered_on_parent_state(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	// struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	// struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
 	void *ret_vals[2] = { child1->subsurface, child3 };
@@ -185,10 +190,10 @@ void test_subsurface_place_above__is_buffered_on_parent_state(void)
 
 	// Run our test
 	bz_subsurface_implementation.place_above(nullptr, nullptr, nullptr);
-	TEST_ASSERT_EQUAL_INT(1, parent->pending_state->subsurface_states->length);
-	struct bz_subsurface_state *state = parent->pending_state->subsurface_states->head->data;
-	TEST_ASSERT_EQUAL_INT(BZ_SUBSURFACE_PLACE_ABOVE, state->placement);
-	TEST_ASSERT_EQUAL_INT(child3, state->sibling);
+	struct bz_list *pending = parent->pending_state->surface_stack;
+	struct bz_list *active  = parent->active_state->surface_stack;
+	TEST_ASSERT_TRUE(bz_list_get_index(pending, child1) > bz_list_get_index(pending, child3));
+	TEST_ASSERT_TRUE(bz_list_get_index(active, child3)  > bz_list_get_index(active, child1));
 
 	// Clean up
 	tear_down_subsurface_placement_test(parent);
@@ -198,9 +203,9 @@ void test_subsurface_place_above__cannot_place_relative_to_self(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	// struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	// struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	// struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	// struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
 	void *ret_vals[2] = { child1->subsurface, child1 };
@@ -220,9 +225,9 @@ void test_subsurface_place_above__cannot_place_relative_to_unrelated_surface(voi
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	// struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	// struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	// struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	// struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 	struct bz_surface *unrelated = bz_create_surface_data();
 
 	// And our mocks
@@ -244,9 +249,9 @@ void test_subsurface_place_above__can_be_relative_to_sibling(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	// struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	// struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
 	void *ret_vals[2] = { child1->subsurface, child2 };
@@ -254,10 +259,10 @@ void test_subsurface_place_above__can_be_relative_to_sibling(void)
 
 	// Run our test
 	bz_subsurface_implementation.place_above(nullptr, nullptr, nullptr);
-	TEST_ASSERT_EQUAL_INT(1, parent->pending_state->subsurface_states->length);
-	struct bz_subsurface_state *state = parent->pending_state->subsurface_states->head->data;
-	TEST_ASSERT_EQUAL_INT(BZ_SUBSURFACE_PLACE_ABOVE, state->placement);
-	TEST_ASSERT_EQUAL_INT(child2, state->sibling);
+	struct bz_list *pending = parent->pending_state->surface_stack;
+	struct bz_list *active = parent->active_state->surface_stack;
+	TEST_ASSERT_TRUE(bz_list_get_index(pending, child1) > bz_list_get_index(pending, child2));
+	TEST_ASSERT_TRUE(bz_list_get_index(active, child2)  > bz_list_get_index(active, child1));
 
 	// Clean up
 	tear_down_subsurface_placement_test(parent);
@@ -267,9 +272,9 @@ void test_subsurface_place_above__can_be_relative_to_parent(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	// struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	// struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	// struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	// struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
 	void *ret_vals[2] = { child1->subsurface, parent };
@@ -277,10 +282,10 @@ void test_subsurface_place_above__can_be_relative_to_parent(void)
 
 	// Run our test
 	bz_subsurface_implementation.place_above(nullptr, nullptr, nullptr);
-	TEST_ASSERT_EQUAL_INT(1, parent->pending_state->subsurface_states->length);
-	struct bz_subsurface_state *state = parent->pending_state->subsurface_states->head->data;
-	TEST_ASSERT_EQUAL_INT(BZ_SUBSURFACE_PLACE_ABOVE, state->placement);
-	TEST_ASSERT_EQUAL_INT(parent, state->sibling);
+	struct bz_list *pending = parent->pending_state->surface_stack;
+	struct bz_list *active = parent->active_state->surface_stack;
+	TEST_ASSERT_TRUE(bz_list_get_index(pending, child1) > bz_list_get_index(pending, parent));
+	TEST_ASSERT_TRUE(bz_list_get_index(active, child1)  > bz_list_get_index(active, parent));
 
 	// Clean up
 	tear_down_subsurface_placement_test(parent);
@@ -290,9 +295,9 @@ void test_subsurface_place_above__multiple_calls_updates_prev_value(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
 	void *ret_vals[4] = {
@@ -304,10 +309,10 @@ void test_subsurface_place_above__multiple_calls_updates_prev_value(void)
 	// Run our test
 	bz_subsurface_implementation.place_above(nullptr, nullptr, nullptr);
 	bz_subsurface_implementation.place_above(nullptr, nullptr, nullptr);
-	TEST_ASSERT_EQUAL_INT(1, parent->pending_state->subsurface_states->length);
-	struct bz_subsurface_state *state = parent->pending_state->subsurface_states->head->data;
-	TEST_ASSERT_EQUAL_INT(BZ_SUBSURFACE_PLACE_ABOVE, state->placement);
-	TEST_ASSERT_EQUAL_INT(child3, state->sibling);
+	struct bz_list *pending = parent->pending_state->surface_stack;
+	struct bz_list *active = parent->active_state->surface_stack;
+	TEST_ASSERT_TRUE(bz_list_get_index(pending, child1) > bz_list_get_index(pending, child3));
+	TEST_ASSERT_TRUE(bz_list_get_index(active, child3)  > bz_list_get_index(active, child1));
 
 	// Clean up
 	tear_down_subsurface_placement_test(parent);
@@ -322,20 +327,20 @@ void test_subsurface_place_below__is_buffered_on_parent_state(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	// struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	// struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
-	void *ret_vals[2] = { child1->subsurface, child3 };
+	void *ret_vals[2] = { child3->subsurface, child1 };
 	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 2);
 
 	// Run our test
 	bz_subsurface_implementation.place_below(nullptr, nullptr, nullptr);
-	TEST_ASSERT_EQUAL_INT(1, parent->pending_state->subsurface_states->length);
-	struct bz_subsurface_state *state = parent->pending_state->subsurface_states->head->data;
-	TEST_ASSERT_EQUAL_INT(BZ_SUBSURFACE_PLACE_BELOW, state->placement);
-	TEST_ASSERT_EQUAL_INT(child3, state->sibling);
+	struct bz_list *pending = parent->pending_state->surface_stack;
+	struct bz_list *active = parent->active_state->surface_stack;
+	TEST_ASSERT_TRUE(bz_list_get_index(pending, child3) < bz_list_get_index(pending, child1));
+	TEST_ASSERT_TRUE(bz_list_get_index(active, child1)  < bz_list_get_index(active, child3));
 
 	// Clean up
 	tear_down_subsurface_placement_test(parent);
@@ -345,9 +350,9 @@ void test_subsurface_place_below__cannot_place_relative_to_self(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	// struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	// struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	// struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	// struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
 	void *ret_vals[2] = { child1->subsurface, child1 };
@@ -367,9 +372,9 @@ void test_subsurface_place_below__cannot_place_relative_to_unrelated_surface(voi
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	// struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	// struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	// struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	// struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 	struct bz_surface *unrelated = bz_create_surface_data();
 
 	// And our mocks
@@ -391,20 +396,20 @@ void test_subsurface_place_below__can_be_relative_to_sibling(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	// struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	// struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
-	void *ret_vals[2] = { child1->subsurface, child2 };
+	void *ret_vals[2] = { child2->subsurface, child1 };
 	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 2);
 
 	// Run our test
 	bz_subsurface_implementation.place_below(nullptr, nullptr, nullptr);
-	TEST_ASSERT_EQUAL_INT(1, parent->pending_state->subsurface_states->length);
-	struct bz_subsurface_state *state = parent->pending_state->subsurface_states->head->data;
-	TEST_ASSERT_EQUAL_INT(BZ_SUBSURFACE_PLACE_BELOW, state->placement);
-	TEST_ASSERT_EQUAL_INT(child2, state->sibling);
+	struct bz_list *pending = parent->pending_state->surface_stack;
+	struct bz_list *active = parent->active_state->surface_stack;
+	TEST_ASSERT_TRUE(bz_list_get_index(pending, child2) < bz_list_get_index(pending, child1));
+	TEST_ASSERT_TRUE(bz_list_get_index(active, child1)  < bz_list_get_index(active, child2));
 
 	// Clean up
 	tear_down_subsurface_placement_test(parent);
@@ -414,9 +419,9 @@ void test_subsurface_place_below__can_be_relative_to_parent(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	// struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	// struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	// struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	// struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
 	void *ret_vals[2] = { child1->subsurface, parent };
@@ -424,10 +429,10 @@ void test_subsurface_place_below__can_be_relative_to_parent(void)
 
 	// Run our test
 	bz_subsurface_implementation.place_below(nullptr, nullptr, nullptr);
-	TEST_ASSERT_EQUAL_INT(1, parent->pending_state->subsurface_states->length);
-	struct bz_subsurface_state *state = parent->pending_state->subsurface_states->head->data;
-	TEST_ASSERT_EQUAL_INT(BZ_SUBSURFACE_PLACE_BELOW, state->placement);
-	TEST_ASSERT_EQUAL_INT(parent, state->sibling);
+	struct bz_list *pending = parent->pending_state->surface_stack;
+	struct bz_list *active = parent->active_state->surface_stack;
+	TEST_ASSERT_TRUE(bz_list_get_index(pending, child1) < bz_list_get_index(pending, parent));
+	TEST_ASSERT_TRUE(bz_list_get_index(active, parent)  < bz_list_get_index(active, child1));
 
 	// Clean up
 	tear_down_subsurface_placement_test(parent);
@@ -437,24 +442,24 @@ void test_subsurface_place_below__multiple_calls_updates_prev_value(void)
 {
 	// Set up our test data
 	struct bz_surface *parent = prep_subsurface_placement_test();
-	struct bz_surface *child1 = parent->surface_stack->head->next->data;
-	struct bz_surface *child2 = parent->surface_stack->head->next->next->data;
-	struct bz_surface *child3 = parent->surface_stack->head->next->next->next->data;
+	struct bz_surface *child1 = parent->pending_state->surface_stack->head->next->data;
+	struct bz_surface *child2 = parent->pending_state->surface_stack->head->next->next->data;
+	struct bz_surface *child3 = parent->pending_state->surface_stack->head->next->next->next->data;
 
 	// And our mocks
 	void *ret_vals[4] = {
-		child1->subsurface, child2, // First call
-		child1->subsurface, child3, // Second call
+		child3->subsurface, child2, // First call
+		child3->subsurface, child1, // Second call
 	};
 	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 4);
 
 	// Run our test
 	bz_subsurface_implementation.place_below(nullptr, nullptr, nullptr);
 	bz_subsurface_implementation.place_below(nullptr, nullptr, nullptr);
-	TEST_ASSERT_EQUAL_INT(1, parent->pending_state->subsurface_states->length);
-	struct bz_subsurface_state *state = parent->pending_state->subsurface_states->head->data;
-	TEST_ASSERT_EQUAL_INT(BZ_SUBSURFACE_PLACE_BELOW, state->placement);
-	TEST_ASSERT_EQUAL_INT(child3, state->sibling);
+	struct bz_list *pending = parent->pending_state->surface_stack;
+	struct bz_list *active = parent->active_state->surface_stack;
+	TEST_ASSERT_TRUE(bz_list_get_index(pending, child3) < bz_list_get_index(pending, child1));
+	TEST_ASSERT_TRUE(bz_list_get_index(active, child1)  < bz_list_get_index(active, child3));
 
 	// Clean up
 	tear_down_subsurface_placement_test(parent);
@@ -513,7 +518,8 @@ void test_subsurface_set_desync__updates_unreachable_CUs_in_queue(void)
 	struct bz_surface *parent = bz_create_surface_data();
 	struct bz_surface *child = bz_create_surface_data();
 	struct bz_subsurface *child_sub = bz_create_subsurface_data();
-	bz_list_append(parent->surface_stack, child);
+	bz_list_append(parent->pending_state->surface_stack, child);
+	bz_list_append(parent->active_state->surface_stack, child);
 	child_sub->is_sync = true;
 	child_sub->parent = parent;
 	child_sub->surface = child;

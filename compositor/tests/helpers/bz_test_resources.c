@@ -152,6 +152,7 @@ struct bz_surface *bz_create_surface_data(void)
 
 	data->pending_state = calloc(1, sizeof(*data->pending_state));
 	data->pending_state->frame_callbacks = bz_list_create();
+	data->pending_state->surface_stack = bz_list_create();
 	data->pending_state->surface_damage = bz_list_create();
 	data->pending_state->buffer_damage = bz_list_create();
 	data->pending_state->subsurface_states = bz_list_create();
@@ -161,13 +162,14 @@ struct bz_surface *bz_create_surface_data(void)
 
 	data->active_state  = calloc(1, sizeof(*data->active_state));
 	data->active_state->frame_callbacks = bz_list_create();
+	data->active_state->surface_stack = bz_list_create();
 	data->active_state->surface_damage = bz_list_create();
 	data->active_state->buffer_damage = bz_list_create();
 	data->active_state->subsurface_states = bz_list_create();
 	data->active_state->scale = 1;
 
-	data->surface_stack = bz_list_create();
-	bz_list_insert(data->surface_stack, data, nullptr);
+	bz_list_insert(data->pending_state->surface_stack, data, nullptr);
+	bz_list_insert(data->active_state->surface_stack, data, nullptr);
 
 	return data;
 }
@@ -177,6 +179,7 @@ void bz_free_surface_data(struct bz_surface *data)
 	if (data) {
 		if (data->pending_state) {
 			bz_list_free(data->pending_state->frame_callbacks, nullptr);
+			bz_list_free(data->pending_state->surface_stack, nullptr);
 			bz_list_free(data->pending_state->surface_damage, free);
 			bz_list_free(data->pending_state->buffer_damage, free);
 			bz_list_free(data->pending_state->opaque_region, free);
@@ -188,6 +191,7 @@ void bz_free_surface_data(struct bz_surface *data)
 		}
 		if (data->active_state) {
 			bz_list_free(data->active_state->frame_callbacks, nullptr);
+			bz_list_free(data->active_state->surface_stack, nullptr);
 			bz_list_free(data->active_state->surface_damage, free);
 			bz_list_free(data->active_state->buffer_damage, free);
 			bz_list_free(data->active_state->opaque_region, free);
@@ -199,9 +203,6 @@ void bz_free_surface_data(struct bz_surface *data)
 		}
 		if (data->content_updates) {
 			bz_list_free(data->content_updates, nullptr);
-		}
-		if (data->surface_stack) {
-			bz_list_free(data->surface_stack, nullptr);
 		}
 		free(data);
 	}

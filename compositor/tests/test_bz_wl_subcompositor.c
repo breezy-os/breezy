@@ -135,7 +135,8 @@ void test_get_subsurface__gets_linked_to_parent(void)
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
 	struct bz_subsurface *subsurface_data = wl_resource_set_implementation_fake.arg2_val;
 	TEST_ASSERT_EQUAL_PTR(parent_data, subsurface_data->parent);
-	TEST_ASSERT_TRUE(bz_list_contains(parent_data->surface_stack, surface_data));
+	TEST_ASSERT_TRUE(bz_list_contains(parent_data->pending_state->surface_stack, surface_data));
+	TEST_ASSERT_FALSE(bz_list_contains(parent_data->active_state->surface_stack, surface_data));
 
 	// Clean up
 	free(subsurface);
@@ -220,7 +221,7 @@ void test_get_subsurface__parent_descending_child_raises_error(void)
 	SET_RETURN_SEQ(wl_resource_get_user_data, surface_datas, 2);
 
 	// Make the parent a child of the surface.
-	bz_list_append(surface_data->surface_stack, parent_data);
+	bz_list_append(surface_data->pending_state->surface_stack, parent_data);
 
 	// Run our test
 	bz_subcompositor_implementation.get_subsurface(nullptr, nullptr, 0, nullptr, nullptr);

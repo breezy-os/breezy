@@ -31,6 +31,14 @@ struct bz_gbm_bo_data {
 	uint32_t fb_id;
 };
 
+struct bz_connector_data {
+	drmModeConnector *connector;
+	char *make;
+	char *model;
+	char *type;
+	int32_t index;
+};
+
 struct bz_drm_prop_ids {
 	uint32_t crtc_active;
 	uint32_t crtc_mode_id;

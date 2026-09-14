@@ -180,14 +180,16 @@ static void bz_input_process_pointer_motion_event(
 		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
 		if (focused_surf != nullptr) {
 			uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
-			int32_t x_pos = breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.position.x;
-			int32_t y_pos = breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.position.y;
+			wl_fixed_t x_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.position.x);
+			wl_fixed_t y_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.position.y);
 			struct wl_client *client = wl_resource_get_client(focused_surf->resource);
 			struct bz_client *client_data = wl_client_get_user_data(client);
 			struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
 				struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
 					wl_pointer_send_motion(pointer, timestamp, x_pos, y_pos);
-					wl_pointer_send_frame(pointer);
+					if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
+						wl_pointer_send_frame(pointer);
+					}
 				}
 			}
 		}
@@ -216,7 +218,9 @@ static void bz_input_process_pointer_button_event(
 		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
 			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
 				wl_pointer_send_button(pointer, serial, timestamp, button, state);
-				wl_pointer_send_frame(pointer);
+				if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
+					wl_pointer_send_frame(pointer);
+				}
 			}
 		}
 	}
@@ -240,8 +244,12 @@ static void bz_input_process_pointer_scroll_wheel_event(
 	if (sent_request) {
 		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
 			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
-				wl_pointer_send_axis_source(pointer, WL_POINTER_AXIS_SOURCE_WHEEL);
-				wl_pointer_send_frame(pointer);
+				if (wl_resource_get_version(pointer) >= WL_POINTER_AXIS_SOURCE_SINCE_VERSION) {
+					wl_pointer_send_axis_source(pointer, WL_POINTER_AXIS_SOURCE_WHEEL);
+				}
+				if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
+					wl_pointer_send_frame(pointer);
+				}
 			}
 		}
 	}
@@ -257,12 +265,14 @@ static bool bz_input_process_wheel_for_axis(
 		uint32_t wl_axis = axis == LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL
 			? WL_POINTER_AXIS_HORIZONTAL_SCROLL
 			: WL_POINTER_AXIS_VERTICAL_SCROLL;
-		double h_scroll_value = libinput_event_pointer_get_scroll_value(pt_event, axis);
+		wl_fixed_t h_scroll_value = wl_fixed_from_double(libinput_event_pointer_get_scroll_value(pt_event, axis));
 		double h_scroll_value120 = libinput_event_pointer_get_scroll_value_v120(pt_event, axis);
 		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
 			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
 				wl_pointer_send_axis(pointer, timestamp, wl_axis, h_scroll_value);
-				wl_pointer_send_axis_value120(pointer, wl_axis, h_scroll_value120);
+				if (wl_resource_get_version(pointer) >= WL_POINTER_AXIS_VALUE120_SINCE_VERSION) {
+					wl_pointer_send_axis_value120(pointer, wl_axis, h_scroll_value120);
+				}
 			}
 		}
 		return true;

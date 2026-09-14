@@ -73,6 +73,7 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu);
 static void bz_apply_subsurface_cu_state(struct bz_list *subsurface_states, struct bz_surface *surface);
 static void bz_free_content_update(struct bz_content_update *content_update);
 static void *bz_clone_region_mutation(void *input);
+static void bz_sever_child_from_parent(struct bz_surface *child);
 
 // -- wl_subsurface --
 
@@ -96,7 +97,7 @@ static bool bz_subsurface_state_matches(void *list_item, void *match_data);
 /** Gets executed whenever a client binds to wl_compositor. */
 void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_compositor.");
+	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_compositor with version %d.", version);
 
 	struct wl_resource *res = wl_resource_create(client, &wl_compositor_interface, version, id);
 	if (res == nullptr) {
@@ -138,17 +139,12 @@ static void bz_compositor_create_surface(
 		wl_client_post_no_memory(client);
 		goto content_updates_alloc_failed;
 	}
-	struct bz_list *surface_stack = bz_list_create();
-	if (surface_stack == nullptr) {
-		wl_client_post_no_memory(client);
-		goto surface_stack_alloc_failed;
-	}
 
 	// Create the resource, bound to the data
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&wl_surface_interface,
-		BZ_SURFACE_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {
@@ -169,20 +165,18 @@ static void bz_compositor_create_surface(
 	surface->pending_state = pending;
 	surface->active_state = active;
 	surface->content_updates = content_updates;
-	surface->surface_stack = surface_stack;
 	surface->renderable.position.x = 0;
 	surface->renderable.position.y = 0;
 
 	// Starts with only itself in its stack of surfaces.
-	bz_list_append(surface->surface_stack, surface);
+	bz_list_append(surface->pending_state->surface_stack, surface);
+	bz_list_append(surface->active_state->surface_stack, surface);
 
 	// Everything succeeded!
 	return;
 
 	// Error cleanups
 	resource_failed:
-		bz_list_free(surface_stack, nullptr);
-	surface_stack_alloc_failed:
 		bz_list_free(content_updates, nullptr);
 	content_updates_alloc_failed:
 		bz_free_surface_state(active);
@@ -215,7 +209,7 @@ static void bz_compositor_create_region(
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&wl_region_interface,
-		BZ_REGION_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {
@@ -258,6 +252,11 @@ static struct bz_surface_state *bz_init_surface_state(void)
 		goto callback_list_failed;
 	}
 
+	state->surface_stack = bz_list_create();
+	if (state->surface_stack == nullptr) {
+		goto surface_stack_failed;
+	}
+
 	state->surface_damage = bz_list_create();
 	if (state->surface_damage == nullptr) {
 		goto surface_damage_failed;
@@ -290,6 +289,8 @@ static struct bz_surface_state *bz_init_surface_state(void)
 	buffer_damage_failed:
 		bz_list_free(state->surface_damage, nullptr);
 	surface_damage_failed:
+		bz_list_free(state->surface_stack, nullptr);
+	surface_stack_failed:
 		bz_list_free(state->frame_callbacks, nullptr);
 	callback_list_failed:
 		free(state);
@@ -304,6 +305,9 @@ static void bz_free_surface_state(struct bz_surface_state *state)
 
 	if (state->frame_callbacks != nullptr) {
 		bz_list_free(state->frame_callbacks, nullptr);
+	}
+	if (state->frame_callbacks != nullptr) {
+		bz_list_free(state->surface_stack, nullptr);
 	}
 	if (state->surface_damage != nullptr) {
 		bz_list_free(state->surface_damage, free);
@@ -333,7 +337,7 @@ static void bz_free_surface_state(struct bz_surface_state *state)
 /** Gets executed whenever a client binds to wl_subcompositor. */
 void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_subcompositor.");
+	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_subcompositor with version %d.", version);
 
 	struct wl_resource *res = wl_resource_create(client, &wl_subcompositor_interface, version, id);
 	if (res == nullptr) {
@@ -398,7 +402,7 @@ static void bz_subcompositor_get_subsurface(
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&wl_subsurface_interface,
-		BZ_SUBSURFACE_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {
@@ -421,7 +425,7 @@ static void bz_subcompositor_get_subsurface(
 	// And update other, related data
 	surface_data->role = BZ_SURF_ROLE_WL_SUBSURFACE;
 	surface_data->subsurface = subsurface_data;
-	bz_list_append(parent_data->surface_stack, surface_data);
+	bz_list_append(parent_data->pending_state->surface_stack, surface_data);
 
 	// Everything succeeded!
 	return;
@@ -438,7 +442,7 @@ static bool bz_surface_stack_contains_surface(
 	struct bz_surface *source,
 	struct bz_surface *target
 ) {
-	struct bz_surface *current; bz_list_foreach(current, source->surface_stack) {
+	struct bz_surface *current; bz_list_foreach(current, source->pending_state->surface_stack) {
 		if (current == source) { continue; }
 		if (current == target || bz_surface_stack_contains_surface(current, target)) {
 			return true;
@@ -540,9 +544,32 @@ void bz_surface_dtor(struct wl_resource *data)
 {
 	struct bz_surface *bzsurf = wl_resource_get_user_data(data);
 
-	// If a wl_surface was destroyed before its (subsurface) role, sever ties with our parent.
-	if (bzsurf->role == BZ_SURF_ROLE_WL_SUBSURFACE && bzsurf->subsurface != nullptr && bzsurf->subsurface->parent != nullptr) {
-		bz_list_remove(bzsurf->subsurface->parent->surface_stack, bzsurf, nullptr);
+	// If this is destroying a child, remove it from its parent.
+	bz_sever_child_from_parent(bzsurf); // No-op if not a child.
+
+	// If this is destroying a parent, remove its children's reference to it.
+	struct bz_surface *child;
+	bz_list_foreach(child, bzsurf->pending_state->surface_stack) {
+		if (child != bzsurf && child->subsurface != nullptr) {
+			child->subsurface->parent = nullptr;
+		}
+	}
+	 bz_list_foreach(child, bzsurf->active_state->surface_stack) {
+		if (child != bzsurf && child->subsurface != nullptr) {
+			child->subsurface->parent = nullptr;
+		}
+	}
+	struct bz_content_update *cu; bz_list_foreach(cu, bzsurf->content_updates) {
+		bz_list_foreach(child, cu->state->surface_stack) {
+			if (child != bzsurf && child->subsurface != nullptr) {
+				child->subsurface->parent = nullptr;
+			}
+		}
+	}
+
+	// If it's a subsurface, remove the subsurface's reference to this resource.
+	if (bzsurf->role == BZ_SURF_ROLE_WL_SUBSURFACE && bzsurf->subsurface != nullptr) {
+		bzsurf->subsurface->surface = nullptr;
 	}
 
 	// If it's an XDG surface, sever the link between the two.
@@ -555,19 +582,12 @@ void bz_surface_dtor(struct wl_resource *data)
 		bzsurf->xdgpopup->wlsurface = nullptr;
 	}
 
-	// Clear the surface_stack, but first unlink all the children from this surface.
-	struct bz_surface *subsurface; bz_list_foreach(subsurface, bzsurf->surface_stack) {
-		if (subsurface == bzsurf) { continue; }
-		subsurface->subsurface->parent = nullptr;
-	}
-	bz_list_free(bzsurf->surface_stack, nullptr);
-
 	// Free our allocated state
 	bz_free_surface_state(bzsurf->pending_state);
 	bz_free_surface_state(bzsurf->active_state);
-	struct bz_content_update *cu;
-	while ((cu = bz_list_shift(bzsurf->content_updates)) != nullptr) {
-		bz_free_content_update(cu);
+	struct bz_content_update *curr_cu;
+	while ((curr_cu = bz_list_shift(bzsurf->content_updates)) != nullptr) {
+		bz_free_content_update(curr_cu);
 	}
 	bz_list_free(bzsurf->content_updates, nullptr);
 
@@ -629,7 +649,15 @@ static void bz_surface_attach(
 ) {
 	struct bz_surface *surf_data = wl_resource_get_user_data(resource);
 	surf_data->pending_state->buffer = buffer;
-	// TODO: accommodate x and y. Consider how this would apply for both XDG surfaces and cursors.
+
+	if (wl_resource_get_version(resource) < 5) {
+		// x and y can only be used if the version is less than 5
+		// TODO: accommodate x and y. Consider how this would apply for both XDG surfaces and cursors.
+	} else if (x != 0 || y != 0) {
+		// If a non-zero x or y value is given for >= version 5, then it's a protocol error
+		wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_OFFSET,
+			"Cannot provide x and y to attach() for wl_surface versions >= 5.");
+	}
 }
 
 static void bz_surface_damage(
@@ -782,6 +810,8 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	}
 	cu_state->buffer = bzsurf->pending_state->buffer;
 	bz_list_move_to_end(bzsurf->pending_state->frame_callbacks, cu_state->frame_callbacks);
+	free(cu_state->surface_stack);
+	cu_state->surface_stack = bz_list_clone(bzsurf->pending_state->surface_stack, nullptr);
 	bz_list_move_to_end(bzsurf->pending_state->subsurface_states, cu_state->subsurface_states);
 	bz_list_move_to_end(bzsurf->pending_state->surface_damage, cu_state->surface_damage);
 	bz_list_move_to_end(bzsurf->pending_state->buffer_damage, cu_state->buffer_damage);
@@ -827,7 +857,7 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 		bz_list_append(cu->dependencies, preceding_cu);
 	}
 	// This CU claims on all SCU's at the end of each direct child's queue.
-	struct bz_surface *child; bz_list_foreach(child, bzsurf->surface_stack) {
+	struct bz_surface *child; bz_list_foreach(child, bzsurf->pending_state->surface_stack) {
 		if (child == bzsurf) { continue; } // Ignore self.
 		if (child->content_updates->tail != nullptr) {
 			struct bz_content_update *child_cu = child->content_updates->tail->data;
@@ -840,7 +870,7 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 
 	// Walk the content update queue to try and resolve any candidates. If the current commit
 	//   created an SCU, then there's no reason to walk because it didn't create a candidate.
-	if (bzsurf->role != BZ_SURF_ROLE_WL_SUBSURFACE || !bzsurf->subsurface->is_sync) {
+	if (bzsurf->role != BZ_SURF_ROLE_WL_SUBSURFACE || (bzsurf->subsurface && !bzsurf->subsurface->is_sync)) {
 		bz_walk_content_update_queue(cu);
 	}
 
@@ -923,6 +953,7 @@ static void bz_surface_offset(
 ) {
 	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.offset not implemented");
 	// TODO
+	// TODO: (since version 5)
 	// TODO: Make sure to ignore this request for subsurfaces.
 }
 
@@ -1021,11 +1052,11 @@ static void bz_apply_buffer_damage(
 static bool bz_is_effectively_sync(struct bz_surface *surface_data)
 {
 	// Only subsurfaces can be sync.
-	if (surface_data->role != BZ_SURF_ROLE_WL_SUBSURFACE) {
+	if (surface_data->role != BZ_SURF_ROLE_WL_SUBSURFACE || surface_data->subsurface == nullptr) {
 		return false;
 	}
 	// If it's sync ... then it's sync.
-	if (surface_data->subsurface->is_sync) {
+	if (surface_data->subsurface->is_sync) { // TODO-dl12: CLion gave "points to zero page" here.
 		return true;
 	}
 	// If any of its parents are sync, then it's sync.
@@ -1113,6 +1144,11 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	struct bz_surface *surface = cu->surface;
 	surface->active_state->buffer = cu->state->buffer;
 	bz_list_move_to_end(cu->state->frame_callbacks, surface->active_state->frame_callbacks);
+	// Surface stack
+	if (surface->active_state->surface_stack != nullptr) {
+		bz_list_free(surface->active_state->surface_stack, nullptr);
+	}
+	surface->active_state->surface_stack = bz_list_clone(cu->state->surface_stack, nullptr);
 	bz_apply_subsurface_cu_state(cu->state->subsurface_states, surface);
 	// Move damage
 	bz_list_clear(surface->active_state->surface_damage, free);
@@ -1122,14 +1158,24 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	// Move opaque/input regions
 	if (cu->state->dirty_opaque_region) {
 		surface->active_state->dirty_opaque_region = true;
+		if (surface->active_state->opaque_region != nullptr) {
+			bz_list_free(surface->active_state->opaque_region, free);
+		}
 		surface->active_state->opaque_region = bz_list_clone(cu->state->opaque_region, bz_clone_region_mutation);
 	}
 	if (cu->state->dirty_input_region) {
 		surface->active_state->dirty_input_region = true;
+		if (surface->active_state->input_region != nullptr) {
+			bz_list_free(surface->active_state->input_region, free);
+		}
 		surface->active_state->input_region = bz_list_clone(cu->state->input_region, bz_clone_region_mutation);
 	}
+	// Viewporter stuff
+	if (surface->active_state->vp_source) { free(surface->active_state->vp_source); }
+	if (surface->active_state->vp_dest)   { free(surface->active_state->vp_dest); }
 	surface->active_state->vp_source = bz_clone_rect_dbl(cu->state->vp_source);
 	surface->active_state->vp_dest = bz_clone_dimension(cu->state->vp_dest);
+	// Buffer transform and scale
 	surface->active_state->transform = cu->state->transform;
 	surface->active_state->scale = cu->state->scale;
 
@@ -1170,25 +1216,6 @@ static void bz_apply_subsurface_cu_state(
 		// Update the relative render position
 		subsurf_state->subsurface->surface->renderable.position.x = subsurf_state->position.x;
 		subsurf_state->subsurface->surface->renderable.position.y = subsurf_state->position.y;
-		// Update the z-index relative to its other siblings
-		if (subsurf_state->sibling != nullptr) {
-			if (subsurf_state->placement == BZ_SUBSURFACE_PLACE_BELOW) {
-				// Subsurface should be placed BEFORE the sibling in parent's stack
-				bz_list_remove(surface->surface_stack, subsurf_state->subsurface, nullptr);
-				struct bz_surface *after_sibling = nullptr;
-				struct bz_surface *data; bz_list_foreach(data, surface->surface_stack) {
-					if (data == subsurf_state->sibling) {
-						break;
-					}
-					after_sibling = data;
-				}
-				bz_list_insert(surface->surface_stack, subsurf_state->subsurface, after_sibling);
-			} else if (subsurf_state->placement == BZ_SUBSURFACE_PLACE_ABOVE) {
-				// Surface should be placed AFTER the sibling in parent's stack
-				bz_list_remove(surface->surface_stack, subsurf_state->subsurface, nullptr);
-				bz_list_insert(surface->surface_stack, subsurf_state->subsurface, subsurf_state->sibling);
-			}
-		}
 	}
 }
 
@@ -1223,6 +1250,39 @@ static void *bz_clone_region_mutation(void *input)
 	return result;
 }
 
+static void bz_sever_child_from_parent(struct bz_surface *child)
+{
+	// Data validation. Return quietly so we don't need to repeat these checks everywhere we call this.
+	if (child == nullptr) {
+		return;
+	}
+	if (child->role != BZ_SURF_ROLE_WL_SUBSURFACE || child->subsurface == nullptr || child->subsurface->parent == nullptr) {
+		return;
+	}
+
+	struct bz_surface *parent = child->subsurface->parent;
+
+	// (We'll be iterating on this a few times below.)
+	struct bz_content_update *cu;
+
+	// Remove child references from parent surface stacks
+	bz_list_remove(parent->pending_state->surface_stack, child, nullptr);
+	bz_list_remove(parent->active_state->surface_stack, child, nullptr);
+	bz_list_foreach(cu, parent->content_updates) {
+		bz_list_remove(cu->state->surface_stack, child, nullptr);
+	}
+
+	// Remove child subsurface state updates from parent
+	bz_list_filter(parent->pending_state->subsurface_states, child, bz_subsurface_state_matches, free);
+	bz_list_filter(parent->active_state->subsurface_states, child, bz_subsurface_state_matches, free);
+	bz_list_foreach(cu, parent->content_updates) {
+		bz_list_filter(cu->state->subsurface_states, child, bz_subsurface_state_matches, free);
+	}
+
+	// Remove references to each other.
+	child->subsurface->parent = nullptr;
+}
+
 
 // =================================================================================================
 //  wl_subsurface
@@ -1232,19 +1292,13 @@ void bz_subsurface_dtor(struct wl_resource *subsurface)
 {
 	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(subsurface);
 
-	// Sever the ties to its parent (if not already done by the parent surface dtor).
-	struct bz_surface *parent = subsurface_data->parent;
-	if (parent != nullptr) {
-		bz_list_remove(parent->surface_stack, subsurface_data->surface, nullptr);
-		struct bz_list *subsurface_states = parent->pending_state->subsurface_states;
-		bz_list_filter(subsurface_states, subsurface_data, bz_subsurface_state_matches, free);
-		struct bz_content_update *cu; bz_list_foreach(cu, parent->content_updates) {
-			struct bz_list *subsurface_states = cu->state->subsurface_states;
-			bz_list_filter(subsurface_states, subsurface_data, bz_subsurface_state_matches, free);
-		}
-	}
+	if (subsurface_data->surface != nullptr) {
+		// Sever the ties to its parent (if not already done by the parent surface dtor).
+		bz_sever_child_from_parent(subsurface_data->surface);
 
-	subsurface_data->surface->subsurface = nullptr;
+		// Sever the wl_surface ties to this resource.
+		subsurface_data->surface->subsurface = nullptr;
+	}
 
 	free(subsurface_data);
 }
@@ -1301,7 +1355,7 @@ static void bz_subsurface_place_above(
 	}
 
 	// Make sure the given sibling is in the parent's surface stack.
-	if (!bz_list_contains(subsurface_data->parent->surface_stack, sibling_data)) {
+	if (!bz_list_contains(subsurface_data->parent->pending_state->surface_stack, sibling_data)) {
 		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
 			"Sibling not found in parent surface.");
 		goto validation_failure;
@@ -1314,9 +1368,10 @@ static void bz_subsurface_place_above(
 		return;
 	}
 
-	// Make the change
-	state->placement = BZ_SUBSURFACE_PLACE_ABOVE;
-	state->sibling = sibling_data;
+	// Make the change. Surface should be placed AFTER the sibling in parent's stack
+	struct bz_list *parent_stack = subsurface_data->parent->pending_state->surface_stack;
+	bz_list_remove(parent_stack, subsurface_data->surface, nullptr);
+	bz_list_insert(parent_stack, subsurface_data->surface, sibling_data);
 
 	return;
 
@@ -1340,7 +1395,7 @@ static void bz_subsurface_place_below(
 	}
 
 	// Make sure the given sibling is in the parent's surface stack.
-	if (!bz_list_contains(subsurface_data->parent->surface_stack, sibling_data)) {
+	if (!bz_list_contains(subsurface_data->parent->pending_state->surface_stack, sibling_data)) {
 		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
 			"Sibling not found in parent surface.");
 		goto validation_failure;
@@ -1354,8 +1409,17 @@ static void bz_subsurface_place_below(
 	}
 
 	// Make the change
-	state->placement = BZ_SUBSURFACE_PLACE_BELOW;
-	state->sibling = sibling_data;
+	// Subsurface should be placed BEFORE the sibling in parent's stack
+	struct bz_list *parent_stack = subsurface_data->parent->pending_state->surface_stack;
+	bz_list_remove(parent_stack, subsurface_data->surface, nullptr);
+	struct bz_surface *after_sibling = nullptr;
+	struct bz_surface *data; bz_list_foreach(data, parent_stack) {
+		if (data == sibling_data) {
+			break;
+		}
+		after_sibling = data;
+	}
+	bz_list_insert(parent_stack, subsurface_data->surface, after_sibling);
 
 	return;
 

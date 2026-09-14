@@ -470,8 +470,8 @@ static void bz_pointer_motion(
 	wl_fixed_t surface_y
 ) {
 	struct bz_seat *seat_data = data;
-	seat_data->globals->window->circle_center.x = surface_x;
-	seat_data->globals->window->circle_center.y = surface_y;
+	seat_data->globals->window->circle_center.x = wl_fixed_to_int(surface_x);
+	seat_data->globals->window->circle_center.y = wl_fixed_to_int(surface_y);
 }
 
 static void bz_pointer_button(
@@ -509,7 +509,7 @@ static void bz_pointer_axis(
 ) {
 	struct bz_seat *seat_data = data;
 	struct bz_application_window *window = seat_data->globals->window;
-	window->radius = bz_clamp(window->radius + (value / 2), 20, 150);
+	window->radius = bz_clamp(window->radius + (wl_fixed_to_double(value) / 2), 20, 150);
 }
 
 static void bz_pointer_frame(void *data, struct wl_pointer *wl_pointer) {

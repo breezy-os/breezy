@@ -38,9 +38,7 @@ void setUp(void)
 	bz_log_initialize(BZ_LOG_OFF);
 }
 
-void tearDown(void)
-{
-}
+void tearDown(void) {}
 
 
 // =================================================================================================
@@ -762,6 +760,39 @@ void test_list_contains__returns_true_for_found(void)
 
 
 // =================================================================================================
+//  Test bz_list_get_index()
+// -------------------------------------------------------------------------------------------------
+
+void test_list_get_index__returns_neg1_for_uninitialized(void)
+{
+	int search_val = 5;
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_get_index(nullptr, &search_val));
+}
+
+void test_list_get_index__returns_correct_index(void)
+{
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+	TEST_ASSERT_EQUAL_INT(0, bz_list_get_index(list, &val1));
+	TEST_ASSERT_EQUAL_INT(1, bz_list_get_index(list, &val2));
+	TEST_ASSERT_EQUAL_INT(2, bz_list_get_index(list, &val3));
+	bz_list_free(list, nullptr);
+}
+
+void test_list_get_index__returns_neg1_for_not_found(void)
+{
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; // Not added
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_get_index(list, &val3));
+	bz_list_free(list, nullptr);
+}
+
+
+// =================================================================================================
 //  Test bz_list_get_neighbor()
 // -------------------------------------------------------------------------------------------------
 
@@ -1064,21 +1095,27 @@ void test_list_move_item_to_end__returns_neg2_when_list_empty(void)
 //  Test bz_list_clone()
 // -------------------------------------------------------------------------------------------------
 
-void test_list_clone_returns_null_for_uninitialized(void)
+void test_list_clone__returns_null_for_uninitialized(void)
 {
 	const void *retval = bz_list_clone(nullptr, clone_int);
 	TEST_ASSERT_NULL(retval);
 }
 
-void test_list_clone_returns_null_for_null_clone_fn(void)
+void test_list_clone__shallow_for_null_clone_fn(void)
 {
 	struct bz_list *list = bz_list_create();
-	const void *retval = bz_list_clone(list, nullptr);
-	TEST_ASSERT_NULL(retval);
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+	struct bz_list *retval = bz_list_clone(list, nullptr);
+	TEST_ASSERT_NOT_NULL(retval);
+	TEST_ASSERT_EQUAL_INT(3, retval->length);
+	TEST_ASSERT_EQUAL_PTR(&val1, retval->head->data);
+	bz_list_free(retval, nullptr);
 	bz_list_free(list, nullptr);
 }
 
-void test_list_clone_returns_different_list(void)
+void test_list_clone__returns_different_list(void)
 {
 	struct bz_list *list = bz_list_create();
 	struct bz_list *clone = bz_list_clone(list, clone_int);
@@ -1088,7 +1125,7 @@ void test_list_clone_returns_different_list(void)
 	bz_list_free(clone, nullptr);
 }
 
-void test_list_clone_returns_different_but_equal_values(void)
+void test_list_clone__returns_different_but_equal_values(void)
 {
 	// Create our initial data
 	int *one = malloc(sizeof(*one));
@@ -1407,6 +1444,11 @@ int main(void) {
 	RUN_TEST(test_list_contains__returns_false_for_not_found);
 	RUN_TEST(test_list_contains__returns_true_for_found);
 
+	// Test bz_list_get_index()
+	RUN_TEST(test_list_get_index__returns_neg1_for_uninitialized);
+	RUN_TEST(test_list_get_index__returns_correct_index);
+	RUN_TEST(test_list_get_index__returns_neg1_for_not_found);
+
 	// Test bz_list_get_neighbor()
 	RUN_TEST(test_list_get_neighbor_returns_null_for_uninitialized);
 	RUN_TEST(test_list_get_neighbor_returns_null_for_not_found);
@@ -1429,10 +1471,10 @@ int main(void) {
 	RUN_TEST(test_list_move_item_to_end__returns_neg2_when_list_empty);
 
 	// Test bz_list_clone()
-	RUN_TEST(test_list_clone_returns_null_for_uninitialized);
-	RUN_TEST(test_list_clone_returns_null_for_null_clone_fn);
-	RUN_TEST(test_list_clone_returns_different_list);
-	RUN_TEST(test_list_clone_returns_different_but_equal_values);
+	RUN_TEST(test_list_clone__returns_null_for_uninitialized);
+	RUN_TEST(test_list_clone__shallow_for_null_clone_fn);
+	RUN_TEST(test_list_clone__returns_different_list);
+	RUN_TEST(test_list_clone__returns_different_but_equal_values);
 
 	// Test bz_list_foreach() macro
 	RUN_TEST(test_list_foreach__basic_iteration);

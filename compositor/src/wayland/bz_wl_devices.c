@@ -89,7 +89,7 @@ void bz_seat_dtor(struct wl_resource *data)
 /** Gets executed whenever a client binds to wl_seat. */
 void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DEVICES, "Binding a client to wl_seat.");
+	bz_debug(BZ_LOG_WL_DEVICES, "Binding a client to wl_seat with version %d.", version);
 
 	// Allocate our user data
 	struct bz_wl_seat *seat_data = calloc(1, sizeof(*seat_data));
@@ -135,7 +135,9 @@ void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version,
 	uint32_t capabilities =
 		(client_data->breezy->input.keyboard_count > 0 ? WL_SEAT_CAPABILITY_KEYBOARD : 0) |
 		(client_data->breezy->input.pointer_count  > 0 ? WL_SEAT_CAPABILITY_POINTER  : 0);
-	wl_seat_send_name(res, "breezy-seat"); // We only support 1 seat for now, hence a hardcoded name
+	if (wl_resource_get_version(res) >= WL_SEAT_NAME_SINCE_VERSION) {
+		wl_seat_send_name(res, "breezy-seat"); // We only support 1 seat for now, hence a hardcoded name
+	}
 	wl_seat_send_capabilities(res, capabilities);
 
 	// Success!
@@ -181,7 +183,7 @@ static void bz_seat_get_pointer(
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&wl_pointer_interface,
-		BZ_POINTER_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {
@@ -232,7 +234,7 @@ static void bz_seat_get_keyboard(
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&wl_keyboard_interface,
-		BZ_KEYBOARD_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {
@@ -266,7 +268,9 @@ static void bz_seat_get_keyboard(
 	free(keymap);
 
 	// Send the initial "repeat_info" event. Just sane defaults for now: 25Hz rate, 600ms delay
-	wl_keyboard_send_repeat_info(res, 25, 600);
+	if (wl_resource_get_version(res) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION) {
+		wl_keyboard_send_repeat_info(res, 25, 600);
+	}
 
 	// If the active/focused surface belongs to the current client, then we should also send it the
 	//   keyboard "enter + modifiers" events.
@@ -425,7 +429,7 @@ static void bz_keyboard_release(struct wl_client *client, struct wl_resource *re
 /** Gets executed whenever a client binds to wl_output. */
 void bz_output_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DEVICES, "Binding a client to wl_output.");
+	bz_debug(BZ_LOG_WL_DEVICES, "Binding a client to wl_output with version %d.", version);
 
 	struct wl_resource *res = wl_resource_create(client, &wl_output_interface, version, id);
 	if (res == nullptr) {
@@ -433,17 +437,33 @@ void bz_output_constructor(struct wl_client *client, void *data, uint32_t versio
 		return;
 	}
 
-	wl_resource_set_implementation(res, &bz_output_implementation, nullptr, nullptr);
+	struct bz_output *output = data;
+	wl_resource_set_implementation(res, &bz_output_implementation, output, nullptr);
 
 	// Emit events describing the output.
-	// TODO-dl12: Currently just filler data Some of this we can get from the DRM mode connector.
-	struct bz_breezy *breezy = data;
-	wl_output_send_geometry(res, 0, 0, 500, 330, WL_OUTPUT_SUBPIXEL_UNKNOWN, "Dell", "Monitor", WL_OUTPUT_TRANSFORM_NORMAL);
-	wl_output_send_mode(res, WL_OUTPUT_MODE_CURRENT, breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay, breezy->drm.mode_info.vrefresh);
-	wl_output_send_scale(res, 1);
-	wl_output_send_name(res, breezy->drm.mode_info.name); // TODO: This isn't a good name..
-	// wl_output_send_description(res, "I am a monitor.");
-	wl_output_send_done(res);
+	wl_output_send_geometry(res,
+		output->position.x,
+		output->position.y,
+		output->physical_size.w,
+		output->physical_size.h,
+		output->subpixel,
+		output->make,
+		output->model,
+		output->transform
+	);
+	wl_output_send_mode(res, WL_OUTPUT_MODE_CURRENT, output->size.w, output->size.h, output->refresh_rate);
+	if (wl_resource_get_version(res) >= WL_OUTPUT_SCALE_SINCE_VERSION) {
+		wl_output_send_scale(res, 1);
+	}
+	if (wl_resource_get_version(res) >= WL_OUTPUT_NAME_SINCE_VERSION) {
+		wl_output_send_name(res, output->name); // TODO: This isn't a good name..
+	}
+	if (wl_resource_get_version(res) >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION) {
+		wl_output_send_description(res, output->description);
+	}
+	if (wl_resource_get_version(res) >= WL_OUTPUT_DONE_SINCE_VERSION) {
+		wl_output_send_done(res);
+	}
 }
 
 const struct wl_output_interface bz_output_implementation = {
@@ -463,7 +483,7 @@ static void bz_output_release(struct wl_client *client, struct wl_resource *reso
 /** Gets executed whenever a client binds to wl_data_device_manager. */
 void bz_data_device_manager_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DEVICES, "Binding a client to wl_data_device_manager.");
+	bz_debug(BZ_LOG_WL_DEVICES, "Binding a client to wl_data_device_manager with version %d.", version);
 
 	struct wl_resource *res = wl_resource_create(
 		client,
@@ -510,7 +530,7 @@ static void bz_data_device_manager_get_data_device(
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&wl_data_device_interface,
-		BZ_DATA_DEVICE_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {

@@ -103,7 +103,6 @@ void test_create_surface__initializes_properly(void)
 	TEST_ASSERT_NOT_NULL(surface_data->pending_state);
 	TEST_ASSERT_NOT_NULL(surface_data->active_state);
 	TEST_ASSERT_NOT_NULL(surface_data->content_updates);
-	TEST_ASSERT_NOT_NULL(surface_data->surface_stack);
 
 	// Cleanup
 	free(surface);

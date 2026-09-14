@@ -65,7 +65,7 @@ static void bz_xdg_toplevel_set_minimized(struct wl_client *client, struct wl_re
 /** Gets executed whenever a client binds to xdg_wm_base. */
 void bz_xdg_wm_base_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_XDG_SHELL, "Binding a client to xdg_wm_base.");
+	bz_debug(BZ_LOG_WL_XDG_SHELL, "Binding a client to xdg_wm_base with version %d.", version);
 
 	struct wl_resource *res = wl_resource_create(client, &xdg_wm_base_interface, version, id);
 	if (res == nullptr) {
@@ -122,7 +122,7 @@ static void bz_xdg_wm_base_get_xdg_surface(
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&xdg_surface_interface,
-		BZ_XDG_SURFACE_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {
@@ -233,7 +233,7 @@ static void bz_xdg_surface_get_toplevel(
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&xdg_toplevel_interface,
-		BZ_XDG_TOPLEVEL_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {
@@ -378,11 +378,14 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		// Send initial state values
 		//   wl_surface_send_preferred_buffer_scale(resource, 1);
 		//   wl_surface_send_preferred_buffer_transform(resource, 0);
-		xdg_toplevel_send_configure_bounds(
-			bzsurf->xdgtoplevel->resource,
-			configevt->toplevel.max_size.w,
-			configevt->toplevel.max_size.h
-		);
+
+		if (wl_resource_get_version(bzsurf->xdgtoplevel->resource) >= XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION) {
+			xdg_toplevel_send_configure_bounds(
+				bzsurf->xdgtoplevel->resource,
+				configevt->toplevel.max_size.w,
+				configevt->toplevel.max_size.h
+			);
+		}
 		xdg_toplevel_send_configure(
 			bzsurf->xdgtoplevel->resource,
 			configevt->toplevel.recommended_size.w,
