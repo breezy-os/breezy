@@ -252,7 +252,9 @@ static void bz_mgmt_change_pointer_focus(
 		struct bz_wl_seat *seat; bz_list_foreach(seat, orig_client_data->seats) {
 			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
 				wl_pointer_send_leave(pointer, serial, orig_surface->resource);
-				wl_pointer_send_frame(pointer);
+				if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
+					wl_pointer_send_frame(pointer);
+				}
 			}
 		}
 	}
@@ -261,14 +263,16 @@ static void bz_mgmt_change_pointer_focus(
 	if (new_surface != nullptr) {
 		struct wl_client *new_client = wl_resource_get_client(new_surface->resource);
 		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
-		int32_t x_pos = mgmt->last_cursor_loc.x - new_surface->renderable.position.x;
-		int32_t y_pos = mgmt->last_cursor_loc.y - new_surface->renderable.position.y;
+		wl_fixed_t x_pos = wl_fixed_from_int(mgmt->last_cursor_loc.x - new_surface->renderable.position.x);
+		wl_fixed_t y_pos = wl_fixed_from_int(mgmt->last_cursor_loc.y - new_surface->renderable.position.y);
 		uint32_t serial = wl_display_next_serial(new_client_data->breezy->wayland.display);
 		new_client_data->last_enter_serial = serial;
 		struct bz_wl_seat *seat; bz_list_foreach(seat, new_client_data->seats) {
 			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
 				wl_pointer_send_enter(pointer, serial, new_surface->resource, x_pos, y_pos);
-				wl_pointer_send_frame(pointer);
+				if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
+					wl_pointer_send_frame(pointer);
+				}
 			}
 		}
 	}

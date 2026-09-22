@@ -7,12 +7,16 @@
 
 #include <wayland-server.h>
 #include <xdg-shell-server-protocol.h>
+#include <viewporter-server-protocol.h>
+#include <xdg-output-unstable-v1-server-protocol.h>
 
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
+#include "breezy/bz_wp_viewporter.h"
+#include "breezy/bz_xdg_output.h"
 #include "breezy/bz_xdg_shell.h"
 
 
@@ -29,10 +33,12 @@ static void bz_wayland_handle_client_disconnect(struct wl_listener * /*listener*
 // Wayland "Global" constructors
 static int bz_wayland_create_compositor(struct bz_breezy *breezy);
 static int bz_wayland_create_subcompositor(struct bz_breezy *breezy);
-static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy);
 static int bz_wayland_create_data_device_manager(struct bz_breezy *breezy);
 static int bz_wayland_create_seat(struct bz_breezy *breezy);
 static int bz_wayland_create_output(struct bz_breezy *breezy);
+static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy);
+static int bz_wayland_create_wp_viewporter(struct bz_breezy *breezy);
+static int bz_wayland_create_xdg_output(struct bz_breezy *breezy);
 
 
 // =================================================================================================
@@ -159,24 +165,6 @@ static int bz_wayland_create_subcompositor(struct bz_breezy *breezy)
 	return 0;
 }
 
-/** Creates the xdg_wm_base global. */
-static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy)
-{
-	struct wl_global *glob = wl_global_create(
-		breezy->wayland.display,
-		&xdg_wm_base_interface,
-		BZ_XDG_WM_BASE_VERSION,
-		nullptr,
-		bz_xdg_wm_base_constructor
-	);
-	if (glob == nullptr) {
-		bz_error(BZ_LOG_WAYLAND, "Error creating xdg_wm_base global.");
-		return -1;
-	}
-
-	return 0;
-}
-
 /** Creates the wl_data_device_manager global. */
 static int bz_wayland_create_data_device_manager(struct bz_breezy *breezy)
 {
@@ -216,21 +204,79 @@ static int bz_wayland_create_seat(struct bz_breezy *breezy)
 /** Creates the wl_output global. */
 static int bz_wayland_create_output(struct bz_breezy *breezy)
 {
+	if (breezy->drm.current_output == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, "Current output is not set.");
+		return -1;
+	}
+
 	struct wl_global *glob = wl_global_create(
 		breezy->wayland.display,
 		&wl_output_interface,
 		BZ_OUTPUT_VERSION,
-		nullptr,
+		breezy->drm.current_output,
 		bz_output_constructor
 	);
 	if (glob == nullptr) {
 		bz_error(BZ_LOG_WAYLAND, "Error creating wl_output global.");
+		return -2;
+	}
+
+	return 0;
+}
+
+/** Creates the xdg_wm_base global. */
+static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&xdg_wm_base_interface,
+		BZ_XDG_WM_BASE_VERSION,
+		nullptr,
+		bz_xdg_wm_base_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, "Error creating xdg_wm_base global.");
 		return -1;
 	}
 
 	return 0;
 }
 
+/** Creates the wp_viewporter global. */
+static int bz_wayland_create_wp_viewporter(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&wp_viewporter_interface,
+		BZ_WP_VIEWPORTER_VERSION,
+		nullptr,
+		bz_wp_viewporter_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, "Error creating wp_viewporter global.");
+		return -1;
+	}
+
+	return 0;
+}
+
+/** Creates the xdg_output global. */
+static int bz_wayland_create_xdg_output(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&zxdg_output_manager_v1_interface,
+		BZ_ZXDG_OUTPUT_MANAGER_V1_VERSION,
+		nullptr,
+		bz_zxdg_output_manager_v1_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, "Error creating xdg_output global.");
+		return -1;
+	}
+
+	return 0;
+}
 
 // =================================================================================================
 //  Exposed API
@@ -273,6 +319,12 @@ int bz_wayland_initialize(struct bz_breezy *breezy)
 	if (bz_wayland_create_output(breezy) < 0) {
 		return -8;
 	}
+	if (bz_wayland_create_wp_viewporter(breezy) < 0) {
+		return -9;
+	}
+	if (bz_wayland_create_xdg_output(breezy) < 0) {
+		return -10;
+	}
 
 
 	// Set up a listener for new client connections
@@ -286,7 +338,7 @@ int bz_wayland_initialize(struct bz_breezy *breezy)
 	breezy->wayland.socket_name = wl_display_add_socket_auto(breezy->wayland.display);
 	if (!breezy->wayland.socket_name) {
 		bz_error(BZ_LOG_WAYLAND, "Failed to add socket to Wayland display.");
-		return -9;
+		return -11;
 	}
 
 	bz_info(BZ_LOG_WAYLAND, "Successfully initialized our Wayland system.");

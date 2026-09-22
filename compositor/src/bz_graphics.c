@@ -12,6 +12,8 @@
 #include <glad/gles2.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <libdisplay-info/edid.h>
+#include <libdisplay-info/info.h>
 
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
@@ -32,7 +34,8 @@ static struct bz_drm_prop_ids prop_id_lookup = { 0 };
 // Init
 static int bz_drm_init(struct bz_breezy *breezy);
 // DRM resource
-static drmModeConnector *bz_drm_get_first_valid_connector(int drm_fd, const drmModeRes *resources);
+static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct bz_connector_data *conn_data);
+static struct bz_connector_data *bz_drm_get_first_valid_connector(int drm_fd, const drmModeRes *resources);
 static void bz_drm_print_modes(const drmModeConnector *connector);
 static uint32_t bz_drm_find_valid_crtc(int drm_fd, const drmModeRes *resources, const drmModeConnector *connector, int *crtc_index);
 static uint32_t bz_drm_find_valid_plane(int drm_fd, int crtc_index);
@@ -60,6 +63,7 @@ static char *bz_get_egl_error_text(EGLint error);
 static void bz_gles_print_egl_error(char *function_name, EGLint error);
 static void bz_gles_render_and_commit(void *data);
 static void bz_gles_render_applications(struct bz_breezy *breezy);
+static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surface *surface);
 static void bz_gles_render_cursor(struct bz_breezy *breezy);
 // Shaders
 static GLuint bz_gles_create_client_shader_program(void);
@@ -111,7 +115,8 @@ static int bz_drm_init(struct bz_breezy *breezy)
 	}
 
 	// Grab our first connected connector
-	drmModeConnector *connector = bz_drm_get_first_valid_connector(drm_fd, resources);
+	struct bz_connector_data *conn_data = bz_drm_get_first_valid_connector(drm_fd, resources);
+	drmModeConnector *connector = conn_data->connector;
 	if (connector == nullptr) {
 		bz_error(BZ_LOG_GRAPHICS, "Failed to find a suitable connector.");
 		retval = -5;
@@ -180,21 +185,78 @@ static int bz_drm_init(struct bz_breezy *breezy)
 	prop_id_lookup.plane_crtc_w  = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_W");
 	prop_id_lookup.plane_crtc_h  = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_H");
 
+	// Fill in our chosen output data.
+	breezy->drm.current_output = bz_drm_get_output_data(breezy, conn_data);
+	if (breezy->drm.current_output == nullptr) {
+		retval = -9;
+		goto clean_connector;
+	}
+
 	// Create our GBM device.
 	breezy->gbm.device = gbm_create_device(drm_fd);
 	if (breezy->gbm.device == nullptr) {
 		bz_error(BZ_LOG_GRAPHICS, "Failed to create GBM device.");
-		retval = -9;
+		retval = -10;
 		goto clean_connector;
 	}
 
 clean_connector:
 	if (connector != nullptr) { drmModeFreeConnector(connector); }
+	if (conn_data != nullptr) { free(conn_data); }
 clean_resources:
 	if (resources != nullptr) { drmModeFreeResources(resources); }
 
 exit:
 	return retval;
+}
+
+static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct bz_connector_data *conn_data) {
+	// Initialize our output/monitor data
+	struct bz_output *out = calloc(1, sizeof(*out));
+	if (out == nullptr) {
+		bz_error(BZ_LOG_GRAPHICS, "Failed to allocate memory for output data.");
+		return nullptr;
+	}
+
+	// Pull needed data out of DRM.
+	drmModeModeInfo *mode = &breezy->drm.mode_info;
+
+	// Figure out subpixel
+	enum wl_output_subpixel subpixel = WL_OUTPUT_SUBPIXEL_UNKNOWN;
+	switch (conn_data->connector->subpixel) {
+	case DRM_MODE_SUBPIXEL_UNKNOWN:        subpixel = WL_OUTPUT_SUBPIXEL_UNKNOWN; break;
+	case DRM_MODE_SUBPIXEL_HORIZONTAL_RGB: subpixel = WL_OUTPUT_SUBPIXEL_HORIZONTAL_RGB; break;
+	case DRM_MODE_SUBPIXEL_HORIZONTAL_BGR: subpixel = WL_OUTPUT_SUBPIXEL_HORIZONTAL_BGR; break;
+	case DRM_MODE_SUBPIXEL_VERTICAL_RGB:   subpixel = WL_OUTPUT_SUBPIXEL_VERTICAL_RGB; break;
+	case DRM_MODE_SUBPIXEL_VERTICAL_BGR:   subpixel = WL_OUTPUT_SUBPIXEL_VERTICAL_BGR; break;
+	case DRM_MODE_SUBPIXEL_NONE:           subpixel = WL_OUTPUT_SUBPIXEL_NONE; break;
+	}
+
+	size_t index_digits = (conn_data->index == 0) ? 1 : ((int)log10(conn_data->index) + 1);
+	size_t name_len = strlen(conn_data->type) + index_digits + 1 + 1;
+	char *name = calloc(name_len, sizeof(char));  // "HDMI-A-1"; // <connector-type>-<index> from DRM connector
+	snprintf(name, name_len, "%s-%d", conn_data->type, conn_data->index, name);
+
+	size_t desc_len = strlen(conn_data->make) + strlen(conn_data->model) + strlen(name) + 4 + 1;
+	char *description = calloc(desc_len, sizeof(char));
+	snprintf(description, desc_len, "%s %s (%s)", conn_data->make, conn_data->model, name);
+
+	// Set all values
+	out->position = (struct bz_position){ .x = 0, .y = 0 };
+	out->size = (struct bz_dimension){ .w = mode->hdisplay, .h = mode->vdisplay };
+	out->refresh_rate = mode->vrefresh;
+	out->physical_size = (struct bz_dimension){
+		.w = conn_data->connector->mmWidth,
+		.h = conn_data->connector->mmHeight
+	};
+	out->make = conn_data->make;
+	out->model = conn_data->model;
+	out->name = name;
+	out->description = description;
+	out->subpixel = subpixel;
+	out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+
+	return out;
 }
 
 /**
@@ -205,8 +267,11 @@ exit:
  * It's up to the caller to call "drmModeFreeConnector()" on the returned value when
  * they are finished with it.
  */
-static drmModeConnector *bz_drm_get_first_valid_connector(const int drm_fd, const drmModeRes *resources)
+static struct bz_connector_data *bz_drm_get_first_valid_connector(const int drm_fd, const drmModeRes *resources)
 {
+	struct bz_connector_data *data = calloc(1, sizeof(*data));
+
+	// Find a connector
 	drmModeConnector *connector = nullptr;
 	bz_debug(BZ_LOG_GRAPHICS, "Found %d connectors.", resources->count_connectors);
 	for (int i = 0; i < resources->count_connectors; i++) {
@@ -217,12 +282,51 @@ static drmModeConnector *bz_drm_get_first_valid_connector(const int drm_fd, cons
 		}
 		if (connector->connection == DRM_MODE_CONNECTED) {
 			bz_debug(BZ_LOG_GRAPHICS, "  Using connector %d.", i);
+			data->connector = connector;
+			data->index = i;
+			data->type = drmModeGetConnectorTypeName(connector->connector_type);
+			if (data->type == nullptr) {
+				data->type = "Unknown";
+			}
 			break;
 		}
 		drmModeFreeConnector(connector);
 	}
+	if (connector == nullptr) {
+		bz_error(BZ_LOG_GRAPHICS, "  Could not find valid connector.");
+		return nullptr;
+	}
 
-	return connector;
+	// Look up make and model
+	drmModeObjectProperties *props = drmModeObjectGetProperties(drm_fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR);
+	bz_debug(BZ_LOG_GRAPHICS, "Found %d object properties", props->count_props);
+	for (uint32_t j = 0; j < props->count_props && data->make == nullptr; j++) {
+		drmModePropertyRes *p = drmModeGetProperty(drm_fd, props->props[j]);
+
+		if (strcmp(p->name, "EDID") == 0) {
+			bz_debug(BZ_LOG_GRAPHICS, "  Found %s with id %d", p->name, p->prop_id);
+
+			drmModePropertyBlobPtr blob = drmModeGetPropertyBlob(drm_fd, props->prop_values[j]);
+			if (!blob) { continue; }
+			struct di_info *info = di_info_parse_edid(blob->data, blob->length);
+			if (!info) { continue; }
+
+			data->make = di_info_get_make(info);
+			data->model = di_info_get_model(info);
+			bz_debug(BZ_LOG_GRAPHICS, "    Make: %s, Model: %s", data->make, data->model);
+
+			di_info_destroy(info);
+			drmModeFreePropertyBlob(blob);
+		}
+		drmModeFreeProperty(p);
+	}
+	drmModeFreeObjectProperties(props);
+
+	if (data == nullptr) {
+		bz_error(BZ_LOG_GRAPHICS, "  Could not find make/model for given connector.");
+		return nullptr;
+	}
+	return data;
 }
 
 /**
@@ -837,31 +941,47 @@ static void bz_gles_render_applications(struct bz_breezy *breezy)
 	glEnableVertexAttribArray(1);
 
 	// ...then render each activable surface
-	struct bz_node *curr_surf = breezy->window_mgmt.activable_surfaces->head;
-	while (curr_surf != nullptr) {
-		struct bz_surface *surf_data = curr_surf->data;
-		struct bz_renderable renderable = surf_data->renderable;
-		if (renderable.texture != 0 && surf_data->active_state->buffer != nullptr) {
-			// Load our surface projection matrix
-			bz_mat3 projection = {0};
-			bz_fill_projection_matrix(projection,
-				0, 0, 1, 1,
-				renderable.position.x, renderable.position.y,
-				renderable.size.w, renderable.size.h
-			);
-			GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
-			glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+	struct bz_surface *main_surface;
+	bz_list_foreach(main_surface, breezy->window_mgmt.activable_surfaces) {
+		bz_gles_render_surface_stack(client_program, main_surface);
+	}
+}
 
-			// Prep the texture
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, renderable.texture);
-			GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
-			glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surface *surface)
+{
+	struct bz_surface *rendered_surface;
+	bz_list_foreach(rendered_surface, surface->active_state->surface_stack) {
+		if (rendered_surface != surface) {
+			bz_gles_render_surface_stack(client_program, rendered_surface);
+		} else {
+			struct bz_renderable renderable = rendered_surface->renderable;
+			// A subsurface's position is relative to its parent's
+			struct bz_position rel_pos = { .x = 0, .y = 0 };
+			if (rendered_surface->role == BZ_SURF_ROLE_WL_SUBSURFACE) {
+				rel_pos = rendered_surface->subsurface->parent->renderable.position;
+			}
 
-			// Render!
-			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			if (renderable.texture != 0 && rendered_surface->active_state->buffer != nullptr) {
+				// Load our surface projection matrix
+				bz_mat3 projection = {0};
+				bz_fill_projection_matrix(projection,
+					0, 0, 1, 1,
+					rel_pos.x + renderable.position.x, rel_pos.y + renderable.position.y,
+					renderable.size.w, renderable.size.h
+				);
+				GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+				glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+
+				// Prep the texture
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, renderable.texture);
+				GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+				glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+				// Render!
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			}
 		}
-		curr_surf = curr_surf->next;
 	}
 }
 
@@ -1093,6 +1213,13 @@ void bz_graphics_cleanup(struct bz_breezy *breezy) {
 	}
 
 	// -- DRM --
+	if (breezy->drm.current_output != nullptr) {
+		free(breezy->drm.current_output->name);
+		free(breezy->drm.current_output->description);
+		free(breezy->drm.current_output->make);
+		free(breezy->drm.current_output->model);
+		free(breezy->drm.current_output);
+	}
 	if (breezy->drm.plane_id != 0) {
 		bz_drm_clear_plane(breezy);
 	}
@@ -1165,20 +1292,17 @@ int bz_graphics_deactivate(struct bz_breezy *breezy)
  *
  * (Exposed as "public" for testing purposes only.)
  */
-void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp) {
-	struct bz_node *curr_surf = surfaces->head;
-
-	// TODO: Only emit for surfaces that are visible.
-	while (curr_surf != nullptr) {
-		struct bz_surface *bzsurf = curr_surf->data;
-		struct bz_node *curr_callback = bzsurf->active_state->frame_callbacks->head;
-
-		while (curr_callback != nullptr) {
-			wl_callback_send_done(curr_callback->data, timestamp);
-			wl_resource_destroy(curr_callback->data);
-			curr_callback = curr_callback->next;
+void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp)
+{
+	// TODO-dl??: Only emit for surfaces that are visible.
+	struct bz_surface *parent_surf; bz_list_foreach(parent_surf, surfaces) {
+		struct bz_surface *child_surf; bz_list_foreach(child_surf, parent_surf->active_state->surface_stack) {
+			// TODO-dl12: Buffer overflow here:
+			struct wl_resource *curr_cb; bz_list_foreach(curr_cb, child_surf->active_state->frame_callbacks) {
+				wl_callback_send_done(curr_cb, timestamp);
+				wl_resource_destroy(curr_cb);
+			}
+			bz_list_clear(child_surf->active_state->frame_callbacks, nullptr);
 		}
-		bz_list_clear(bzsurf->active_state->frame_callbacks, nullptr);
-		curr_surf = curr_surf->next;
 	}
 }

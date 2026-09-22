@@ -24,6 +24,7 @@ struct bz_drm {
 	uint32_t plane_id;
 	bz_mat3 output_projection;
 	bool retry_render_on_page_flip;
+	struct bz_output *current_output;
 };
 
 struct bz_gbm {

@@ -1,9 +1,28 @@
 
-# Import the XDG shell protocol
 wl_mod = import('wayland')
+
+# Import the XDG Shell protocol extension
 xdg_shell_xml = wl_mod.find_protocol('xdg-shell')
 xdg_shell_code = wl_mod.scan_xml(
     xdg_shell_xml,
+    client: false,
+    server: true,
+    public: false,
+    include_core_only: false)
+
+# Import the XDG Output protocol extension
+xdg_output_xml = wl_mod.find_protocol('xdg-output', state: 'unstable', version: 1)
+xdg_output_code = wl_mod.scan_xml(
+    xdg_output_xml,
+    client: false,
+    server: true,
+    public: false,
+    include_core_only: false)
+
+# Import the WP Viewporter protocol extension
+viewporter_xml = wl_mod.find_protocol('viewporter')
+viewporter_code = wl_mod.scan_xml(
+    viewporter_xml,
     client: false,
     server: true,
     public: false,
@@ -21,8 +40,12 @@ bz_main_lib = static_library(
         './gles2.c',
         './wayland/bz_wl_display.c',
         './wayland/bz_wl_devices.c',
+        './wayland/bz_wp_viewporter.c',
+        './wayland/bz_xdg_output.c',
         './wayland/bz_xdg_shell.c',
+        xdg_output_code,
         xdg_shell_code,
+        viewporter_code,
     ],
     include_directories: compositor_inc,
     dependencies: [
@@ -34,6 +57,7 @@ bz_main_lib = static_library(
         dependency('libinput'),
         dependency('xkbcommon'),
         dependency('wayland-server'),
+        dependency('libdisplay-info'),
         bz_utils_dep,
     ])
 bz_main_dep = declare_dependency(link_with: bz_main_lib, include_directories: compositor_inc)

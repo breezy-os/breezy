@@ -6,39 +6,20 @@
 #include <xdg-shell-server-protocol.h>
 
 #include "unity.h"
-#include "fff.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wl_display.h"
 #include "helpers/bz_test_resources.c"
+#include "helpers/bz_test_fakes.c"
 
 
 // =================================================================================================
 //  Set up / tear down / globals
 // -------------------------------------------------------------------------------------------------
 
-DEFINE_FFF_GLOBALS
-// -- wl_client --
-FAKE_VOID_FUNC(wl_client_post_no_memory, struct wl_client *)
-FAKE_VALUE_FUNC(void *, wl_client_get_user_data, struct wl_client *)
-// -- wl_resource --
-FAKE_VOID_FUNC(wl_resource_set_implementation, struct wl_resource *, const void *, void *, wl_resource_destroy_func_t)
-FAKE_VALUE_FUNC(struct wl_resource *, wl_resource_create, struct wl_client *, const struct wl_interface *, int, uint32_t)
-FAKE_VALUE_FUNC(void *, wl_resource_get_user_data, struct wl_resource *)
-FAKE_VOID_FUNC_VARARG(wl_resource_post_error, struct wl_resource *, uint32_t, const char *, ...)
-FAKE_VOID_FUNC(wl_resource_add_destroy_listener, struct wl_resource *, struct wl_listener *)
-
 void setUp(void)
 {
-	RESET_FAKE(wl_client_post_no_memory);
-	RESET_FAKE(wl_client_get_user_data);
-	RESET_FAKE(wl_resource_set_implementation);
-	RESET_FAKE(wl_resource_create);
-	RESET_FAKE(wl_resource_get_user_data);
-	RESET_FAKE(wl_resource_post_error);
-	RESET_FAKE(wl_resource_add_destroy_listener);
-	FFF_RESET_HISTORY();
-
+	bz_reset_fakes();
 	bz_log_initialize(BZ_LOG_OFF);
 }
 
@@ -50,6 +31,69 @@ void tearDown(void) {}
 // -------------------------------------------------------------------------------------------------
 
 extern const struct xdg_surface_interface bz_xdg_surface_implementation;
+
+
+// =================================================================================================
+//  Test bz_xdg_surface_destroy()
+// -------------------------------------------------------------------------------------------------
+
+/** Deletes the xdg_surface when it never held a role. */
+void test_xdg_surface_destroy__succeeds_with_no_role(void)
+{
+	// Set up our test data
+	struct bz_xdg_surface *xdg_surface_data = bz_create_xdg_surface_data();
+	wl_resource_get_user_data_fake.return_val = xdg_surface_data;
+
+	// Run our test
+	bz_xdg_surface_implementation.destroy(nullptr, nullptr);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_destroy_fake.call_count);
+
+	// Clean up
+	bz_free_xdg_surface_data(xdg_surface_data);
+}
+
+/** Deletes the xdg_surface when it had a role which has since been destroyed. */
+void test_xdg_surface_destroy__succeeds_with_destroyed_role(void)
+{
+	// Set up our test data
+	struct bz_xdg_surface *xdg_surface_data = bz_create_xdg_surface_data();
+	wl_resource_get_user_data_fake.return_val = xdg_surface_data;
+
+	// Surface should have a role, but not a role object.
+	xdg_surface_data->wlsurface->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
+	xdg_surface_data->wlsurface->xdgtoplevel = nullptr;
+
+	// Run our test
+	bz_xdg_surface_implementation.destroy(nullptr, nullptr);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_destroy_fake.call_count);
+
+	// Clean up
+	bz_free_xdg_surface_data(xdg_surface_data);
+}
+
+/** The client must destroy the role object first. Otherwise, a defunct_role_object error is sent. */
+void test_xdg_surface_destroy__with_role_sends_error(void)
+{
+	// Set up our test data
+	struct bz_xdg_surface *xdg_surface_data = bz_create_xdg_surface_data();
+	wl_resource_get_user_data_fake.return_val = xdg_surface_data;
+
+	// Surface should have both a role and role object.
+	xdg_surface_data->wlsurface->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
+	xdg_surface_data->wlsurface->xdgtoplevel = bz_create_xdg_toplevel_data();
+
+	// Run our test
+	bz_xdg_surface_implementation.destroy(nullptr, nullptr);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_destroy_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(XDG_SURFACE_ERROR_DEFUNCT_ROLE_OBJECT, wl_resource_post_error_fake.arg1_val);
+
+	// Clean up
+	bz_free_xdg_toplevel_data(xdg_surface_data->wlsurface->xdgtoplevel);
+	bz_free_xdg_surface_data(xdg_surface_data);
+}
 
 
 // =================================================================================================
@@ -287,8 +331,9 @@ int main(void) {
 	UNITY_BEGIN();
 
 	// Test bz_xdg_surface_destroy()
-	// RUN_TEST(test_xdg_surface_destroy__);
-	// TODO
+	RUN_TEST(test_xdg_surface_destroy__succeeds_with_no_role);
+	RUN_TEST(test_xdg_surface_destroy__succeeds_with_destroyed_role);
+	RUN_TEST(test_xdg_surface_destroy__with_role_sends_error);
 
 	// Test bz_xdg_surface_get_toplevel()
 	RUN_TEST(test_xdg_surface_get_toplevel__initializes_properly);

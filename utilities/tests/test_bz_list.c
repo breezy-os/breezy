@@ -38,9 +38,7 @@ void setUp(void)
 	bz_log_initialize(BZ_LOG_OFF);
 }
 
-void tearDown(void)
-{
-}
+void tearDown(void) {}
 
 
 // =================================================================================================
@@ -179,6 +177,112 @@ void test_list_insert_fails_when_not_found(void)
 	// The returned error code indicates "could not find data"
 	TEST_ASSERT_EQUAL_INT(-2, actual);
 
+	bz_list_free(list, nullptr);
+}
+
+
+// =================================================================================================
+//  Test bz_list_shift()
+// -------------------------------------------------------------------------------------------------
+
+/** Calling bz_list_shift() should return nullptr for an uninitialized list. */
+void test_list_shift__null_for_uninitialized(void)
+{
+	TEST_ASSERT_NULL(bz_list_shift(nullptr));
+}
+
+/** Calling bz_list_shift() should return and remove the first item, or nullptr for an empty list. */
+void test_list_shift__returns_and_removes_first_item(void)
+{
+	// Initialize our test data
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+
+	// Initial asserts
+	TEST_ASSERT_EQUAL_INT(3, list->length);
+	TEST_ASSERT_EQUAL_PTR(&val1, list->head->data);
+	TEST_ASSERT_EQUAL_PTR(&val3, list->tail->data);
+
+	// First shift
+	TEST_ASSERT_EQUAL_PTR(&val1, bz_list_shift(list));
+	TEST_ASSERT_EQUAL_INT(2, list->length);
+	TEST_ASSERT_EQUAL_PTR(&val2, list->head->data);
+	TEST_ASSERT_EQUAL_PTR(&val3, list->tail->data);
+
+	// Second shift
+	TEST_ASSERT_EQUAL_PTR(&val2, bz_list_shift(list));
+	TEST_ASSERT_EQUAL_INT(1, list->length);
+	TEST_ASSERT_EQUAL_PTR(&val3, list->head->data);
+	TEST_ASSERT_EQUAL_PTR(&val3, list->tail->data);
+
+	// Third shift
+	TEST_ASSERT_EQUAL_PTR(&val3, bz_list_shift(list));
+	TEST_ASSERT_EQUAL_INT(0, list->length);
+	TEST_ASSERT_NULL(list->head);
+	TEST_ASSERT_NULL(list->tail);
+
+	// ...and the empty cases, repeated for good measure.
+	TEST_ASSERT_NULL(bz_list_shift(list));
+	TEST_ASSERT_EQUAL_INT(0, list->length);
+	TEST_ASSERT_NULL(bz_list_shift(list));
+	TEST_ASSERT_EQUAL_INT(0, list->length);
+
+	// Cleanup!
+	bz_list_free(list, nullptr);
+}
+
+
+// =================================================================================================
+//  Test bz_list_pop()
+// -------------------------------------------------------------------------------------------------
+
+/** Calling bz_list_pop() should return nullptr for an uninitialized list. */
+void test_list_pop__null_for_uninitialized(void)
+{
+	TEST_ASSERT_NULL(bz_list_pop(nullptr));
+}
+
+/** Calling bz_list_pop() should return and remove the last item, or nullptr for an empty list. */
+void test_list_pop__returns_and_removes_last_item(void)
+{
+	// Initialize our test data
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+
+	// Initial asserts
+	TEST_ASSERT_EQUAL_INT(3, list->length);
+	TEST_ASSERT_EQUAL_PTR(&val1, list->head->data);
+	TEST_ASSERT_EQUAL_PTR(&val3, list->tail->data);
+
+	// First pop
+	TEST_ASSERT_EQUAL_PTR(&val3, bz_list_pop(list));
+	TEST_ASSERT_EQUAL_INT(2, list->length);
+	TEST_ASSERT_EQUAL_PTR(&val1, list->head->data);
+	TEST_ASSERT_EQUAL_PTR(&val2, list->tail->data);
+
+	// Second pop
+	TEST_ASSERT_EQUAL_PTR(&val2, bz_list_pop(list));
+	TEST_ASSERT_EQUAL_INT(1, list->length);
+	TEST_ASSERT_EQUAL_PTR(&val1, list->head->data);
+	TEST_ASSERT_EQUAL_PTR(&val1, list->tail->data);
+
+	// Third pop
+	TEST_ASSERT_EQUAL_PTR(&val1, bz_list_pop(list));
+	TEST_ASSERT_EQUAL_INT(0, list->length);
+	TEST_ASSERT_NULL(list->head);
+	TEST_ASSERT_NULL(list->tail);
+
+	// ...and the empty cases, repeated for good measure.
+	TEST_ASSERT_NULL(bz_list_pop(list));
+	TEST_ASSERT_EQUAL_INT(0, list->length);
+	TEST_ASSERT_NULL(bz_list_pop(list));
+	TEST_ASSERT_EQUAL_INT(0, list->length);
+
+	// Cleanup!
 	bz_list_free(list, nullptr);
 }
 
@@ -656,6 +760,39 @@ void test_list_contains__returns_true_for_found(void)
 
 
 // =================================================================================================
+//  Test bz_list_get_index()
+// -------------------------------------------------------------------------------------------------
+
+void test_list_get_index__returns_neg1_for_uninitialized(void)
+{
+	int search_val = 5;
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_get_index(nullptr, &search_val));
+}
+
+void test_list_get_index__returns_correct_index(void)
+{
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+	TEST_ASSERT_EQUAL_INT(0, bz_list_get_index(list, &val1));
+	TEST_ASSERT_EQUAL_INT(1, bz_list_get_index(list, &val2));
+	TEST_ASSERT_EQUAL_INT(2, bz_list_get_index(list, &val3));
+	bz_list_free(list, nullptr);
+}
+
+void test_list_get_index__returns_neg1_for_not_found(void)
+{
+	struct bz_list *list = bz_list_create();
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; // Not added
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_get_index(list, &val3));
+	bz_list_free(list, nullptr);
+}
+
+
+// =================================================================================================
 //  Test bz_list_get_neighbor()
 // -------------------------------------------------------------------------------------------------
 
@@ -763,8 +900,8 @@ void test_list_move_to_end__fails_for_uninitialized(void)
 	struct bz_list *dest = bz_list_create();
 
 	// Run our test
-	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_to_end(nullptr, src));
-	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_to_end(dest, nullptr));
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_to_end(src, nullptr));
+	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_to_end(nullptr, dest));
 	TEST_ASSERT_EQUAL_INT(-1, bz_list_move_to_end(nullptr, nullptr));
 
 	// Cleanup
@@ -781,7 +918,7 @@ void test_list_move_to_end__empty_src_list(void)
 	int dest_val = 1; bz_list_append(dest, &dest_val);
 
 	// Run our test
-	int ret_val = bz_list_move_to_end(dest, src);
+	int ret_val = bz_list_move_to_end(src, dest);
 	TEST_ASSERT_EQUAL_INT(0, ret_val);
 	TEST_ASSERT_EQUAL_INT(0, src->length);
 	TEST_ASSERT_EQUAL_INT(1, dest->length);
@@ -801,7 +938,7 @@ void test_list_move_to_end__empty_dest_list(void)
 	int src_val = 1; bz_list_append(src, &src_val);
 
 	// Run our test
-	int ret_val = bz_list_move_to_end(dest, src);
+	int ret_val = bz_list_move_to_end(src, dest);
 	TEST_ASSERT_EQUAL_INT(1, ret_val);
 	TEST_ASSERT_EQUAL_INT(0, src->length);
 	TEST_ASSERT_EQUAL_INT(1, dest->length);
@@ -824,7 +961,7 @@ void test_list_move_to_end__both_lists_populated(void)
 	int dest_val_2 = 4; bz_list_append(dest, &dest_val_2);
 
 	// Run our test
-	int ret_val = bz_list_move_to_end(dest, src);
+	int ret_val = bz_list_move_to_end(src, dest);
 	TEST_ASSERT_EQUAL_INT(2, ret_val);
 	TEST_ASSERT_EQUAL_INT(0, src->length);
 	TEST_ASSERT_EQUAL_INT(4, dest->length);
@@ -958,21 +1095,27 @@ void test_list_move_item_to_end__returns_neg2_when_list_empty(void)
 //  Test bz_list_clone()
 // -------------------------------------------------------------------------------------------------
 
-void test_list_clone_returns_null_for_uninitialized(void)
+void test_list_clone__returns_null_for_uninitialized(void)
 {
 	const void *retval = bz_list_clone(nullptr, clone_int);
 	TEST_ASSERT_NULL(retval);
 }
 
-void test_list_clone_returns_null_for_null_clone_fn(void)
+void test_list_clone__shallow_for_null_clone_fn(void)
 {
 	struct bz_list *list = bz_list_create();
-	const void *retval = bz_list_clone(list, nullptr);
-	TEST_ASSERT_NULL(retval);
+	int val1 = 1; bz_list_append(list, &val1);
+	int val2 = 2; bz_list_append(list, &val2);
+	int val3 = 3; bz_list_append(list, &val3);
+	struct bz_list *retval = bz_list_clone(list, nullptr);
+	TEST_ASSERT_NOT_NULL(retval);
+	TEST_ASSERT_EQUAL_INT(3, retval->length);
+	TEST_ASSERT_EQUAL_PTR(&val1, retval->head->data);
+	bz_list_free(retval, nullptr);
 	bz_list_free(list, nullptr);
 }
 
-void test_list_clone_returns_different_list(void)
+void test_list_clone__returns_different_list(void)
 {
 	struct bz_list *list = bz_list_create();
 	struct bz_list *clone = bz_list_clone(list, clone_int);
@@ -982,7 +1125,7 @@ void test_list_clone_returns_different_list(void)
 	bz_list_free(clone, nullptr);
 }
 
-void test_list_clone_returns_different_but_equal_values(void)
+void test_list_clone__returns_different_but_equal_values(void)
 {
 	// Create our initial data
 	int *one = malloc(sizeof(*one));
@@ -1257,6 +1400,14 @@ int main(void) {
 	RUN_TEST(test_list_insert_adds_after_given_data);
 	RUN_TEST(test_list_insert_fails_when_not_found);
 
+	// Test bz_list_shift()
+	RUN_TEST(test_list_shift__null_for_uninitialized);
+	RUN_TEST(test_list_shift__returns_and_removes_first_item);
+
+	// Test bz_list_pop()
+	RUN_TEST(test_list_pop__null_for_uninitialized);
+	RUN_TEST(test_list_pop__returns_and_removes_last_item);
+
 	// Test bz_list_replace()
 	RUN_TEST(test_list_replace_fails_for_uninitialized);
 	RUN_TEST(test_list_replace_fails_when_not_found);
@@ -1293,6 +1444,11 @@ int main(void) {
 	RUN_TEST(test_list_contains__returns_false_for_not_found);
 	RUN_TEST(test_list_contains__returns_true_for_found);
 
+	// Test bz_list_get_index()
+	RUN_TEST(test_list_get_index__returns_neg1_for_uninitialized);
+	RUN_TEST(test_list_get_index__returns_correct_index);
+	RUN_TEST(test_list_get_index__returns_neg1_for_not_found);
+
 	// Test bz_list_get_neighbor()
 	RUN_TEST(test_list_get_neighbor_returns_null_for_uninitialized);
 	RUN_TEST(test_list_get_neighbor_returns_null_for_not_found);
@@ -1315,10 +1471,10 @@ int main(void) {
 	RUN_TEST(test_list_move_item_to_end__returns_neg2_when_list_empty);
 
 	// Test bz_list_clone()
-	RUN_TEST(test_list_clone_returns_null_for_uninitialized);
-	RUN_TEST(test_list_clone_returns_null_for_null_clone_fn);
-	RUN_TEST(test_list_clone_returns_different_list);
-	RUN_TEST(test_list_clone_returns_different_but_equal_values);
+	RUN_TEST(test_list_clone__returns_null_for_uninitialized);
+	RUN_TEST(test_list_clone__shallow_for_null_clone_fn);
+	RUN_TEST(test_list_clone__returns_different_list);
+	RUN_TEST(test_list_clone__returns_different_but_equal_values);
 
 	// Test bz_list_foreach() macro
 	RUN_TEST(test_list_foreach__basic_iteration);

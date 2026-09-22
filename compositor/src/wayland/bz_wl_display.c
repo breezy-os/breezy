@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <wayland-server.h>
 
@@ -13,6 +14,7 @@
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_window_management.h"
 #include "breezy/bz_xdg_shell.h"
+#include "breezy/bz_wp_viewporter.h"
 
 
 // =================================================================================================
@@ -21,21 +23,34 @@
 
 // -- wl_compositor --
 
-static const struct wl_compositor_interface bz_compositor_implementation;
+const struct wl_compositor_interface bz_compositor_implementation;
 static void bz_compositor_create_surface(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 static void bz_compositor_create_region(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 // Helpers
-static struct bz_surface_state *bz_surface_state_init(void);
-static void bz_surface_state_free(struct bz_surface_state *state);
+static struct bz_surface_state *bz_init_surface_state(void);
+static void bz_free_surface_state(struct bz_surface_state *state);
 
 // -- wl_subcompositor --
 
-static const struct wl_subcompositor_interface bz_subcompositor_implementation;
+const struct wl_subcompositor_interface bz_subcompositor_implementation;
 static void bz_subcompositor_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_subcompositor_get_subsurface(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface, struct wl_resource *parent);
+// Helpers
+static bool bz_surface_stack_contains_surface(struct bz_surface *source, struct bz_surface *target);
+
+// -- wl_region --
+
+void bz_region_dtor(struct wl_resource *data);
+const struct wl_region_interface bz_region_implementation;
+static void bz_region_destroy(struct wl_client *client, struct wl_resource *resource);
+static void bz_region_add(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
+static void bz_region_subtract(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
+// Helpers
+static void bz_region_append_mutation(struct wl_client *client, struct bz_region *region_data, enum bz_region_op operation, int32_t x, int32_t y, int32_t width, int32_t height);
 
 // -- wl_surface --
 
+void bz_surface_dtor(struct wl_resource *data);
 const struct wl_surface_interface bz_surface_implementation;
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_surface_attach(struct wl_client *client, struct wl_resource *resource, struct wl_resource *buffer, int32_t x, int32_t y);
@@ -50,6 +65,29 @@ static void bz_surface_damage_buffer(struct wl_client *client, struct wl_resourc
 static void bz_surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
 // Helpers
 static void bz_write_surface_texture(struct bz_surface *surface_data);
+static void bz_apply_buffer_damage(uint32_t *shm_data, int32_t buff_w, int32_t buff_h, struct bz_list *damage);
+static bool bz_is_effectively_sync(struct bz_surface *surface_data);
+static void bz_walk_content_update_queue(struct bz_content_update *cu);
+static bool bz_is_content_update_satisfied(struct bz_content_update *cu);
+static struct bz_list *bz_apply_content_update(struct bz_content_update *cu);
+static void bz_apply_subsurface_cu_state(struct bz_list *subsurface_states, struct bz_surface *surface);
+static void bz_free_content_update(struct bz_content_update *content_update);
+static void *bz_clone_region_mutation(void *input);
+static void bz_sever_child_from_parent(struct bz_surface *child);
+
+// -- wl_subsurface --
+
+void bz_subsurface_dtor(struct wl_resource *subsurface);
+const struct wl_subsurface_interface bz_subsurface_implementation;
+static void bz_subsurface_destroy(struct wl_client *client, struct wl_resource *resource);
+static void bz_subsurface_set_position(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
+static void bz_subsurface_place_above(struct wl_client *client, struct wl_resource *resource, struct wl_resource *sibling);
+static void bz_subsurface_place_below(struct wl_client *client, struct wl_resource *resource, struct wl_resource *sibling);
+static void bz_subsurface_set_sync(struct wl_client *client, struct wl_resource *resource);
+static void bz_subsurface_set_desync(struct wl_client *client, struct wl_resource *resource);
+// Helpers
+static struct bz_subsurface_state *bz_subsurface_get_pending_state(struct bz_subsurface *for_child);
+static bool bz_subsurface_state_matches(void *list_item, void *match_data);
 
 
 // =================================================================================================
@@ -59,7 +97,7 @@ static void bz_write_surface_texture(struct bz_surface *surface_data);
 /** Gets executed whenever a client binds to wl_compositor. */
 void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_compositor.");
+	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_compositor with version %d.", version);
 
 	struct wl_resource *res = wl_resource_create(client, &wl_compositor_interface, version, id);
 	if (res == nullptr) {
@@ -70,7 +108,7 @@ void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t ve
 	wl_resource_set_implementation(res, &bz_compositor_implementation, nullptr, nullptr);
 }
 
-static const struct wl_compositor_interface bz_compositor_implementation = {
+const struct wl_compositor_interface bz_compositor_implementation = {
 	.create_surface = bz_compositor_create_surface,
 	.create_region = bz_compositor_create_region,
 };
@@ -86,22 +124,27 @@ static void bz_compositor_create_surface(
 		wl_client_post_no_memory(client);
 		goto surface_alloc_failed;
 	}
-	struct bz_surface_state *pending = bz_surface_state_init();
+	struct bz_surface_state *pending = bz_init_surface_state();
 	if (pending == nullptr) {
 		wl_client_post_no_memory(client);
 		goto pending_state_alloc_failed;
 	}
-	struct bz_surface_state *active = bz_surface_state_init();
+	struct bz_surface_state *active = bz_init_surface_state();
 	if (active == nullptr) {
 		wl_client_post_no_memory(client);
 		goto active_state_alloc_failed;
+	}
+	struct bz_list *content_updates = bz_list_create();
+	if (content_updates == nullptr) {
+		wl_client_post_no_memory(client);
+		goto content_updates_alloc_failed;
 	}
 
 	// Create the resource, bound to the data
 	struct wl_resource *res = wl_resource_create(
 		client,
 		&wl_surface_interface,
-		BZ_SURFACE_VERSION,
+		wl_resource_get_version(resource),
 		id
 	);
 	if (res == nullptr) {
@@ -116,22 +159,29 @@ static void bz_compositor_create_surface(
 	);
 
 	// Populate the surface's user data
-	const struct bz_client *client_data = wl_client_get_user_data(client);
+	// const struct bz_client *client_data = wl_client_get_user_data(client);
 	surface->resource = res;
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
-	surface->renderable.position.x = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.hdisplay);
-	surface->renderable.position.y = bz_rand_int(0, 3.0f/4*client_data->breezy->drm.mode_info.vdisplay);
+	surface->content_updates = content_updates;
+	surface->renderable.position.x = 0;
+	surface->renderable.position.y = 0;
+
+	// Starts with only itself in its stack of surfaces.
+	bz_list_append(surface->pending_state->surface_stack, surface);
+	bz_list_append(surface->active_state->surface_stack, surface);
 
 	// Everything succeeded!
 	return;
 
 	// Error cleanups
 	resource_failed:
-		bz_surface_state_free(active);
+		bz_list_free(content_updates, nullptr);
+	content_updates_alloc_failed:
+		bz_free_surface_state(active);
 	active_state_alloc_failed:
-		bz_surface_state_free(pending);
+		bz_free_surface_state(pending);
 	pending_state_alloc_failed:
 		free(surface);
 	surface_alloc_failed:
@@ -143,13 +193,54 @@ static void bz_compositor_create_region(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_compositor.create_region not implemented");
-	// TODO
+	// Allocate our user data
+	struct bz_region *region_data = calloc(1, sizeof(*region_data));
+	if (region_data == nullptr) {
+		wl_client_post_no_memory(client);
+		goto region_alloc_failed;
+	}
+	region_data->mutations = bz_list_create();
+	if (region_data->mutations == nullptr) {
+		wl_client_post_no_memory(client);
+		goto mutations_alloc_failed;
+	}
+
+	// Create the resource, bound to the data
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_region_interface,
+		wl_resource_get_version(resource),
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_region_implementation,
+		region_data,
+		bz_region_dtor
+	);
+
+	// Populate the region's user data
+	region_data->resource = res;
+
+	// Everything succeeded!
+	return;
+
+	// Error cleanups
+	resource_failed:
+		bz_list_free(region_data->mutations, nullptr);
+	mutations_alloc_failed:
+		free(region_data);
+	region_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to construct a new region.");
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------
 
-static struct bz_surface_state *bz_surface_state_init(void)
+static struct bz_surface_state *bz_init_surface_state(void)
 {
 	struct bz_surface_state *state = calloc(1, sizeof(*state));
 	if (state == nullptr) {
@@ -160,9 +251,47 @@ static struct bz_surface_state *bz_surface_state_init(void)
 	if (state->frame_callbacks == nullptr) {
 		goto callback_list_failed;
 	}
+
+	state->surface_stack = bz_list_create();
+	if (state->surface_stack == nullptr) {
+		goto surface_stack_failed;
+	}
+
+	state->surface_damage = bz_list_create();
+	if (state->surface_damage == nullptr) {
+		goto surface_damage_failed;
+	}
+
+	state->buffer_damage = bz_list_create();
+	if (state->buffer_damage == nullptr) {
+		goto buffer_damage_failed;
+	}
+
+	state->subsurface_states = bz_list_create();
+	if (state->subsurface_states == nullptr) {
+		goto subsurface_list_failed;
+	}
+
+	state->dirty_opaque_region = false;
+	state->opaque_region = nullptr;
+	state->dirty_input_region = false;
+	state->input_region = nullptr;
+
+	state->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	state->scale = 1;
+
+	// All is good!
 	return state;
 
 	// Error cleanups
+	subsurface_list_failed:
+		bz_list_free(state->buffer_damage, nullptr);
+	buffer_damage_failed:
+		bz_list_free(state->surface_damage, nullptr);
+	surface_damage_failed:
+		bz_list_free(state->surface_stack, nullptr);
+	surface_stack_failed:
+		bz_list_free(state->frame_callbacks, nullptr);
 	callback_list_failed:
 		free(state);
 	state_alloc_failed:
@@ -170,13 +299,33 @@ static struct bz_surface_state *bz_surface_state_init(void)
 		return nullptr;
 }
 
-static void bz_surface_state_free(struct bz_surface_state *state)
+static void bz_free_surface_state(struct bz_surface_state *state)
 {
 	if (state == nullptr) { return; }
 
 	if (state->frame_callbacks != nullptr) {
 		bz_list_free(state->frame_callbacks, nullptr);
 	}
+	if (state->frame_callbacks != nullptr) {
+		bz_list_free(state->surface_stack, nullptr);
+	}
+	if (state->surface_damage != nullptr) {
+		bz_list_free(state->surface_damage, free);
+	}
+	if (state->buffer_damage != nullptr) {
+		bz_list_free(state->buffer_damage, free);
+	}
+	if (state->opaque_region != nullptr) {
+		bz_list_free(state->opaque_region, free);
+	}
+	if (state->input_region != nullptr) {
+		bz_list_free(state->input_region, free);
+	}
+	if (state->subsurface_states != nullptr) {
+		bz_list_free(state->subsurface_states, free);
+	}
+	if (state->vp_source != nullptr) { free(state->vp_source); }
+	if (state->vp_dest != nullptr)   { free(state->vp_dest);   }
 	free(state);
 }
 
@@ -188,7 +337,7 @@ static void bz_surface_state_free(struct bz_surface_state *state)
 /** Gets executed whenever a client binds to wl_subcompositor. */
 void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_subcompositor.");
+	bz_debug(BZ_LOG_WL_DISPLAY, "Binding a client to wl_subcompositor with version %d.", version);
 
 	struct wl_resource *res = wl_resource_create(client, &wl_subcompositor_interface, version, id);
 	if (res == nullptr) {
@@ -199,15 +348,14 @@ void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t
 	wl_resource_set_implementation(res, &bz_subcompositor_implementation, nullptr, nullptr);
 }
 
-static const struct wl_subcompositor_interface bz_subcompositor_implementation = {
+const struct wl_subcompositor_interface bz_subcompositor_implementation = {
 	.destroy = bz_subcompositor_destroy,
 	.get_subsurface = bz_subcompositor_get_subsurface,
 };
 
 static void bz_subcompositor_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subcompositor.destroy not implemented");
-	// TODO
+	wl_resource_destroy(resource);
 }
 
 static void bz_subcompositor_get_subsurface(
@@ -217,14 +365,247 @@ static void bz_subcompositor_get_subsurface(
 	struct wl_resource *surface,
 	struct wl_resource *parent
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_subcompositor.get_subsurface not implemented");
-	// TODO
+	// Validate the provided surface
+	struct bz_surface *surface_data = wl_resource_get_user_data(surface);
+	if (surface_data->role != BZ_SURF_ROLE_NONE && surface_data->role != BZ_SURF_ROLE_WL_SUBSURFACE) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+			"Surface role cannot be changed.");
+		goto validation_error;
+	}
+	if (surface_data->subsurface != nullptr) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+			"Surface already has an assigned subsurface.");
+		goto validation_error;
+	}
+
+	// Validate the provided parent
+	struct bz_surface *parent_data = wl_resource_get_user_data(parent);
+	if (parent_data == surface_data) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_PARENT,
+			"Parent and child surfaces cannot be the same surface.");
+		goto validation_error;
+	}
+	if (bz_surface_stack_contains_surface(surface_data, parent_data)) {
+		wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_PARENT,
+			"Parent surface cannot descend from one of its children.");
+		goto validation_error;
+	}
+
+	// Allocate our user data
+	struct bz_subsurface *subsurface_data = calloc(1, sizeof(*subsurface_data));
+	if (subsurface_data == nullptr) {
+		wl_client_post_no_memory(client);
+		goto subsurface_alloc_failed;
+	}
+
+	// Create the resource, bound to the data
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&wl_subsurface_interface,
+		wl_resource_get_version(resource),
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_subsurface_implementation,
+		subsurface_data,
+		bz_subsurface_dtor
+	);
+
+	// Populate the surface's user data
+	subsurface_data->resource = res;
+	subsurface_data->surface = surface_data;
+	subsurface_data->parent = parent_data;
+	subsurface_data->is_sync = true;
+
+	// And update other, related data
+	surface_data->role = BZ_SURF_ROLE_WL_SUBSURFACE;
+	surface_data->subsurface = subsurface_data;
+	bz_list_append(parent_data->pending_state->surface_stack, surface_data);
+
+	// Everything succeeded!
+	return;
+
+	// Error cleanups
+	resource_failed:
+		free(subsurface_data);
+	subsurface_alloc_failed:
+	validation_error:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to construct a new subsurface.");
+}
+
+static bool bz_surface_stack_contains_surface(
+	struct bz_surface *source,
+	struct bz_surface *target
+) {
+	struct bz_surface *current; bz_list_foreach(current, source->pending_state->surface_stack) {
+		if (current == source) { continue; }
+		if (current == target || bz_surface_stack_contains_surface(current, target)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+// =================================================================================================
+//  wl_region
+// -------------------------------------------------------------------------------------------------
+
+void bz_region_dtor(struct wl_resource *data)
+{
+	struct bz_region *region_data = wl_resource_get_user_data(data);
+	bz_list_free(region_data->mutations, free);
+	free(region_data);
+}
+
+const struct wl_region_interface bz_region_implementation = {
+	.destroy = bz_region_destroy,
+	.add = bz_region_add,
+	.subtract = bz_region_subtract,
+};
+
+static void bz_region_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static void bz_region_add(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height
+) {
+	struct bz_region *region_data = wl_resource_get_user_data(resource);
+	bz_region_append_mutation(client, region_data, OP_ADD, x, y, width, height);
+}
+
+static void bz_region_subtract(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height
+) {
+	struct bz_region *region_data = wl_resource_get_user_data(resource);
+	bz_region_append_mutation(client, region_data, OP_SUBTRACT, x, y, width, height);
+}
+
+static void bz_region_append_mutation(
+	struct wl_client *client,
+	struct bz_region *region_data,
+	enum bz_region_op operation,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height
+) {
+	// Create the mutation
+	struct bz_region_mutation *mutation = calloc(1, sizeof(*mutation));
+	if (mutation == nullptr) {
+		wl_client_post_no_memory(client);
+		goto calloc_failed;
+	}
+
+	// Populate the mutation
+	mutation->op = operation;
+	mutation->x = x;
+	mutation->y = y;
+	mutation->w = width;
+	mutation->h = height;
+
+	// Add it to our region's list
+	if (bz_list_append(region_data->mutations, mutation) < 0) {
+		wl_client_post_no_memory(client);
+		goto append_failed;
+	}
+
+	return;
+
+	append_failed:
+		free(mutation);
+	calloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to add or subtract rectangle to wl_region.");
 }
 
 
 // =================================================================================================
 //  wl_surface
 // -------------------------------------------------------------------------------------------------
+
+void bz_surface_dtor(struct wl_resource *data)
+{
+	struct bz_surface *bzsurf = wl_resource_get_user_data(data);
+
+	// If this is destroying a child, remove it from its parent.
+	bz_sever_child_from_parent(bzsurf); // No-op if not a child.
+
+	// If this is destroying a parent, remove its children's reference to it.
+	struct bz_surface *child;
+	bz_list_foreach(child, bzsurf->pending_state->surface_stack) {
+		if (child != bzsurf && child->subsurface != nullptr) {
+			child->subsurface->parent = nullptr;
+		}
+	}
+	 bz_list_foreach(child, bzsurf->active_state->surface_stack) {
+		if (child != bzsurf && child->subsurface != nullptr) {
+			child->subsurface->parent = nullptr;
+		}
+	}
+	struct bz_content_update *cu; bz_list_foreach(cu, bzsurf->content_updates) {
+		bz_list_foreach(child, cu->state->surface_stack) {
+			if (child != bzsurf && child->subsurface != nullptr) {
+				child->subsurface->parent = nullptr;
+			}
+		}
+	}
+
+	// If it's a subsurface, remove the subsurface's reference to this resource.
+	if (bzsurf->role == BZ_SURF_ROLE_WL_SUBSURFACE && bzsurf->subsurface != nullptr) {
+		bzsurf->subsurface->surface = nullptr;
+	}
+
+	// If it's an XDG surface, sever the link between the two.
+	if (bzsurf->xdgsurface != nullptr) {
+		bzsurf->xdgsurface->wlsurface = nullptr;
+	}
+	if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL && bzsurf->xdgtoplevel != nullptr) {
+		bzsurf->xdgtoplevel->wlsurface = nullptr;
+	} else if (bzsurf->role == BZ_SURF_ROLE_XDG_POPUP && bzsurf->xdgpopup != nullptr) {
+		bzsurf->xdgpopup->wlsurface = nullptr;
+	}
+
+	// Free our allocated state
+	bz_free_surface_state(bzsurf->pending_state);
+	bz_free_surface_state(bzsurf->active_state);
+	struct bz_content_update *curr_cu;
+	while ((curr_cu = bz_list_shift(bzsurf->content_updates)) != nullptr) {
+		bz_free_content_update(curr_cu);
+	}
+	bz_list_free(bzsurf->content_updates, nullptr);
+
+	// Remove the association with the viewporter (if present)
+	if (bzsurf->viewport != nullptr) {
+		bzsurf->viewport->surface = nullptr;
+		bzsurf->viewport = nullptr;
+	}
+
+	glDeleteTextures(1, &bzsurf->renderable.texture);
+
+	free(bzsurf);
+
+	// Not sure I really like this here... keep an eye out for a better place to unrender clients.
+	struct wl_client *client = wl_resource_get_client(data);
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	bz_graphics_schedule_render(client_data->breezy);
+}
 
 const struct wl_surface_interface bz_surface_implementation = {
 	.destroy = bz_surface_destroy,
@@ -240,29 +621,23 @@ const struct wl_surface_interface bz_surface_implementation = {
 	.offset = bz_surface_offset,
 };
 
-void bz_surface_dtor(struct wl_resource *data)
-{
-	struct bz_surface *bzsurf = wl_resource_get_user_data(data);
-
-	bz_surface_state_free(bzsurf->pending_state);
-	bz_surface_state_free(bzsurf->active_state);
-
-	glDeleteTextures(1, &bzsurf->renderable.texture);
-
-	free(bzsurf);
-
-	// Not sure I really like this here... keep an eye out for a better place to unrender clients.
-	struct wl_client *client = wl_resource_get_client(data);
-	struct bz_client *client_data = wl_client_get_user_data(client);
-	bz_graphics_schedule_render(client_data->breezy);
-}
-
 static void bz_surface_destroy(struct wl_client *client, struct wl_resource *resource)
 {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.destroy not implemented");
-	// TODO
-	// wl_resource_destroy(resource);
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
 	// Role must be destroyed first. Otherwise, "defunct_role_object" error
+	if (
+		(surface_data->role == BZ_SURF_ROLE_XDG_TOPLEVEL && surface_data->xdgtoplevel != nullptr) ||
+		(surface_data->role == BZ_SURF_ROLE_XDG_POPUP && surface_data->xdgpopup != nullptr) ||
+		(surface_data->role == BZ_SURF_ROLE_WL_SUBSURFACE && surface_data->subsurface != nullptr)
+	) {
+		bz_error(BZ_LOG_WL_DISPLAY, "Surface role must be destroyed before the surface.");
+		wl_resource_post_error(resource, WL_SURFACE_ERROR_DEFUNCT_ROLE_OBJECT,
+			"Surface role must be destroyed before the surface.");
+		return;
+	}
+
+	wl_resource_destroy(resource);
 }
 
 static void bz_surface_attach(
@@ -274,7 +649,15 @@ static void bz_surface_attach(
 ) {
 	struct bz_surface *surf_data = wl_resource_get_user_data(resource);
 	surf_data->pending_state->buffer = buffer;
-	// TODO: accommodate x and y. Consider how this would apply for both XDG surfaces and cursors.
+
+	if (wl_resource_get_version(resource) < 5) {
+		// x and y can only be used if the version is less than 5
+		// TODO: accommodate x and y. Consider how this would apply for both XDG surfaces and cursors.
+	} else if (x != 0 || y != 0) {
+		// If a non-zero x or y value is given for >= version 5, then it's a protocol error
+		wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_OFFSET,
+			"Cannot provide x and y to attach() for wl_surface versions >= 5.");
+	}
 }
 
 static void bz_surface_damage(
@@ -285,8 +668,24 @@ static void bz_surface_damage(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.damage not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	struct bz_rect *damage = calloc(1, sizeof(*damage));
+	if (damage == nullptr) {
+		wl_resource_post_no_memory(resource);
+		goto damage_alloc_failed;
+	}
+	damage->x = x;
+	damage->y = y;
+	damage->w = width;
+	damage->h = height;
+
+	bz_list_append(surface_data->pending_state->surface_damage, damage);
+
+	return;
+
+	damage_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to record surface damage.");
 }
 
 static void bz_surface_frame(
@@ -322,8 +721,30 @@ static void bz_surface_set_opaque_region(
 	struct wl_resource *resource,
 	struct wl_resource *region
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_opaque_region not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	// The current data gets replaced
+	if (surface_data->pending_state->opaque_region != nullptr) {
+		bz_list_free(surface_data->pending_state->opaque_region, free);
+	}
+
+	// A null region is allowed and meaningful for this handler.
+	if (region == nullptr) {
+		surface_data->pending_state->opaque_region = nullptr;
+		surface_data->pending_state->dirty_opaque_region = true;
+		return;
+	}
+
+	// Non-null value supplied, so copy the mutations over
+	struct bz_region *region_data = wl_resource_get_user_data(region);
+	struct bz_list *mutations = bz_list_clone(region_data->mutations, bz_clone_region_mutation);
+	if (mutations == nullptr) {
+		wl_resource_post_no_memory(resource);
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to clone opaque region mutation list.");
+		return;
+	}
+	surface_data->pending_state->opaque_region = mutations;
+	surface_data->pending_state->dirty_opaque_region = true;
 }
 
 static void bz_surface_set_input_region(
@@ -331,13 +752,34 @@ static void bz_surface_set_input_region(
 	struct wl_resource *resource,
 	struct wl_resource *region
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_input_region not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	// The current data gets replaced
+	if (surface_data->pending_state->input_region != nullptr) {
+		bz_list_free(surface_data->pending_state->input_region, free);
+	}
+
+	// A null region is allowed and meaningful for this handler.
+	if (region == nullptr) {
+		surface_data->pending_state->input_region = nullptr;
+		surface_data->pending_state->dirty_input_region = true;
+		return;
+	}
+
+	// Non-null value supplied, so copy the mutations over
+	struct bz_region *region_data = wl_resource_get_user_data(region);
+	struct bz_list *mutations = bz_list_clone(region_data->mutations, bz_clone_region_mutation);
+	if (mutations == nullptr) {
+		wl_resource_post_no_memory(resource);
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to clone input region mutation list.");
+		return;
+	}
+	surface_data->pending_state->input_region = mutations;
+	surface_data->pending_state->dirty_input_region = true;
 }
 
 static void bz_surface_commit(struct wl_client *client, struct wl_resource *resource)
 {
-	struct bz_client *client_data = wl_client_get_user_data(client);
 	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
 
 	// After creating an XDG role, the client must perform an initial commit w/o a buffer. The
@@ -360,35 +802,86 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 		return;
 	}
 
-	// Copy over our other pending state into active state.
-	bzsurf->active_state->buffer = bzsurf->pending_state->buffer;
-	bz_list_move_to_end(
-		bzsurf->active_state->frame_callbacks,
-		bzsurf->pending_state->frame_callbacks
-	);
+	// Copy over our pending state into a content update
+	struct bz_surface_state *cu_state = bz_init_surface_state();
+	if (cu_state == nullptr) {
+		wl_client_post_no_memory(client);
+		goto cu_state_alloc_failed;
+	}
+	cu_state->buffer = bzsurf->pending_state->buffer;
+	bz_list_move_to_end(bzsurf->pending_state->frame_callbacks, cu_state->frame_callbacks);
+	free(cu_state->surface_stack);
+	cu_state->surface_stack = bz_list_clone(bzsurf->pending_state->surface_stack, nullptr);
+	bz_list_move_to_end(bzsurf->pending_state->subsurface_states, cu_state->subsurface_states);
+	bz_list_move_to_end(bzsurf->pending_state->surface_damage, cu_state->surface_damage);
+	bz_list_move_to_end(bzsurf->pending_state->buffer_damage, cu_state->buffer_damage);
+	if (bzsurf->pending_state->dirty_opaque_region) {
+		bzsurf->pending_state->dirty_opaque_region = false; // Clear the dirty flag.
+		cu_state->dirty_opaque_region = true;
+		cu_state->opaque_region = bz_list_clone(bzsurf->pending_state->opaque_region, bz_clone_region_mutation);
+	}
+	if (bzsurf->pending_state->dirty_input_region) {
+		bzsurf->pending_state->dirty_input_region = false; // Clear the dirty flag.
+		cu_state->dirty_input_region = true;
+		cu_state->input_region = bz_list_clone(bzsurf->pending_state->input_region, bz_clone_region_mutation);
+	}
+	cu_state->vp_source = bz_clone_rect_dbl(bzsurf->pending_state->vp_source);
+	cu_state->vp_dest = bz_clone_dimension(bzsurf->pending_state->vp_dest);
+	cu_state->transform = bzsurf->pending_state->transform;
+	cu_state->scale = bzsurf->pending_state->scale;
 
-	if (bzsurf->active_state->buffer != nullptr) {
-		// Update our OpenGL texture
-		bz_write_surface_texture(bzsurf);
+	// Create that content update
+	struct bz_content_update *cu = calloc(1, sizeof(*cu));
+	if (cu == nullptr) {
+		wl_client_post_no_memory(client);
+		goto cu_alloc_failed;
+	}
+	cu->surface = bzsurf;
+	cu->state = cu_state;
+	cu->is_sync = bz_is_effectively_sync(bzsurf);
+	cu->dependencies = bz_list_create();
+	if (cu->dependencies == nullptr) {
+		wl_client_post_no_memory(client);
+		goto cu_claims_alloc_failed;
+	}
 
-		// Update our displayed window size
-		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->active_state->buffer);
-		bzsurf->renderable.size.w = wl_shm_buffer_get_width(shmbuf);
-		bzsurf->renderable.size.h = wl_shm_buffer_get_height(shmbuf);
+	// Add it to our list of content updates, taking note of the CU that comes before it.
+	struct bz_content_update *preceding_cu = bzsurf->content_updates->tail
+		? bzsurf->content_updates->tail->data
+		: nullptr;
+	bz_list_append(bzsurf->content_updates, cu);
 
-		// Since the buffer contents are saved on our OpenGL texture, release the buffer.
-		// TODO: This might need to be deferred for the DMA-BUF protocol..?
-		wl_buffer_send_release(bzsurf->active_state->buffer);
-
-		// Since the surface was just mapped (and therefore displayed), let's focus the surface
-		// TODO-dl13 (ish): Also consider wlr_layer_surfaces
-		if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
-			bz_mgmt_open_window(&client_data->breezy->window_mgmt, bzsurf);
+	// This CU depends on the item before it in the queue
+	if (preceding_cu != nullptr) {
+		preceding_cu->depended_on_by = cu;
+		bz_list_append(cu->dependencies, preceding_cu);
+	}
+	// This CU claims on all SCU's at the end of each direct child's queue.
+	struct bz_surface *child; bz_list_foreach(child, bzsurf->pending_state->surface_stack) {
+		if (child == bzsurf) { continue; } // Ignore self.
+		if (child->content_updates->tail != nullptr) {
+			struct bz_content_update *child_cu = child->content_updates->tail->data;
+			if (child_cu->is_sync && child_cu->claimed_by == nullptr) {
+				child_cu->claimed_by = cu;
+				bz_list_append(cu->dependencies, child_cu);
+			}
 		}
 	}
 
-	// Schedule a repaint
-	bz_graphics_schedule_render(client_data->breezy);
+	// Walk the content update queue to try and resolve any candidates. If the current commit
+	//   created an SCU, then there's no reason to walk because it didn't create a candidate.
+	if (bzsurf->role != BZ_SURF_ROLE_WL_SUBSURFACE || (bzsurf->subsurface && !bzsurf->subsurface->is_sync)) {
+		bz_walk_content_update_queue(cu);
+	}
+
+	return;
+
+	cu_claims_alloc_failed:
+		free(cu);
+	cu_alloc_failed:
+		bz_free_surface_state(cu_state);
+	cu_state_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to commit the wl_surface.");
 }
 
 static void bz_surface_set_buffer_transform(
@@ -396,8 +889,16 @@ static void bz_surface_set_buffer_transform(
 	struct wl_resource *resource,
 	int32_t transform
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_buffer_transform not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	if (transform < 0 || transform > 7) {
+		wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_TRANSFORM,
+			"Invalid transform supplied to surface.");
+		bz_warn(BZ_LOG_WL_DISPLAY, "Invalid transform supplied to surface: %d", transform);
+		return;
+	}
+	enum wl_output_transform xform = transform;
+	surface_data->pending_state->transform = xform;
 }
 
 static void bz_surface_set_buffer_scale(
@@ -405,8 +906,15 @@ static void bz_surface_set_buffer_scale(
 	struct wl_resource *resource,
 	int32_t scale
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.set_buffer_scale not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	if (scale <= 0) {
+		wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SCALE,
+			"Invalid scale supplied to surface.");
+		bz_warn(BZ_LOG_WL_DISPLAY, "Invalid scale supplied to surface: %d", scale);
+		return;
+	}
+	surface_data->pending_state->scale = scale;
 }
 
 static void bz_surface_damage_buffer(
@@ -417,8 +925,24 @@ static void bz_surface_damage_buffer(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.damage_buffer not implemented");
-	// TODO
+	struct bz_surface *surface_data = wl_resource_get_user_data(resource);
+
+	struct bz_rect *damage = calloc(1, sizeof(*damage));
+	if (damage == nullptr) {
+		wl_resource_post_no_memory(resource);
+		goto damage_alloc_failed;
+	}
+	damage->x = x;
+	damage->y = y;
+	damage->w = width;
+	damage->h = height;
+
+	bz_list_append(surface_data->pending_state->buffer_damage, damage);
+
+	return;
+
+	damage_alloc_failed:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to record buffer damage.");
 }
 
 static void bz_surface_offset(
@@ -429,6 +953,8 @@ static void bz_surface_offset(
 ) {
 	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.offset not implemented");
 	// TODO
+	// TODO: (since version 5)
+	// TODO: Make sure to ignore this request for subsurfaces.
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------
@@ -436,7 +962,8 @@ static void bz_surface_offset(
 static void bz_write_surface_texture(struct bz_surface *surface_data)
 {
 	// Initialize the texture
-	if (surface_data->renderable.texture == 0) {
+	bool init_needed = surface_data->renderable.texture == 0;
+	if (init_needed) {
 		bz_info(BZ_LOG_WL_DEVICES, "Initializing OpenGL texture for surface.");
 		glGenTextures(1, &surface_data->renderable.texture);
 		glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
@@ -457,22 +984,543 @@ static void bz_write_surface_texture(struct bz_surface *surface_data)
 	// --- Buffer Access Begin ---------------------------------------------------------------------
 
 	uint32_t *data = wl_shm_buffer_get_data(shmbuf);
-	int32_t width = wl_shm_buffer_get_width(shmbuf);
+	int32_t width = wl_shm_buffer_get_width(shmbuf); // Pixels per row, not bytes
 	int32_t height = wl_shm_buffer_get_height(shmbuf);
 	glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
-	glTexImage2D(
-		GL_TEXTURE_2D,
-		0,                // mipmap level
-		GL_BGRA_EXT,      // format
-		width,
-		height,
-		0,                // border
-		GL_BGRA_EXT,      // format
-		GL_UNSIGNED_BYTE, // type
-		data              // pointer to new data
-	);
+
+	if (init_needed) {
+		// TODO-dl12: This needs to be rerun whenever the buffer size changes
+		glTexImage2D(
+			GL_TEXTURE_2D,
+			0,                // mipmap level
+			GL_BGRA_EXT,      // format
+			width,
+			height,
+			0,                // border
+			GL_BGRA_EXT,      // format
+			GL_UNSIGNED_BYTE, // type
+			data              // pointer to new data
+		);
+	} else {
+		// First, we'll apply buffer damage (no transformation needed here)
+		bz_apply_buffer_damage(data, width, height, surface_data->active_state->buffer_damage);
+
+		// Then, apply surface damage, first transforming the damage into buffer coords.
+		struct bz_list *transformed_damage = bz_list_create();
+		struct bz_rect *rect; bz_list_foreach(rect, surface_data->active_state->surface_damage) {
+			struct bz_rect transformed = *rect;
+			// TODO-dl12: Modify the rectangle as needed (scale + transform)
+			bz_list_append(transformed_damage, &transformed);
+		}
+		bz_apply_buffer_damage(data, width, height, transformed_damage);
+		bz_list_free(transformed_damage, nullptr);
+	}
 
 	// --- Buffer Access End -----------------------------------------------------------------------
 	wl_shm_buffer_end_access(shmbuf);
+}
+
+static void bz_apply_buffer_damage(
+	uint32_t *shm_data,
+	int32_t buff_w,
+	int32_t buff_h,
+	struct bz_list *damage
+) {
+	struct bz_rect *rect; bz_list_foreach(rect, damage) {
+		// May want to update these..?
+		int32_t x = bz_clamp(rect->x, 0, buff_w);
+		int32_t y = bz_clamp(rect->y, 0, buff_h);
+		int32_t w = bz_clamp(rect->w, 0, buff_w - x); // minux 'x' so it doesn't overflow when copying
+		int32_t h = bz_clamp(rect->h, 0, buff_h - y); // minux 'y' so it doesn't overflow when copying
+		glPixelStorei(GL_UNPACK_SKIP_PIXELS, x);
+		glPixelStorei(GL_UNPACK_SKIP_ROWS, y);
+		glTexSubImage2D(
+			GL_TEXTURE_2D,
+			0,          // Mipmap level
+			x, y, w, h, // Area to update
+			GL_BGRA_EXT,
+			GL_UNSIGNED_BYTE,
+			shm_data
+		);
+	}
+	// Safety cleanup
+	glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+	glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+}
+
+static bool bz_is_effectively_sync(struct bz_surface *surface_data)
+{
+	// Only subsurfaces can be sync.
+	if (surface_data->role != BZ_SURF_ROLE_WL_SUBSURFACE || surface_data->subsurface == nullptr) {
+		return false;
+	}
+	// If it's sync ... then it's sync.
+	if (surface_data->subsurface->is_sync) { // TODO-dl12: CLion gave "points to zero page" here.
+		return true;
+	}
+	// If any of its parents are sync, then it's sync.
+	return bz_is_effectively_sync(surface_data->subsurface->parent);
+}
+
+static void bz_walk_content_update_queue(struct bz_content_update *cu)
+{
+	// Walk upwards to find the root-level DCU
+	struct bz_content_update *root_cu = nullptr;
+	struct bz_content_update *parent_cu = cu;
+	while (parent_cu != nullptr) {
+		root_cu = parent_cu;
+		parent_cu = (parent_cu->claimed_by != nullptr)
+			? parent_cu->claimed_by
+			: parent_cu->depended_on_by;
+	}
+	if (root_cu->is_sync) {
+		return; // We hit a dead end. There is no parent DCU, just some SCUs.
+	}
+	if (root_cu->surface->content_updates->head->data != root_cu) {
+		return; // This graph depends on another graph to complete first.
+	}
+
+	// Walk all the branches claimed by the root DCU, checking if their dependencies are satisfied.
+	if (bz_is_content_update_satisfied(root_cu)) {
+		struct wl_client *client = wl_resource_get_client(cu->surface->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+
+		// Apply our content updates, and then prune them out of our treelists.
+		struct bz_list *processed_CUs = bz_apply_content_update(root_cu);
+		struct bz_content_update *curr_cu;
+		while ((curr_cu = bz_list_shift(processed_CUs)) != nullptr) {
+			bz_free_content_update(curr_cu);
+		}
+		bz_list_free(processed_CUs, nullptr);
+
+		// Schedule a repaint
+		bz_graphics_schedule_render(client_data->breezy);
+	}
+}
+
+/**
+ * A content update is satisfied if:
+ *   (1) all of its dependencies are satisfied, and...
+ *   (2) it has no blockers.
+ */
+static bool bz_is_content_update_satisfied(struct bz_content_update *cu)
+{
+	// First, check to make sure all its dependencies are satisfied.
+	struct bz_content_update *child_cu; bz_list_foreach(child_cu, cu->dependencies) {
+		if (!bz_is_content_update_satisfied(child_cu)) {
+			return false;
+		}
+	}
+
+	// Synchronized commits that haven't been claimed are blockers.
+	if (cu->is_sync && cu->claimed_by == nullptr && cu->depended_on_by == nullptr) {
+		return false;
+	}
+
+	// If we made it here, all constraints have been satisfied!
+	return true;
+}
+
+/**
+ * Applies the full tree of content updates, starting with the deepest CUs (leaves) first and
+ * working backwards to the root. It's assumed that the full tree of the provided CU has all of
+ * its constraints fully satisfied already.
+ *
+ * All CUs that were applied are returned in a single list in the order that they were applied.
+ */
+static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
+{
+	struct bz_list *applied_CUs = bz_list_create();
+
+	// First, apply all the CUs this depends on, starting at the leaf nodes.
+	struct bz_content_update *cu_node; bz_list_foreach(cu_node, cu->dependencies) {
+		struct bz_list *dep_CUs = bz_apply_content_update(cu_node);
+		bz_list_move_to_end(dep_CUs, applied_CUs);
+		bz_list_free(dep_CUs, nullptr);
+	}
+
+	// Then, apply the current CU. (This is also the base case.)
+	struct bz_surface *surface = cu->surface;
+	surface->active_state->buffer = cu->state->buffer;
+	bz_list_move_to_end(cu->state->frame_callbacks, surface->active_state->frame_callbacks);
+	// Surface stack
+	if (surface->active_state->surface_stack != nullptr) {
+		bz_list_free(surface->active_state->surface_stack, nullptr);
+	}
+	surface->active_state->surface_stack = bz_list_clone(cu->state->surface_stack, nullptr);
+	bz_apply_subsurface_cu_state(cu->state->subsurface_states, surface);
+	// Move damage
+	bz_list_clear(surface->active_state->surface_damage, free);
+	bz_list_move_to_end(cu->state->surface_damage, surface->active_state->surface_damage);
+	bz_list_clear(surface->active_state->buffer_damage, free);
+	bz_list_move_to_end(cu->state->buffer_damage, surface->active_state->buffer_damage);
+	// Move opaque/input regions
+	if (cu->state->dirty_opaque_region) {
+		surface->active_state->dirty_opaque_region = true;
+		if (surface->active_state->opaque_region != nullptr) {
+			bz_list_free(surface->active_state->opaque_region, free);
+		}
+		surface->active_state->opaque_region = bz_list_clone(cu->state->opaque_region, bz_clone_region_mutation);
+	}
+	if (cu->state->dirty_input_region) {
+		surface->active_state->dirty_input_region = true;
+		if (surface->active_state->input_region != nullptr) {
+			bz_list_free(surface->active_state->input_region, free);
+		}
+		surface->active_state->input_region = bz_list_clone(cu->state->input_region, bz_clone_region_mutation);
+	}
+	// Viewporter stuff
+	if (surface->active_state->vp_source) { free(surface->active_state->vp_source); }
+	if (surface->active_state->vp_dest)   { free(surface->active_state->vp_dest); }
+	surface->active_state->vp_source = bz_clone_rect_dbl(cu->state->vp_source);
+	surface->active_state->vp_dest = bz_clone_dimension(cu->state->vp_dest);
+	// Buffer transform and scale
+	surface->active_state->transform = cu->state->transform;
+	surface->active_state->scale = cu->state->scale;
+
+	// When a CU is applied, the buffer is applied first. This means all other coordinates are
+	//   relative to the new buffer. If there is no new buffer, the coordinates are relative to
+	//   the previous CU.
+	if (surface->active_state->buffer != nullptr) {
+		// Update our OpenGL texture
+		bz_write_surface_texture(surface);
+
+		// Update our displayed window size
+		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(surface->active_state->buffer);
+		surface->renderable.size.w = wl_shm_buffer_get_width(shmbuf);
+		surface->renderable.size.h = wl_shm_buffer_get_height(shmbuf);
+
+		// Since the buffer contents are saved on our OpenGL texture, release the buffer.
+		// TODO-dl??: This might need to be deferred for the DMA-BUF protocol..?
+		wl_buffer_send_release(surface->active_state->buffer);
+
+		// Since the surface was just mapped (and therefore displayed), let's focus the surface
+		// TODO-dl?? : Also consider wlr_layer_surfaces
+		if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL || surface->role == BZ_SURF_ROLE_XDG_POPUP) {
+			struct wl_client *client = wl_resource_get_client(surface->resource);
+			struct bz_client *client_data = wl_client_get_user_data(client);
+			bz_mgmt_open_window(&client_data->breezy->window_mgmt, surface);
+		}
+	}
+
+	bz_list_append(applied_CUs, cu);
+	return applied_CUs;
+}
+
+static void bz_apply_subsurface_cu_state(
+	struct bz_list *subsurface_states,
+	struct bz_surface *surface
+) {
+	struct bz_subsurface_state *subsurf_state; bz_list_foreach(subsurf_state, subsurface_states) {
+		// Update the relative render position
+		subsurf_state->subsurface->surface->renderable.position.x = subsurf_state->position.x;
+		subsurf_state->subsurface->surface->renderable.position.y = subsurf_state->position.y;
+	}
+}
+
+static void bz_free_content_update(struct bz_content_update *content_update)
+{
+	struct bz_content_update *cu = content_update;
+
+	if (cu->claimed_by != nullptr) {
+		bz_list_remove(cu->claimed_by->dependencies, cu, nullptr);
+	}
+	if (cu->depended_on_by != nullptr) {
+		bz_list_remove(cu->depended_on_by->dependencies, cu, nullptr);
+	}
+	bz_list_remove(cu->surface->content_updates, cu, nullptr);
+	bz_list_free(cu->dependencies, nullptr);
+
+	bz_free_surface_state(cu->state);
+
+	free(cu);
+}
+
+/** Parameter and return type are both "struct bz_region_mutation *". */
+static void *bz_clone_region_mutation(void *input)
+{
+	struct bz_region_mutation *in = input;
+	struct bz_region_mutation *result = calloc(1, sizeof(*result));
+	result->op = in->op;
+	result->x = in->x;
+	result->y = in->y;
+	result->w = in->w;
+	result->h = in->h;
+	return result;
+}
+
+static void bz_sever_child_from_parent(struct bz_surface *child)
+{
+	// Data validation. Return quietly so we don't need to repeat these checks everywhere we call this.
+	if (child == nullptr) {
+		return;
+	}
+	if (child->role != BZ_SURF_ROLE_WL_SUBSURFACE || child->subsurface == nullptr || child->subsurface->parent == nullptr) {
+		return;
+	}
+
+	struct bz_surface *parent = child->subsurface->parent;
+
+	// (We'll be iterating on this a few times below.)
+	struct bz_content_update *cu;
+
+	// Remove child references from parent surface stacks
+	bz_list_remove(parent->pending_state->surface_stack, child, nullptr);
+	bz_list_remove(parent->active_state->surface_stack, child, nullptr);
+	bz_list_foreach(cu, parent->content_updates) {
+		bz_list_remove(cu->state->surface_stack, child, nullptr);
+	}
+
+	// Remove child subsurface state updates from parent
+	bz_list_filter(parent->pending_state->subsurface_states, child, bz_subsurface_state_matches, free);
+	bz_list_filter(parent->active_state->subsurface_states, child, bz_subsurface_state_matches, free);
+	bz_list_foreach(cu, parent->content_updates) {
+		bz_list_filter(cu->state->subsurface_states, child, bz_subsurface_state_matches, free);
+	}
+
+	// Remove references to each other.
+	child->subsurface->parent = nullptr;
+}
+
+
+// =================================================================================================
+//  wl_subsurface
+// -------------------------------------------------------------------------------------------------
+
+void bz_subsurface_dtor(struct wl_resource *subsurface)
+{
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(subsurface);
+
+	if (subsurface_data->surface != nullptr) {
+		// Sever the ties to its parent (if not already done by the parent surface dtor).
+		bz_sever_child_from_parent(subsurface_data->surface);
+
+		// Sever the wl_surface ties to this resource.
+		subsurface_data->surface->subsurface = nullptr;
+	}
+
+	free(subsurface_data);
+}
+
+const struct wl_subsurface_interface bz_subsurface_implementation = {
+	.destroy = bz_subsurface_destroy,
+	.set_position = bz_subsurface_set_position,
+	.place_above = bz_subsurface_place_above,
+	.place_below = bz_subsurface_place_below,
+	.set_sync = bz_subsurface_set_sync,
+	.set_desync = bz_subsurface_set_desync,
+};
+
+const struct wl_subsurface_interface bz_subsurface_implementation;
+
+static void bz_subsurface_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static void bz_subsurface_set_position(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t x,
+	int32_t y
+) {
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+	struct bz_subsurface_state *state = bz_subsurface_get_pending_state(subsurface_data);
+
+	if (state == nullptr) {
+		wl_resource_post_no_memory(resource);
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to look up state on parent surface.");
+		return;
+	}
+
+	// (No restrictions on these. Negative values are allowed.)
+	state->position.x = x;
+	state->position.y = y;
+}
+
+static void bz_subsurface_place_above(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	struct wl_resource *sibling
+) {
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+	struct bz_surface *sibling_data = wl_resource_get_user_data(sibling);
+
+	// Make sure the sibling is not itself
+	if (subsurface_data->surface == sibling_data) {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"Sibling cannot equal self.");
+		goto validation_failure;
+	}
+
+	// Make sure the given sibling is in the parent's surface stack.
+	if (!bz_list_contains(subsurface_data->parent->pending_state->surface_stack, sibling_data)) {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"Sibling not found in parent surface.");
+		goto validation_failure;
+	}
+
+	// Look up the subsurface's state on the parent
+	struct bz_subsurface_state *state = bz_subsurface_get_pending_state(subsurface_data);
+	if (state == nullptr) {
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	// Make the change. Surface should be placed AFTER the sibling in parent's stack
+	struct bz_list *parent_stack = subsurface_data->parent->pending_state->surface_stack;
+	bz_list_remove(parent_stack, subsurface_data->surface, nullptr);
+	bz_list_insert(parent_stack, subsurface_data->surface, sibling_data);
+
+	return;
+
+	validation_failure:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to place subsurface above sibling.");
+}
+
+static void bz_subsurface_place_below(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	struct wl_resource *sibling
+) {
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+	struct bz_surface *sibling_data = wl_resource_get_user_data(sibling);
+
+	// Make sure the sibling is not itself
+	if (subsurface_data->surface == sibling_data) {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"Sibling cannot equal self.");
+		goto validation_failure;
+	}
+
+	// Make sure the given sibling is in the parent's surface stack.
+	if (!bz_list_contains(subsurface_data->parent->pending_state->surface_stack, sibling_data)) {
+		wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+			"Sibling not found in parent surface.");
+		goto validation_failure;
+	}
+
+	// Look up the subsurface's state on the parent
+	struct bz_subsurface_state *state = bz_subsurface_get_pending_state(subsurface_data);
+	if (state == nullptr) {
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	// Make the change
+	// Subsurface should be placed BEFORE the sibling in parent's stack
+	struct bz_list *parent_stack = subsurface_data->parent->pending_state->surface_stack;
+	bz_list_remove(parent_stack, subsurface_data->surface, nullptr);
+	struct bz_surface *after_sibling = nullptr;
+	struct bz_surface *data; bz_list_foreach(data, parent_stack) {
+		if (data == sibling_data) {
+			break;
+		}
+		after_sibling = data;
+	}
+	bz_list_insert(parent_stack, subsurface_data->surface, after_sibling);
+
+	return;
+
+	validation_failure:
+		bz_error(BZ_LOG_WL_DISPLAY, "Failed to place subsurface below sibling.");
+}
+
+static void bz_subsurface_set_sync(struct wl_client *client, struct wl_resource *resource)
+{
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+
+	// Already sync.
+	if (subsurface_data->is_sync) {
+		return;
+	}
+
+	subsurface_data->is_sync = true;
+}
+
+static void bz_subsurface_set_desync(struct wl_client *client, struct wl_resource *resource)
+{
+	struct bz_subsurface *subsurface_data = wl_resource_get_user_data(resource);
+
+	// Already desync.
+	if (!subsurface_data->is_sync) {
+		return;
+	}
+
+	subsurface_data->is_sync = false;
+
+	// When a surface changes to desync, all UNREACHABLE SCUs in its CU queue become desync, and
+	//   any dependencies leading into these CUs are severed.
+	struct bz_list *eval_candidates = nullptr;
+	struct bz_content_update *cu; bz_list_foreach(cu, subsurface_data->surface->content_updates) {
+		// First, check itself. If it's already desync, then it doesn't matter.
+		if (!cu->is_sync) { continue; }
+
+		// Next, walk up its content update tree, looking for a DCU.
+		struct bz_content_update *parent_cu = cu;
+		while (parent_cu != nullptr) {
+			if (!parent_cu->is_sync) { break; }
+			parent_cu = parent_cu->claimed_by != nullptr
+				? parent_cu->claimed_by
+				: parent_cu->depended_on_by;
+		}
+		if (parent_cu != nullptr && !parent_cu->is_sync) {
+			continue; // Found a desync, so no need to change the current CU into a DCU.
+		}
+
+		// If we made it here, then it's unreachable. Change its type, and sever its dependencies.
+		cu->is_sync = false;
+		if (cu->claimed_by != nullptr) {
+			bz_list_remove(cu->claimed_by->dependencies, cu, nullptr);
+			cu->claimed_by = nullptr;
+		}
+
+		// Record all DCU candidates for possible evaluation once we exit this loop.
+		if (eval_candidates == nullptr) {
+			eval_candidates = bz_list_create();
+			if (eval_candidates == nullptr) {
+				wl_resource_post_no_memory(resource);
+				bz_error(BZ_LOG_WL_DISPLAY, "Failed to allocate memory for eval list.");
+				return;
+			}
+		}
+		bz_list_append(eval_candidates, cu);
+	}
+
+	// Try evaluating all of our candidates. Since they're now desync, maybe they can activate.
+	if (eval_candidates != nullptr) {
+		struct bz_content_update *eval_cu; bz_list_foreach(eval_cu, eval_candidates) {
+			bz_walk_content_update_queue(eval_cu);
+		}
+		bz_list_free(eval_candidates, nullptr);
+	}
+}
+
+// ---  Helpers  -----------------------------------------------------------------------------------
+
+static struct bz_subsurface_state *bz_subsurface_get_pending_state(struct bz_subsurface *for_child)
+{
+	// Look up the state object on the parent
+	struct bz_surface *parent = for_child->parent;
+	if (parent != nullptr) {
+		struct bz_subsurface_state *state = bz_list_find(parent->pending_state->subsurface_states, for_child, bz_subsurface_state_matches);
+		if (state == nullptr) {
+			state = calloc(1, sizeof(*state));
+			state->subsurface = for_child;
+			bz_list_append(parent->pending_state->subsurface_states, state);
+		}
+		return state;
+	}
+
+	// Shouldn't be able to get here. Return null to indicate an error.
+	return nullptr;
+}
+
+static bool bz_subsurface_state_matches(void *list_item, void *match_data)
+{
+	struct bz_subsurface *subsurface = match_data;
+	struct bz_subsurface_state *state = list_item;
+
+	return state->subsurface == subsurface;
 }

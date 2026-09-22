@@ -6,6 +6,22 @@
 #include <stdlib.h>
 
 
+struct bz_rect_dbl *bz_clone_rect_dbl(struct bz_rect_dbl *source)
+{
+	if (source == nullptr) { return nullptr; }
+	struct bz_rect_dbl *dest = calloc(1, sizeof(*dest));
+	*dest = *source;
+	return dest;
+}
+
+struct bz_dimension *bz_clone_dimension(struct bz_dimension *source)
+{
+	if (source == nullptr) { return nullptr; }
+	struct bz_dimension *dest = calloc(1, sizeof(*dest));
+	*dest = *source;
+	return dest;
+}
+
 /**
  * This method creates a projection matrix which maps the given x1/y1/w1/h1 to x2/y2/w2/h2.
  *

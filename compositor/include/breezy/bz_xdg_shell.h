@@ -26,7 +26,7 @@ enum bz_xdg_surface_type {
 	BZ_XDG_SURF_POPUP,
 };
 struct bz_toplevel_configure {
-	struct wl_array states; // TODO: Remember to call wl_array_release(&states)
+	struct wl_array states;
 	struct bz_dimension max_size;
 	struct bz_dimension recommended_size;
 };

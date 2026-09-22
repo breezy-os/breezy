@@ -13,7 +13,7 @@ https://breezy.zenittini.dev
 
 The project relies on the following libraries, some you may need to install manually through your package manager, but others might be provided in your OS already. When you run the meson compile command (later on), it will tell you which you're missing. Oftentimes, you'll need both the base package *and* the `-dev` / `-devel` package.
 
-* **Graphics:** `libdrm` `gbm` `opengl` `mesa`
+* **Graphics:** `libdrm` `gbm` `opengl` `mesa` `libdisplay-info`
 * **Input:** `udev` `libinput` `libseat` `libxkbcommon`
 * **Other:** `wayland` (possibly with a `-server` and `-client` suffix)
 

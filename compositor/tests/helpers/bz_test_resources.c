@@ -4,6 +4,7 @@
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
+#include "breezy/bz_wp_viewporter.h"
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_list.h"
 
@@ -20,13 +21,33 @@ void bz_free_breezy_data(struct bz_breezy *data);
 struct bz_client *bz_create_client_data(void);
 void bz_free_client_data(struct bz_client *data);
 
+// -- bz_region --
+struct bz_region *bz_create_region_data(void);
+void bz_free_region_data(struct bz_region *data);
+
 // -- bz_surface --
 struct bz_surface *bz_create_surface_data(void);
 void bz_free_surface_data(struct bz_surface *data);
 
+// -- bz_subsurface --
+struct bz_subsurface *bz_create_subsurface_data(void);
+void bz_free_subsurface_data(struct bz_subsurface *data);
+
+// -- bz_content_update --
+struct bz_content_update *bz_create_content_update_data(void);
+void bz_free_content_update_data(struct bz_content_update *data);
+
 // -- bz_wl_seat --
 struct bz_wl_seat *bz_create_seat_data(void);
 void bz_free_seat_data(struct bz_wl_seat *data);
+
+// -- bz_data_device --
+struct bz_data_device *bz_create_data_device_data(void);
+void bz_free_data_device_data(struct bz_data_device *data);
+
+// -- bz_wp_viewport --
+struct bz_wp_viewport *bz_create_wp_viewport_data(void);
+void bz_free_wp_viewport_data(struct bz_wp_viewport *data);
 
 // -- bz_xdg_surface --
 struct bz_xdg_surface *bz_create_xdg_surface_data();
@@ -49,6 +70,8 @@ struct bz_breezy *bz_create_breezy_data(void)
 {
 	struct bz_breezy *data = calloc(1, sizeof(*data));
 
+	data->drm.mode_info.hdisplay = 1920;
+	data->drm.mode_info.vdisplay = 1080;
 	data->window_mgmt.activable_surfaces = bz_list_create();
 	data->wayland.clients = bz_list_create();
 
@@ -94,6 +117,30 @@ void bz_free_client_data(struct bz_client *data)
 
 
 // =================================================================================================
+//  bz_region
+// -------------------------------------------------------------------------------------------------
+
+struct bz_region *bz_create_region_data(void)
+{
+	struct bz_region *data = calloc(1, sizeof(*data));
+
+	data->mutations = bz_list_create();
+
+	return data;
+}
+
+void bz_free_region_data(struct bz_region *data)
+{
+	if (data) {
+		if (data->mutations) {
+			bz_list_free(data->mutations, free);
+		}
+		free(data);
+	}
+}
+
+
+// =================================================================================================
 //  bz_surface
 // -------------------------------------------------------------------------------------------------
 
@@ -105,9 +152,24 @@ struct bz_surface *bz_create_surface_data(void)
 
 	data->pending_state = calloc(1, sizeof(*data->pending_state));
 	data->pending_state->frame_callbacks = bz_list_create();
+	data->pending_state->surface_stack = bz_list_create();
+	data->pending_state->surface_damage = bz_list_create();
+	data->pending_state->buffer_damage = bz_list_create();
+	data->pending_state->subsurface_states = bz_list_create();
+	data->pending_state->scale = 1;
+
+	data->content_updates = bz_list_create();
 
 	data->active_state  = calloc(1, sizeof(*data->active_state));
 	data->active_state->frame_callbacks = bz_list_create();
+	data->active_state->surface_stack = bz_list_create();
+	data->active_state->surface_damage = bz_list_create();
+	data->active_state->buffer_damage = bz_list_create();
+	data->active_state->subsurface_states = bz_list_create();
+	data->active_state->scale = 1;
+
+	bz_list_insert(data->pending_state->surface_stack, data, nullptr);
+	bz_list_insert(data->active_state->surface_stack, data, nullptr);
 
 	return data;
 }
@@ -117,11 +179,76 @@ void bz_free_surface_data(struct bz_surface *data)
 	if (data) {
 		if (data->pending_state) {
 			bz_list_free(data->pending_state->frame_callbacks, nullptr);
+			bz_list_free(data->pending_state->surface_stack, nullptr);
+			bz_list_free(data->pending_state->surface_damage, free);
+			bz_list_free(data->pending_state->buffer_damage, free);
+			bz_list_free(data->pending_state->opaque_region, free);
+			bz_list_free(data->pending_state->input_region, free);
+			bz_list_free(data->pending_state->subsurface_states, free);
+			if (data->pending_state->vp_source) { free(data->pending_state->vp_source); }
+			if (data->pending_state->vp_dest)   { free(data->pending_state->vp_dest); }
 			free(data->pending_state);
 		}
 		if (data->active_state) {
 			bz_list_free(data->active_state->frame_callbacks, nullptr);
+			bz_list_free(data->active_state->surface_stack, nullptr);
+			bz_list_free(data->active_state->surface_damage, free);
+			bz_list_free(data->active_state->buffer_damage, free);
+			bz_list_free(data->active_state->opaque_region, free);
+			bz_list_free(data->active_state->input_region, free);
+			bz_list_free(data->active_state->subsurface_states, free);
+			if (data->active_state->vp_source) { free(data->active_state->vp_source); }
+			if (data->active_state->vp_dest)   { free(data->active_state->vp_dest); }
 			free(data->active_state);
+		}
+		if (data->content_updates) {
+			bz_list_free(data->content_updates, nullptr);
+		}
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_subsurface
+// -------------------------------------------------------------------------------------------------
+
+struct bz_subsurface *bz_create_subsurface_data(void)
+{
+	struct bz_subsurface *data = calloc(1, sizeof(*data));
+
+	data->is_sync = true; // This is the default in our code.
+
+	return data;
+}
+
+void bz_free_subsurface_data(struct bz_subsurface *data)
+{
+	if (data != nullptr) {
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_content_update
+// -------------------------------------------------------------------------------------------------
+
+struct bz_content_update *bz_create_content_update_data(void)
+{
+	struct bz_content_update *data = calloc(1, sizeof(*data));
+
+	data->is_sync = false;
+	data->dependencies = bz_list_create();
+
+	return data;
+}
+
+void bz_free_content_update_data(struct bz_content_update *data)
+{
+	if (data != nullptr) {
+		if (data->dependencies != nullptr) {
+			bz_list_free(data->dependencies, nullptr);
 		}
 		free(data);
 	}
@@ -138,6 +265,7 @@ struct bz_wl_seat *bz_create_seat_data(void)
 
 	data->keyboards = bz_list_create();
 	data->pointers = bz_list_create();
+	data->data_devices = bz_list_create();
 
 	return data;
 }
@@ -151,6 +279,45 @@ void bz_free_seat_data(struct bz_wl_seat *data)
 		if (data->pointers) {
 			bz_list_free(data->pointers, nullptr);
 		}
+		if (data->data_devices) {
+			bz_list_free(data->data_devices, nullptr);
+		}
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_data_device
+// -------------------------------------------------------------------------------------------------
+
+struct bz_data_device *bz_create_data_device_data(void)
+{
+	struct bz_data_device *data = calloc(1, sizeof(*data));
+	return data;
+}
+
+void bz_free_data_device_data(struct bz_data_device *data)
+{
+	if (data) {
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_wp_viewport
+// -------------------------------------------------------------------------------------------------
+
+struct bz_wp_viewport *bz_create_wp_viewport_data(void)
+{
+	struct bz_wp_viewport *data = calloc(1, sizeof(*data));
+	return data;
+}
+
+void bz_free_wp_viewport_data(struct bz_wp_viewport *data)
+{
+	if (data) {
 		free(data);
 	}
 }

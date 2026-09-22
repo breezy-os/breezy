@@ -138,6 +138,70 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 }
 
 /**
+ * Removes and returns the first item on the list. If the list is uninitialized or empty, nullptr
+ * is returned.
+ */
+void *bz_list_shift(struct bz_list *list)
+{
+	if (list == nullptr) {
+		bz_error(BZ_LOG_LIST, "List shift failed: list was not initialized.");
+		return nullptr;
+	}
+	if (list->length == 0) {
+		return nullptr;
+	}
+
+	struct bz_node *first = list->head;
+	void *data = first->data;
+
+	if (list->length == 1) {
+		list->head = nullptr;
+		list->tail = nullptr;
+		list->length--;
+	} else {
+		struct bz_node *next = first->next;
+		next->prev = nullptr;
+		list->head = next;
+		list->length--;
+	}
+
+	free(first);
+	return data;
+}
+
+/**
+ * Removes and returns the last item on the list. If the list is uninitialized or empty, nullptr
+ * is returned.
+ */
+void *bz_list_pop(struct bz_list *list)
+{
+	if (list == nullptr) {
+		bz_error(BZ_LOG_LIST, "List pop failed: list was not initialized.");
+		return nullptr;
+	}
+	if (list->length == 0) {
+		return nullptr;
+	}
+
+	struct bz_node *last = list->tail;
+	void *data = last->data;
+
+	if (list->length == 1) {
+		list->head = nullptr;
+		list->tail = nullptr;
+		list->length--;
+	} else {
+		struct bz_node *prev = last->prev;
+		prev->next = nullptr;
+		list->tail = prev;
+		list->length--;
+	}
+
+	free(last);
+	return data;
+}
+
+/**
  * Replaces the first instance of "search_data" in the provided list with "replacement", returning
  * 0 on success or a negative value on failure. If a function is provided for "free_data", then the
  * replaced data will be freed via that function if the replacement occurs.
@@ -417,6 +481,26 @@ bool bz_list_contains(struct bz_list *list, void *match_data)
 }
 
 /**
+ * Not very efficient or intended for production use, but a helpful utility for debugging or testing.
+ *
+ * Returns the index of the given item in the list, or -1 if not found.
+ */
+int bz_list_get_index(struct bz_list *list, void *item)
+{
+	if (list == nullptr) {
+		return -1;
+	}
+
+	int index = 0;
+	void *data; bz_list_foreach(data, list) {
+		if (data == item) return index;
+		index++;
+	}
+
+	return -1;
+}
+
+/**
  * Returns a neighbor of item, prioritized in the following order:
  *   1. The node that comes BEFORE the item (if present)
  *   2. The node that comes AFTER the item (if present)
@@ -458,7 +542,7 @@ void *bz_list_get_neighbor(struct bz_list *list, void *item)
  * empty list. If either list is null, a value of -1 will be returned. Otherwise, the number of
  * moved items will be returned.
  */
-int bz_list_move_to_end(struct bz_list *list_dest, struct bz_list *list_src)
+int bz_list_move_to_end(struct bz_list *list_src, struct bz_list *list_dest)
 {
 	// Validation checks
 	if (list_dest == nullptr) {
@@ -563,18 +647,15 @@ int bz_list_move_item_to_end(struct bz_list *list, void *data)
 
 /**
  * Creates a duplicate of the provided list. The data for each element is provided to "clone_data",
- * and its returned value is used as the data for the new list. The original list is unchanged.
+ * and its returned value is used as the data for the new list. If clone_data is null, a shallow
+ * clone is performed.
+ *
+ * The original list is unchanged.
  */
 struct bz_list *bz_list_clone(struct bz_list *list, void *(*clone_data)(void *))
 {
 	// Base case - source list is null.
 	if (list == nullptr) { return nullptr; }
-
-	// Error case - null "clone_data" function. This is a required parameter.
-	if (clone_data == nullptr) {
-		bz_error(BZ_LOG_LIST, "Clone failed. 'clone_data' parameter is required but was null.");
-		return nullptr;
-	}
 
 	// Create the new list
 	struct bz_list *new_list = bz_list_create();
@@ -586,7 +667,7 @@ struct bz_list *bz_list_clone(struct bz_list *list, void *(*clone_data)(void *))
 	// Clone each item from the source list into the new list.
 	struct bz_node *current = list->head;
 	while (current != nullptr) {
-		void *cloned_data = clone_data(current->data);
+		void *cloned_data = clone_data == nullptr ? current->data : clone_data(current->data);
 		if (bz_list_append(new_list, cloned_data) != 0) {
 			goto append_failure;
 		}

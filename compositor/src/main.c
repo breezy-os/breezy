@@ -25,14 +25,12 @@ int main(void)
 
 	// Set up our logger
 	bz_log_initialize(BZ_LOG_INFO);
+	bz_log_set_level(BZ_LOG_TEMP, BZ_LOG_DEBUG);
 	bz_log_set_level(BZ_LOG_INPUT, BZ_LOG_DEBUG);
 	bz_log_set_level(BZ_LOG_WINDOW_MGMT, BZ_LOG_DEBUG);
 	bz_log_set_level(BZ_LOG_WL_DEVICES, BZ_LOG_DEBUG);
-	// bz_log_set_level(BZ_LOG_WAYLAND, BZ_LOG_DEBUG);
-	// bz_log_set_level(BZ_LOG_WL_DISPLAY, BZ_LOG_DEBUG);
-	// bz_log_set_level(BZ_LOG_WL_XDG_SHELL, BZ_LOG_DEBUG);
 
-	// Initialize our main "breezy" struct, explicitly setting non-zero/nullptr values as needed.
+	// Initialize our main "breezy" struct, explicitly setting non-zero/non-nullptr values as needed.
 	struct bz_breezy breezy = { 0 };
 	breezy.drm.fd = -1;
 	breezy.drm.device_id = -1;
