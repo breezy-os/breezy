@@ -1294,10 +1294,9 @@ int bz_graphics_deactivate(struct bz_breezy *breezy)
  */
 void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp)
 {
-	// TODO-dl??: Only emit for surfaces that are visible.
+	// TODO-dl14: Only emit for surfaces that are visible.
 	struct bz_surface *parent_surf; bz_list_foreach(parent_surf, surfaces) {
 		struct bz_surface *child_surf; bz_list_foreach(child_surf, parent_surf->active_state->surface_stack) {
-			// TODO-dl12: Buffer overflow here:
 			struct wl_resource *curr_cb; bz_list_foreach(curr_cb, child_surf->active_state->frame_callbacks) {
 				wl_callback_send_done(curr_cb, timestamp);
 				wl_resource_destroy(curr_cb);

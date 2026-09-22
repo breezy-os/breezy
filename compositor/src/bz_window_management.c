@@ -51,6 +51,8 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 	struct wl_resource *res = nullptr;
 	if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
 		res = surface->xdgtoplevel->resource;
+	} else if (surface->role == BZ_SURF_ROLE_XDG_POPUP) {
+		res = surface->xdgpopup->resource;
 	} else {
 		bz_warn(BZ_LOG_WINDOW_MGMT, "Unsupported surface role in window manager: %d", surface->role);
 		return;

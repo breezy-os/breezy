@@ -17,6 +17,15 @@
 void bz_xdg_wm_base_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
 
+// -- xdg_positioner --
+
+#define BZ_XDG_POSITIONER_VERSION 7
+
+struct bz_xdg_positioner {
+	struct wl_resource *resource;
+};
+
+
 // -- xdg_surface --
 
 #define BZ_XDG_SURFACE_VERSION 7
@@ -64,6 +73,9 @@ struct bz_xdg_toplevel {
 	struct wl_resource *resource;
 	struct bz_xdg_surface *xdgsurface;
 	struct bz_surface *wlsurface;
+
+	char *title;
+	char *app_id;
 };
 
 void bz_xdg_toplevel_dtor(struct wl_resource *data);
@@ -79,7 +91,7 @@ struct bz_xdg_popup {
 	struct bz_surface *wlsurface;
 };
 
-// void bz_xdg_popup_dtor(struct wl_resource *data);
+void bz_xdg_popup_dtor(struct wl_resource *data);
 
 
 

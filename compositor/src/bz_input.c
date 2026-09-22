@@ -171,8 +171,10 @@ static void bz_input_process_pointer_motion_event(
 		// TODO-dl?? : This is all temporary nonsense. It'll be removed when we add tiling.
 		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
 		if (focused_surf != nullptr) {
-			focused_surf->renderable.position.x += delta_x;
-			focused_surf->renderable.position.y += delta_y;
+			int32_t cursor_move_x = breezy->gl.cursor.position.x - (start_x + breezy->gl.cursor.offset.x);
+			int32_t cursor_move_y = breezy->gl.cursor.position.y - (start_y + breezy->gl.cursor.offset.y);
+			focused_surf->renderable.position.x += cursor_move_x;
+			focused_surf->renderable.position.y += cursor_move_y;
 		}
 
 	} else {
@@ -317,11 +319,8 @@ static void bz_input_process_kb_event(
 			return;
 
 		// Start / Stop Applications
-		case XKB_KEY_d:
-			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/git/breezy/build/test-client/test-client");
-			return;
 		case XKB_KEY_t:
-			bz_input_spawn_child(breezy->wayland.socket_name, "/home/ben/bin/bins/bzfoot");
+			bz_input_spawn_child(breezy->wayland.socket_name, "foot");
 			return;
 		case XKB_KEY_q:
 			bz_mgmt_close_active_window(&breezy->window_mgmt);

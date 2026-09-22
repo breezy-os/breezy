@@ -990,7 +990,7 @@ static void bz_write_surface_texture(struct bz_surface *surface_data)
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
 
 	if (init_needed) {
-		// TODO-dl12: This needs to be rerun whenever the buffer size changes
+		// TODO-dl13: This needs to be rerun whenever the buffer size changes
 		glTexImage2D(
 			GL_TEXTURE_2D,
 			0,                // mipmap level
@@ -1010,7 +1010,7 @@ static void bz_write_surface_texture(struct bz_surface *surface_data)
 		struct bz_list *transformed_damage = bz_list_create();
 		struct bz_rect *rect; bz_list_foreach(rect, surface_data->active_state->surface_damage) {
 			struct bz_rect transformed = *rect;
-			// TODO-dl12: Modify the rectangle as needed (scale + transform)
+			// TODO-dl13: Modify the rectangle as needed (scale + transform)
 			bz_list_append(transformed_damage, &transformed);
 		}
 		bz_apply_buffer_damage(data, width, height, transformed_damage);
@@ -1056,7 +1056,7 @@ static bool bz_is_effectively_sync(struct bz_surface *surface_data)
 		return false;
 	}
 	// If it's sync ... then it's sync.
-	if (surface_data->subsurface->is_sync) { // TODO-dl12: CLion gave "points to zero page" here.
+	if (surface_data->subsurface->is_sync) {
 		return true;
 	}
 	// If any of its parents are sync, then it's sync.

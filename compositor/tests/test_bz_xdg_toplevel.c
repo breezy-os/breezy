@@ -8,6 +8,7 @@
 #include "unity.h"
 #include "fff.h"
 #include "breezy/bz_logger.h"
+#include "helpers/bz_test_resources.c"
 #include "helpers/bz_test_fakes.c"
 
 
@@ -43,6 +44,44 @@ void test_xdg_toplevel_destroy__destroys_the_resource(void)
 
 
 // =================================================================================================
+//  Test bz_xdg_toplevel_set_title()
+// -------------------------------------------------------------------------------------------------
+
+void test_xdg_toplevel_set_title__sets_the_title(void)
+{
+	// Set up
+	struct bz_xdg_toplevel *toplevel = bz_create_xdg_toplevel_data();
+	wl_resource_get_user_data_fake.return_val = toplevel;
+
+	// Test
+	bz_xdg_toplevel_implementation.set_title(nullptr, nullptr, "Hello there");
+	TEST_ASSERT_EQUAL_STRING("Hello there", toplevel->title);
+
+	// Clean up
+	bz_free_xdg_toplevel_data(toplevel);
+}
+
+
+// =================================================================================================
+//  Test bz_xdg_toplevel_set_app_id()
+// -------------------------------------------------------------------------------------------------
+
+void test_xdg_toplevel_set_app_id__sets_the_app_id(void)
+{
+	// Set up
+	struct bz_xdg_toplevel *toplevel = bz_create_xdg_toplevel_data();
+	wl_resource_get_user_data_fake.return_val = toplevel;
+
+	// Test
+	bz_xdg_toplevel_implementation.set_app_id(nullptr, nullptr, "dev.zenittini.breezy.Test");
+	TEST_ASSERT_EQUAL_STRING("dev.zenittini.breezy.Test", toplevel->app_id);
+
+	// Clean up
+	bz_free_xdg_toplevel_data(toplevel);
+}
+
+
+// =================================================================================================
 //  Runner
 // -------------------------------------------------------------------------------------------------
 
@@ -51,6 +90,12 @@ int main(void) {
 
 	// Test bz_xdg_toplevel_destroy()
 	RUN_TEST(test_xdg_toplevel_destroy__destroys_the_resource);
+
+	// Test bz_xdg_toplevel_set_title()
+	RUN_TEST(test_xdg_toplevel_set_title__sets_the_title);
+
+	// Test bz_xdg_toplevel_set_app_id()
+	RUN_TEST(test_xdg_toplevel_set_app_id__sets_the_app_id);
 
 	return UNITY_END();
 }

@@ -24,6 +24,21 @@ static void bz_xdg_wm_base_create_positioner(struct wl_client *client, struct wl
 static void bz_xdg_wm_base_get_xdg_surface(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface);
 static void bz_xdg_wm_base_pong(struct wl_client *client, struct wl_resource *resource, uint32_t serial);
 
+// -- xdg_positioner --
+
+void bz_xdg_positioner_dtor(struct wl_resource *data);
+const struct xdg_positioner_interface bz_xdg_positioner_implementation;
+static void bz_xdg_positioner_destroy(struct wl_client *client, struct wl_resource *resource);
+static void bz_xdg_positioner_set_size(struct wl_client *client, struct wl_resource *resource, int32_t width, int32_t height);
+static void bz_xdg_positioner_set_anchor_rect(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
+static void bz_xdg_positioner_set_anchor(struct wl_client *client, struct wl_resource *resource, uint32_t anchor);
+static void bz_xdg_positioner_set_gravity(struct wl_client *client, struct wl_resource *resource, uint32_t gravity);
+static void bz_xdg_positioner_set_constraint_adjustment(struct wl_client *client, struct wl_resource *resource, uint32_t constraint_adjustment);
+static void bz_xdg_positioner_set_offset(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
+static void bz_xdg_positioner_set_reactive(struct wl_client *client, struct wl_resource *resource);
+static void bz_xdg_positioner_set_parent_size(struct wl_client *client, struct wl_resource *resource, int32_t parent_width, int32_t parent_height);
+static void bz_xdg_positioner_set_parent_configure(struct wl_client *client, struct wl_resource *resource, uint32_t serial);
+
 // -- xdg_surface --
 
 void bz_xdg_surface_dtor(struct wl_resource *data);
@@ -56,6 +71,14 @@ static void bz_xdg_toplevel_unset_maximized(struct wl_client *client, struct wl_
 static void bz_xdg_toplevel_set_fullscreen(struct wl_client *client, struct wl_resource *resource, struct wl_resource *output);
 static void bz_xdg_toplevel_unset_fullscreen(struct wl_client *client, struct wl_resource *resource);
 static void bz_xdg_toplevel_set_minimized(struct wl_client *client, struct wl_resource *resource);
+
+// -- xdg_popup --
+
+void bz_xdg_popup_dtor(struct wl_resource *data);
+const struct xdg_popup_interface bz_xdg_popup_implementation;
+static void bz_xdg_popup_destroy(struct wl_client *client, struct wl_resource *resource);
+static void bz_xdg_popup_grab(struct wl_client *client, struct wl_resource *resource, struct wl_resource *seat, uint32_t serial);
+static void bz_xdg_popup_reposition(struct wl_client *client, struct wl_resource *resource, struct wl_resource *positioner, uint32_t token);
 
 
 // =================================================================================================
@@ -94,8 +117,42 @@ static void bz_xdg_wm_base_create_positioner(
 	struct wl_resource *resource,
 	uint32_t id
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_wm_base.create_positioner not implemented");
-	// TODO
+	// Allocate our user data
+	struct bz_xdg_positioner *positioner = calloc(1, sizeof(*positioner));
+	if (positioner == nullptr) {
+		wl_client_post_no_memory(client);
+		goto positioner_alloc_failed;
+	}
+
+	// Create the resource, bound to the data
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&xdg_positioner_interface,
+		wl_resource_get_version(resource),
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_xdg_positioner_implementation,
+		positioner,
+		bz_xdg_positioner_dtor
+	);
+
+	// Populate the surface's user data
+	positioner->resource = res;
+
+	// Everything succeeded!
+	return;
+
+	// Error cleanup
+	resource_failed:
+		free(positioner);
+	positioner_alloc_failed:
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to construct a new xdg_positioner.");
 }
 
 static void bz_xdg_wm_base_get_xdg_surface(
@@ -161,6 +218,122 @@ static void bz_xdg_wm_base_pong(
 	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_wm_base.pong not implemented");
 	// TODO
 }
+
+
+// =================================================================================================
+//  xdg_positioner
+// -------------------------------------------------------------------------------------------------
+
+void bz_xdg_positioner_dtor(struct wl_resource *data)
+{
+	struct bz_xdg_positioner *positioner = wl_resource_get_user_data(data);
+	free(positioner);
+}
+
+const struct xdg_positioner_interface bz_xdg_positioner_implementation = {
+	.destroy = bz_xdg_positioner_destroy,
+	.set_size = bz_xdg_positioner_set_size,
+	.set_anchor_rect = bz_xdg_positioner_set_anchor_rect,
+	.set_anchor = bz_xdg_positioner_set_anchor,
+	.set_gravity = bz_xdg_positioner_set_gravity,
+	.set_constraint_adjustment = bz_xdg_positioner_set_constraint_adjustment,
+	.set_offset = bz_xdg_positioner_set_offset,
+	.set_reactive = bz_xdg_positioner_set_reactive,
+	.set_parent_size = bz_xdg_positioner_set_parent_size,
+	.set_parent_configure = bz_xdg_positioner_set_parent_configure
+};
+
+static void bz_xdg_positioner_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static void bz_xdg_positioner_set_size(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t width,
+	int32_t height
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_size() not implemented.");
+	// TODO
+}
+
+static void bz_xdg_positioner_set_anchor_rect(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_anchor_rect() not implemented.");
+	// TODO
+}
+
+static void bz_xdg_positioner_set_anchor(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	uint32_t anchor
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_anchor() not implemented.");
+	// TODO
+}
+
+static void bz_xdg_positioner_set_gravity(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	uint32_t gravity
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_gravity() not implemented.");
+	// TODO
+}
+
+static void bz_xdg_positioner_set_constraint_adjustment(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	uint32_t constraint_adjustment
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_constraint_adjustment() not implemented.");
+	// TODO
+}
+
+static void bz_xdg_positioner_set_offset(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t x,
+	int32_t y
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_offset() not implemented.");
+	// TODO
+}
+
+static void bz_xdg_positioner_set_reactive(
+	struct wl_client *client,
+	struct wl_resource *resource
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_reactive() not implemented.");
+	// TODO
+}
+
+static void bz_xdg_positioner_set_parent_size(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	int32_t parent_width,
+	int32_t parent_height
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_parent_size() not implemented.");
+	// TODO
+}
+
+static void bz_xdg_positioner_set_parent_configure(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	uint32_t serial
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_parent_configure() not implemented.");
+	// TODO
+}
+
 
 
 // =================================================================================================
@@ -278,19 +451,59 @@ static void bz_xdg_surface_get_popup(
 	struct wl_resource *parent,
 	struct wl_resource *positioner
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_surface.get_popup not implemented");
-	// TODO
+	// Cannot assign a different role if the surface already has one.
+	struct bz_xdg_surface *xdgsurf = wl_resource_get_user_data(resource);
+	struct bz_surface *bzsurf = xdgsurf->wlsurface;
+	if (bzsurf->role != BZ_SURF_ROLE_NONE && bzsurf->role != BZ_SURF_ROLE_XDG_POPUP) {
+		wl_resource_post_error(resource, XDG_WM_BASE_ERROR_ROLE, "Surface role cannot be changed.");
+		goto initial_checks_failed;
+	}
 
-	// // Cannot assign a different role if the surface already has one.
-	// struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
-	// if (bzsurf->role != BZ_SURF_ROLE_NONE && bzsurf->role != BZ_SURF_ROLE_XDG_POPUP) {
-	// 	wl_resource_post_error(resource, XDG_WM_BASE_ERROR_ROLE, "Surface role cannot be changed.");
-	// 	goto initial_checks_failed;
-	// }
-	//
-	// // Error cleanup
-	// initial_checks_failed:
-	// 	bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to construct a new xdg_popup.");
+	// Allocate our user data
+	struct bz_xdg_popup *popup = calloc(1, sizeof(*popup));
+	if (popup == nullptr) {
+		wl_client_post_no_memory(client);
+		goto popup_alloc_failed;
+	}
+
+	// Create the resource, bound to the data
+	struct wl_resource *res = wl_resource_create(
+		client,
+		&xdg_popup_interface,
+		wl_resource_get_version(resource),
+		id
+	);
+	if (res == nullptr) {
+		wl_client_post_no_memory(client);
+		goto resource_failed;
+	}
+	wl_resource_set_implementation(
+		res,
+		&bz_xdg_popup_implementation,
+		popup,
+		bz_xdg_popup_dtor
+	);
+
+	// Populate the surface's user data
+	struct bz_xdg_surface *xdgsurface = wl_resource_get_user_data(resource);
+	popup->resource = res;
+	popup->xdgsurface = xdgsurface;
+	popup->wlsurface = xdgsurface->wlsurface;
+	// TODO-dl12: store the "parent" and "positioner" parameters
+
+	// Populate the surface's role.
+	xdgsurface->wlsurface->role = BZ_SURF_ROLE_XDG_POPUP;
+	xdgsurface->wlsurface->xdgpopup = popup;
+
+	// Everything succeeded!
+	return;
+
+	// Error cleanup
+	resource_failed:
+		free(popup);
+	popup_alloc_failed:
+	initial_checks_failed:
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to construct a new xdg_popup.");
 }
 
 static void bz_xdg_surface_set_window_geometry(
@@ -376,6 +589,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		configevt->toplevel.recommended_size.h = 1080;
 
 		// Send initial state values
+		// TODO-dl13
 		//   wl_surface_send_preferred_buffer_scale(resource, 1);
 		//   wl_surface_send_preferred_buffer_transform(resource, 0);
 
@@ -393,8 +607,30 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 			&configevt->toplevel.states
 		);
 	} else if (bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
-		// TODO
-		bz_error(BZ_LOG_WL_XDG_SHELL, "Configuring roles for XDG popups not yet supported.");
+		// Safety checks
+		if (bzsurf->xdgpopup == nullptr) {
+			bz_warn(BZ_LOG_WL_XDG_SHELL, "XDG popup object does not exist on the surface.");
+			wl_resource_post_error(bzsurf->xdgsurface->resource, XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
+				"XDG popup object does not exist on the surface.");
+			goto null_popup;
+		}
+
+		// Assign our initial state
+		configevt->serial = wl_display_next_serial(wl_client_get_display(client));
+		configevt->type = BZ_XDG_SURF_POPUP;
+		// TODO-dl12: Fill these in from the attached positioner
+		configevt->popup.position.x = 0;
+		configevt->popup.position.y = 0;
+		configevt->popup.size.w = 600;
+		configevt->popup.size.h = 600;
+
+		xdg_popup_send_configure(
+			bzsurf->xdgpopup->resource,
+			configevt->popup.position.x,
+			configevt->popup.position.y,
+			configevt->popup.size.w,
+			configevt->popup.size.h
+		);
 	}
 
 	bz_list_append(xdgsurface->pending_configures, configevt);
@@ -402,6 +638,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 	return;
 
 	null_toplevel:
+	null_popup:
 		free(configevt);
 	configevt_alloc_failed:
 		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to send initial configure sequence.");
@@ -433,7 +670,7 @@ static void bz_free_xdg_surface_configure(void *xdg_surface_configure)
 	if (configure->type == BZ_XDG_SURF_TOPLEVEL) {
 		wl_array_release(&configure->toplevel.states);
 	} else if (configure->type == BZ_XDG_SURF_POPUP) {
-		// TODO-dl12
+		// Nothing to free (...at this point)
 	}
 
 	free(configure);
@@ -491,8 +728,8 @@ static void bz_xdg_toplevel_set_title(
 	struct wl_resource *resource,
 	const char *title
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_title not implemented");
-	// TODO
+	struct bz_xdg_toplevel *toplevel_data = wl_resource_get_user_data(resource);
+	toplevel_data->title = title;
 }
 
 static void bz_xdg_toplevel_set_app_id(
@@ -500,8 +737,8 @@ static void bz_xdg_toplevel_set_app_id(
 	struct wl_resource *resource,
 	const char *app_id
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_app_id not implemented");
-	// TODO
+	struct bz_xdg_toplevel *toplevel_data = wl_resource_get_user_data(resource);
+	toplevel_data->app_id = app_id;
 }
 
 static void bz_xdg_toplevel_show_window_menu(
@@ -589,4 +826,52 @@ static void bz_xdg_toplevel_set_minimized(struct wl_client *client, struct wl_re
 	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_minimized not implemented");
 	// TODO
 }
+
+
+// =================================================================================================
+//  xdg_popup
+// -------------------------------------------------------------------------------------------------
+
+void bz_xdg_popup_dtor(struct wl_resource *data)
+{
+	struct bz_xdg_popup *popup = wl_resource_get_user_data(data);
+
+	if (popup->wlsurface != nullptr) {
+		popup->wlsurface->xdgpopup = nullptr;
+	}
+
+	free(popup);
+}
+
+const struct xdg_popup_interface bz_xdg_popup_implementation = {
+	.destroy = bz_xdg_popup_destroy,
+	.grab = bz_xdg_popup_grab,
+	.reposition = bz_xdg_popup_reposition,
+};
+
+static void bz_xdg_popup_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static void bz_xdg_popup_grab(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	struct wl_resource *seat,
+	uint32_t serial
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_popup.grab() not implemented");
+	// TODO
+}
+
+static void bz_xdg_popup_reposition(
+	struct wl_client *client,
+	struct wl_resource *resource,
+	struct wl_resource *positioner,
+	uint32_t token
+) {
+	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_popup.reposition() not implemented");
+	// TODO
+}
+
 
