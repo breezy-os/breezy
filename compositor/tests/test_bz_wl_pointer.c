@@ -59,6 +59,7 @@ void test_pointer_set_cursor__assigns_cursor_role()
 	TEST_ASSERT_EQUAL_INT(BZ_SURF_ROLE_WL_CURSOR, pointer_surface->role);
 
 	// Clean up
+	free(pointer_surface->cursor);
 	bz_free_surface_data(pointer_surface);
 	bz_free_surface_data(focused_surface);
 	bz_free_client_data(client_data);
@@ -186,6 +187,7 @@ void test_pointer_set_cursor__previous_surface_is_replaced()
 	TEST_ASSERT_EQUAL_INT(pointer_surface, client_data->cursor_surface);
 
 	// Clean up
+	free(pointer_surface->cursor);
 	bz_free_surface_data(pointer_surface);
 	bz_free_surface_data(focused_surface);
 	bz_free_client_data(client_data);
@@ -215,10 +217,13 @@ void test_pointer_set_cursor__hotspot_adjusts_position()
 	// Run our test
 	bz_pointer_implementation.set_cursor(client, pointer, 3, surface, 2, 3);
 	// The surface's offset is the negated hotspot.
-	TEST_ASSERT_EQUAL_INT(-2, pointer_surface->renderable.offset.x);
-	TEST_ASSERT_EQUAL_INT(-3, pointer_surface->renderable.offset.y);
+	// TEST_ASSERT_EQUAL_INT(-2, pointer_surface->renderable.offset.x);
+	// TEST_ASSERT_EQUAL_INT(-3, pointer_surface->renderable.offset.y);
+	TEST_ASSERT_EQUAL_INT(2, pointer_surface->cursor->hotspot.x);
+	TEST_ASSERT_EQUAL_INT(3, pointer_surface->cursor->hotspot.y);
 
 	// Clean up
+	free(pointer_surface->cursor);
 	bz_free_surface_data(pointer_surface);
 	bz_free_surface_data(focused_surface);
 	bz_free_client_data(client_data);

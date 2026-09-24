@@ -187,6 +187,9 @@ void bz_free_surface_data(struct bz_surface *data)
 			bz_list_free(data->pending_state->subsurface_states, free);
 			if (data->pending_state->vp_source) { free(data->pending_state->vp_source); }
 			if (data->pending_state->vp_dest)   { free(data->pending_state->vp_dest); }
+			if (data->pending_state->max_size)        { free(data->pending_state->max_size); }
+			if (data->pending_state->min_size)        { free(data->pending_state->min_size); }
+			if (data->pending_state->window_geometry) { free(data->pending_state->window_geometry); }
 			free(data->pending_state);
 		}
 		if (data->active_state) {
@@ -199,6 +202,9 @@ void bz_free_surface_data(struct bz_surface *data)
 			bz_list_free(data->active_state->subsurface_states, free);
 			if (data->active_state->vp_source) { free(data->active_state->vp_source); }
 			if (data->active_state->vp_dest)   { free(data->active_state->vp_dest); }
+			if (data->active_state->max_size)        { free(data->active_state->max_size); }
+			if (data->active_state->min_size)        { free(data->active_state->min_size); }
+			if (data->active_state->window_geometry) { free(data->active_state->window_geometry); }
 			free(data->active_state);
 		}
 		if (data->content_updates) {

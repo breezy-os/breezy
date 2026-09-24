@@ -22,6 +22,10 @@ struct bz_wl_seat {
 // -- wl_pointer --
 #define BZ_POINTER_VERSION 10 // TODO: version 11 exists - upgrade?
 void bz_pointer_dtor(struct wl_resource *data);
+struct bz_cursor {
+	struct bz_surface *surface;
+	struct bz_position hotspot;
+};
 
 // -- wl_keyboard --
 #define BZ_KEYBOARD_VERSION 10

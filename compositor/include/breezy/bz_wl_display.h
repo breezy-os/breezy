@@ -72,16 +72,21 @@ struct bz_surface_state {
 	struct bz_list *surface_damage;  // List of "struct bz_rect *"
 	struct bz_list *buffer_damage;   // List of "struct bz_rect *"
 
-	// TODO: Make use of opaque regions
+	// TODO-dl13: Make use of opaque regions
 	bool dirty_opaque_region;
 	struct bz_list *opaque_region;   // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
-	// TODO-dl12: Make use of input regions
+	// TODO-dl13: Make use of input regions
 	bool dirty_input_region;
 	struct bz_list *input_region;    // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
 
 	// Viewport state
 	struct bz_rect_dbl *vp_source;
 	struct bz_dimension *vp_dest;
+
+	// XDG state
+	struct bz_rect *window_geometry; // Nullable
+	struct bz_dimension *min_size;   // Nullable
+	struct bz_dimension *max_size;   // Nullable
 
 	enum wl_output_transform transform;
 	int32_t scale;
@@ -106,7 +111,7 @@ struct bz_surface {
 		struct bz_xdg_toplevel *xdgtoplevel;
 		struct bz_xdg_popup *xdgpopup;
 		struct bz_subsurface *subsurface;
-		// (No role object for cursors)
+		struct bz_cursor *cursor;
 		// ...etc...
 	};
 
@@ -132,6 +137,8 @@ struct bz_content_update {
 };
 
 void bz_surface_dtor(struct wl_resource *data);
+void bz_recompute_rendered_bounds(struct bz_surface *surface);
+struct bz_surface *bz_get_root_surface(struct bz_surface *surface);
 
 
 // -- wl_subsurface --
@@ -143,6 +150,7 @@ struct bz_subsurface {
 	struct bz_surface *surface;
 	struct bz_surface *parent;
 
+	struct bz_position position;
 	bool is_sync;
 };
 

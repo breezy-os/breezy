@@ -22,6 +22,8 @@ static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, voi
 static void bz_mgmt_change_keyboard_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
 static void bz_mgmt_change_pointer_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
 
+static struct bz_surface *bz_mgmt_check_window_overlap(struct bz_window_mgmt *mgmt, struct bz_surface *root_surf, struct bz_surface *surface);
+
 
 // =================================================================================================
 //  Initialization / Teardown
@@ -75,8 +77,8 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 	struct wl_client *client = wl_resource_get_client(surface->resource);
 	struct bz_client *client_data = wl_client_get_user_data(client);
 	struct bz_renderable *cursor = &client_data->breezy->gl.cursor;
-	cursor->position.x = surface->renderable.position.x;
-	cursor->position.y = surface->renderable.position.y;
+	cursor->logical_bounds.x = surface->renderable.logical_bounds.x;
+	cursor->logical_bounds.y = surface->renderable.logical_bounds.y;
 	bz_mgmt_update_pointer_position(mgmt, cursor);
 }
 
@@ -265,8 +267,8 @@ static void bz_mgmt_change_pointer_focus(
 	if (new_surface != nullptr) {
 		struct wl_client *new_client = wl_resource_get_client(new_surface->resource);
 		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
-		wl_fixed_t x_pos = wl_fixed_from_int(mgmt->last_cursor_loc.x - new_surface->renderable.position.x);
-		wl_fixed_t y_pos = wl_fixed_from_int(mgmt->last_cursor_loc.y - new_surface->renderable.position.y);
+		wl_fixed_t x_pos = wl_fixed_from_int(mgmt->last_cursor_loc.x - new_surface->renderable.logical_bounds.x);
+		wl_fixed_t y_pos = wl_fixed_from_int(mgmt->last_cursor_loc.y - new_surface->renderable.logical_bounds.y);
 		uint32_t serial = wl_display_next_serial(new_client_data->breezy->wayland.display);
 		new_client_data->last_enter_serial = serial;
 		struct bz_wl_seat *seat; bz_list_foreach(seat, new_client_data->seats) {
@@ -283,29 +285,19 @@ static void bz_mgmt_change_pointer_focus(
 	mgmt->pointer_focus = new_surface;
 }
 
+/**
+ * Returns the ROOT-level surface containing the cursor.
+ */
 struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_renderable *cursor)
 {
-	mgmt->last_cursor_loc.x = cursor->position.x - cursor->offset.x;
-	mgmt->last_cursor_loc.y = cursor->position.y - cursor->offset.y;
+	mgmt->last_cursor_loc.x = cursor->logical_bounds.x;
+	mgmt->last_cursor_loc.y = cursor->logical_bounds.y;
 
 	// Iterate over our list, BACKWARDS, until we overlap with a window (or run out of items)
 	struct bz_surface *surf; bz_list_foreach_rev(surf, mgmt->activable_surfaces) {
-		struct bz_renderable surf_rect = surf->renderable;
-
-		// Check if cursor is overlapping
-		if (bz_contains_point(&surf_rect.position, &surf_rect.size, &mgmt->last_cursor_loc)) {
-			// If it doesn't already have pointer focus, send an enter event for pointers.
-			if (mgmt->pointer_focus != surf) {
-				bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, surf);
-			}
-
-			// If it doesn't have keyboard focus, send an enter event for keyboards.
-			struct bz_surface *original_focus = bz_mgmt_get_active_surface(mgmt);
-			if (original_focus != surf) {
-				bz_mgmt_change_keyboard_focus(mgmt, original_focus, surf);
-			}
-
-			return surf;
+		struct bz_surface *target = bz_mgmt_check_window_overlap(mgmt, surf, surf);
+		if (target != nullptr) {
+			return target;
 		}
 	}
 
@@ -313,5 +305,40 @@ struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, 
 	if (mgmt->pointer_focus != nullptr) {
 		bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, nullptr);
 	}
+	return nullptr;
+}
+
+static struct bz_surface *bz_mgmt_check_window_overlap(struct bz_window_mgmt *mgmt, struct bz_surface *root_surf, struct bz_surface *surface)
+{
+	struct bz_surface *subsurf; bz_list_foreach_rev(subsurf, surface->active_state->surface_stack) {
+		// Recursively loop into subsurfaces
+		if (subsurf != surface) {
+			struct bz_surface *overlap = bz_mgmt_check_window_overlap(mgmt, root_surf, subsurf);
+			if (overlap != nullptr) {
+				return overlap;
+			}
+			continue;
+		}
+
+		struct bz_renderable surf_rect = subsurf->renderable;
+
+		// Check if cursor is overlapping
+		if (bz_contains_point(&surf_rect.rendered_bounds, &mgmt->last_cursor_loc)) {
+			// If it doesn't already have pointer focus, send an enter event for pointers.
+			if (mgmt->pointer_focus != subsurf) {
+				bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, subsurf);
+			}
+
+			// If it doesn't have keyboard focus, send an enter event for keyboards.
+			struct bz_surface *original_focus = bz_mgmt_get_active_surface(mgmt);
+			struct bz_surface *new_kb_focus = subsurf->role == BZ_SURF_ROLE_WL_SUBSURFACE ? root_surf : subsurf;
+			if (original_focus != new_kb_focus) {
+				bz_mgmt_change_keyboard_focus(mgmt, original_focus, new_kb_focus);
+			}
+
+			return root_surf;
+		}
+	}
+
 	return nullptr;
 }

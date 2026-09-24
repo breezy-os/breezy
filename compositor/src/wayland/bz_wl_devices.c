@@ -374,11 +374,22 @@ static void bz_pointer_set_cursor(
 		goto initial_checks_failed;
 	}
 
+	// Try creating our role data object
+	if (surface_data->cursor == nullptr) {
+		surface_data->cursor = calloc(1, sizeof(*surface_data->cursor));
+		if (surface_data->cursor == nullptr) {
+			wl_resource_post_no_memory(resource);
+			bz_error(BZ_LOG_WL_DEVICES, "Failed to allocate cursor data.");
+			return;
+		}
+	}
+
 	// Ok, all checks out. Let's make the change!
-	surface_data->renderable.offset.x = -hotspot_x;
-	surface_data->renderable.offset.y = -hotspot_y;
-	surface_data->renderable.position.x = client_data->breezy->window_mgmt.last_cursor_loc.x;
-	surface_data->renderable.position.y = client_data->breezy->window_mgmt.last_cursor_loc.y;
+	surface_data->cursor->surface = surface_data;
+	surface_data->cursor->hotspot.x = hotspot_x;
+	surface_data->cursor->hotspot.y = hotspot_y;
+	surface_data->renderable.logical_bounds.x = client_data->breezy->window_mgmt.last_cursor_loc.x;
+	surface_data->renderable.logical_bounds.y = client_data->breezy->window_mgmt.last_cursor_loc.y;
 	surface_data->role = BZ_SURF_ROLE_WL_CURSOR;
 	client_data->cursor_surface = surface_data;
 

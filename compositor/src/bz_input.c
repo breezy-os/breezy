@@ -143,21 +143,21 @@ static void bz_input_process_pointer_motion_event(
 	struct bz_breezy *breezy,
 	struct libinput_event_pointer *pt_event
 ) {
-	int32_t start_x = breezy->gl.cursor.position.x - breezy->gl.cursor.offset.x;
-	int32_t start_y = breezy->gl.cursor.position.y - breezy->gl.cursor.offset.y;
+	int32_t start_x = breezy->gl.cursor.logical_bounds.x;
+	int32_t start_y = breezy->gl.cursor.logical_bounds.y;
 	double delta_x = libinput_event_pointer_get_dx_unaccelerated(pt_event);
 	double delta_y = libinput_event_pointer_get_dy_unaccelerated(pt_event);
 
 	// Update the cursor on the screen
-	breezy->gl.cursor.position.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay) + breezy->gl.cursor.offset.x;
-	breezy->gl.cursor.position.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay) + breezy->gl.cursor.offset.y;
+	breezy->gl.cursor.logical_bounds.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay);
+	breezy->gl.cursor.logical_bounds.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay);
 	if (breezy->window_mgmt.pointer_focus != nullptr) {
 		struct wl_client *client = wl_resource_get_client(breezy->window_mgmt.pointer_focus->resource);
 		struct bz_client *client_data = wl_client_get_user_data(client);
 		struct bz_surface *cursor = client_data->cursor_surface;
 		if (cursor != nullptr) {
-			cursor->renderable.position.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay) + breezy->gl.cursor.offset.x;
-			cursor->renderable.position.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay) + breezy->gl.cursor.offset.y;
+			cursor->renderable.logical_bounds.x = bz_clamp(start_x + delta_x, 0, breezy->drm.mode_info.hdisplay);
+			cursor->renderable.logical_bounds.y = bz_clamp(start_y + delta_y, 0, breezy->drm.mode_info.vdisplay);
 		}
 	}
 
@@ -170,11 +170,12 @@ static void bz_input_process_pointer_motion_event(
 	if (super_held) {
 		// TODO-dl?? : This is all temporary nonsense. It'll be removed when we add tiling.
 		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
-		if (focused_surf != nullptr) {
-			int32_t cursor_move_x = breezy->gl.cursor.position.x - (start_x + breezy->gl.cursor.offset.x);
-			int32_t cursor_move_y = breezy->gl.cursor.position.y - (start_y + breezy->gl.cursor.offset.y);
-			focused_surf->renderable.position.x += cursor_move_x;
-			focused_surf->renderable.position.y += cursor_move_y;
+		struct bz_surface *parent_surf = bz_get_root_surface(focused_surf);
+		if (parent_surf != nullptr && parent_surf->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+			int32_t cursor_move_x = breezy->gl.cursor.logical_bounds.x - start_x;
+			int32_t cursor_move_y = breezy->gl.cursor.logical_bounds.y - start_y;
+			parent_surf->renderable.logical_bounds.x += cursor_move_x;
+			parent_surf->renderable.logical_bounds.y += cursor_move_y;
 		}
 
 	} else {
@@ -182,8 +183,8 @@ static void bz_input_process_pointer_motion_event(
 		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
 		if (focused_surf != nullptr) {
 			uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
-			wl_fixed_t x_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.position.x);
-			wl_fixed_t y_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.position.y);
+			wl_fixed_t x_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.rendered_bounds.x);
+			wl_fixed_t y_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.rendered_bounds.y);
 			struct wl_client *client = wl_resource_get_client(focused_surf->resource);
 			struct bz_client *client_data = wl_client_get_user_data(client);
 			struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {

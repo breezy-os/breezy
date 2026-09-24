@@ -49,6 +49,7 @@ static void bz_xdg_surface_get_popup(struct wl_client *client, struct wl_resourc
 static void bz_xdg_surface_set_window_geometry(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
 static void bz_xdg_surface_ack_configure(struct wl_client *client, struct wl_resource *resource, uint32_t serial);
 // Helpers
+void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surface *bzsurf);
 static bool bz_serial_matches(void *item, void *serial);
 static bool bz_serial_is_newer(void *item, void *serial);
 static void bz_free_xdg_surface_configure(void *xdg_surface_configure);
@@ -429,10 +430,6 @@ static void bz_xdg_surface_get_toplevel(
 	bzsurf->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
 	bzsurf->xdgtoplevel = xdgtoplevel;
 
-	// TODO-dl??: Temp toplevel positioning
-	bzsurf->renderable.position.x = 200;
-	bzsurf->renderable.position.y = 200;
-
 	// Everything succeeded!
 	return;
 
@@ -514,8 +511,24 @@ static void bz_xdg_surface_set_window_geometry(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_surface.set_window_geometry not implemented");
-	// TODO
+	bz_debug(BZ_LOG_WL_XDG_SHELL, "Setting window geometry: %dx%d, %dx%d", x, y, width, height);
+	// Parameter validation
+	if (width <= 0 || height <= 0) {
+		wl_resource_post_error(resource, XDG_SURFACE_ERROR_INVALID_SIZE,
+			"Width and height must both be positive.");
+		bz_warn(BZ_LOG_WL_XDG_SHELL,
+			"Non-positive width/height provided to set_window_geometry: %d, %d", width, height);
+		return;
+	}
+
+	struct bz_xdg_surface *xdg_surf = wl_resource_get_user_data(resource);
+	struct bz_surface_state *state = xdg_surf->wlsurface->pending_state;
+
+	// Store our new geometry
+	if (state->window_geometry == nullptr) {
+		state->window_geometry = calloc(1, sizeof(*state->window_geometry));
+	}
+	*state->window_geometry = (struct bz_rect){ .x = x, .y = y, .w = width, .h = height };
 }
 
 static void bz_xdg_surface_ack_configure(
@@ -583,10 +596,17 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		wl_array_init(&configevt->toplevel.states);
 		configevt->toplevel.max_size.w = globals->drm.mode_info.hdisplay;
 		configevt->toplevel.max_size.h = globals->drm.mode_info.vdisplay;
-		// configevt->toplevel.recommended_size.w = bz_rand_int(400, globals->drm.mode_info.hdisplay/2);
-		// configevt->toplevel.recommended_size.h = bz_rand_int(300, globals->drm.mode_info.vdisplay/2);
-		configevt->toplevel.recommended_size.w = 1920;
-		configevt->toplevel.recommended_size.h = 1080;
+		// Set recommended size based on min/max size.
+		struct bz_dimension rec_size = { .w = 1920, .h = 1080 };
+		if (bzsurf->active_state->min_size) {
+			rec_size.w = bz_max(rec_size.w, bzsurf->active_state->min_size->w);
+			rec_size.h = bz_max(rec_size.h, bzsurf->active_state->min_size->h);
+		}
+		if (bzsurf->active_state->max_size) {
+			rec_size.w = bz_min(rec_size.w, bzsurf->active_state->max_size->w);
+			rec_size.h = bz_min(rec_size.h, bzsurf->active_state->max_size->h);
+		}
+		configevt->toplevel.recommended_size = rec_size;
 
 		// Send initial state values
 		// TODO-dl13
@@ -600,6 +620,17 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 				configevt->toplevel.max_size.h
 			);
 		}
+
+		// TODO-dl??: Set window capabilities..? (can be tested with foot)
+		// struct wl_array caps;
+		// wl_array_init(&caps);
+		// uint32_t *c1 = wl_array_add(&caps, sizeof(uint32_t));
+		// *c1 = XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN;
+		// uint32_t *c2 = wl_array_add(&caps, sizeof(uint32_t));
+		// *c2 = XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE;
+		// xdg_toplevel_send_wm_capabilities(bzsurf->xdgtoplevel->resource, &caps);
+		// wl_array_release(&caps);
+
 		xdg_toplevel_send_configure(
 			bzsurf->xdgtoplevel->resource,
 			configevt->toplevel.recommended_size.w,
@@ -618,7 +649,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		// Assign our initial state
 		configevt->serial = wl_display_next_serial(wl_client_get_display(client));
 		configevt->type = BZ_XDG_SURF_POPUP;
-		// TODO-dl12: Fill these in from the attached positioner
+		// TODO-dl13: Fill these in from the attached positioner
 		configevt->popup.position.x = 0;
 		configevt->popup.position.y = 0;
 		configevt->popup.size.w = 600;
@@ -780,8 +811,22 @@ static void bz_xdg_toplevel_set_max_size(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_max_size not implemented");
-	// TODO
+	// Parameter validation
+	if (width < 0 || height < 0) {
+		wl_resource_post_error(resource, XDG_TOPLEVEL_ERROR_INVALID_SIZE,
+			"Neither width nor height can be negative.");
+		bz_warn(BZ_LOG_WL_XDG_SHELL,
+			"Negative width/height provided to set_max_size: %d, %d", width, height);
+		return;
+	}
+
+	// Store our new max size
+	struct bz_xdg_toplevel *xdg_toplevel = wl_resource_get_user_data(resource);
+	if (xdg_toplevel->wlsurface->pending_state->max_size == nullptr) {
+		struct bz_dimension *max_size = calloc(1, sizeof(*max_size));
+		xdg_toplevel->wlsurface->pending_state->max_size = max_size;
+	}
+	*xdg_toplevel->wlsurface->pending_state->max_size = (struct bz_dimension){ .w = width, .h = height };
 }
 
 static void bz_xdg_toplevel_set_min_size(
@@ -790,8 +835,22 @@ static void bz_xdg_toplevel_set_min_size(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_toplevel.set_min_size not implemented");
-	// TODO
+	// Parameter validation
+	if (width < 0 || height < 0) {
+		wl_resource_post_error(resource, XDG_TOPLEVEL_ERROR_INVALID_SIZE,
+			"Neither width nor height can be negative.");
+		bz_warn(BZ_LOG_WL_XDG_SHELL,
+			"Negative width/height provided to set_min_size: %d, %d", width, height);
+		return;
+	}
+
+	// Store our new min size
+	struct bz_xdg_toplevel *xdg_toplevel = wl_resource_get_user_data(resource);
+	if (xdg_toplevel->wlsurface->pending_state->min_size == nullptr) {
+		struct bz_dimension *min_size = calloc(1, sizeof(*min_size));
+		xdg_toplevel->wlsurface->pending_state->min_size = min_size;
+	}
+	*xdg_toplevel->wlsurface->pending_state->min_size = (struct bz_dimension){ .w = width, .h = height };
 }
 
 static void bz_xdg_toplevel_set_maximized(struct wl_client *client, struct wl_resource *resource)

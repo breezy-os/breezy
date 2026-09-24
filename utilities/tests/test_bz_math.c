@@ -105,6 +105,38 @@ void test_rand_int__stays_in_correct_range(void)
 
 
 // =================================================================================================
+//  Test bz_min()
+// -------------------------------------------------------------------------------------------------
+
+void test_min__smaller_number_is_returned(void)
+{
+	TEST_ASSERT_EQUAL_INT(1, bz_min(1, 2));
+	TEST_ASSERT_EQUAL_INT(1, bz_min(2, 1));
+	TEST_ASSERT_EQUAL_INT(-1, bz_min(-1, 2));
+	TEST_ASSERT_EQUAL_INT(-1, bz_min(2, -1));
+	TEST_ASSERT_EQUAL_INT(-2, bz_min(1, -2));
+	TEST_ASSERT_EQUAL_INT(-2, bz_min(-2, 1));
+	TEST_ASSERT_EQUAL_INT(1, bz_min(1, 1));
+}
+
+
+// =================================================================================================
+//  Test bz_max()
+// -------------------------------------------------------------------------------------------------
+
+void test_max__larger_number_is_returned(void)
+{
+	TEST_ASSERT_EQUAL_INT(2, bz_max(1, 2));
+	TEST_ASSERT_EQUAL_INT(2, bz_max(2, 1));
+	TEST_ASSERT_EQUAL_INT(2, bz_max(-1, 2));
+	TEST_ASSERT_EQUAL_INT(2, bz_max(2, -1));
+	TEST_ASSERT_EQUAL_INT(1, bz_max(1, -2));
+	TEST_ASSERT_EQUAL_INT(1, bz_max(-2, 1));
+	TEST_ASSERT_EQUAL_INT(1, bz_max(1, 1));
+}
+
+
+// =================================================================================================
 //  Test bz_clamp()
 // -------------------------------------------------------------------------------------------------
 
@@ -137,9 +169,8 @@ void test_clamp__valid_number_is_unchanged(void)
 static bool bz_test_contains_point_wrapper(int x, int y, int w, int h, int px, int py)
 {
 	return bz_contains_point(
-		&(struct bz_position ){ .x = x, .y = y },
-		&(struct bz_dimension){ .w = w, .h = h },
-		&(struct bz_position ){ .x = px, .y = py }
+		&(struct bz_rect){ .x = x, .y = y, .w = w, .h = h },
+		&(struct bz_position){ .x = px, .y = py }
 	);
 }
 
@@ -212,6 +243,12 @@ int main(void) {
 
 	// -- bz_rand_int() --
 	RUN_TEST(test_rand_int__stays_in_correct_range);
+
+	// -- bz_min() --
+	RUN_TEST(test_min__smaller_number_is_returned);
+
+	// -- bz_max() --
+	RUN_TEST(test_max__larger_number_is_returned);
 
 	// -- bz_clamp() --
 	RUN_TEST(test_clamp__small_number_is_increased);

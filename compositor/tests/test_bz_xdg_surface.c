@@ -238,6 +238,98 @@ void test_xdg_surface_get_toplevel__resource_failed(void)
 
 
 // =================================================================================================
+//  Test bz_xdg_surface_set_window_geometry()
+// -------------------------------------------------------------------------------------------------
+
+void test_xdg_surface_set_window_geometry__initializes_new_state(void)
+{
+	// Set up
+	struct bz_xdg_surface *xdg_surface = bz_create_xdg_surface_data();
+	struct bz_surface *surface = xdg_surface->wlsurface;
+	wl_resource_get_user_data_fake.return_val = xdg_surface;
+
+	// Test
+	TEST_ASSERT_NULL(surface->pending_state->window_geometry);
+	bz_xdg_surface_implementation.set_window_geometry(nullptr, nullptr, 1, 2, 3, 4);
+	TEST_ASSERT_NOT_NULL(surface->pending_state->window_geometry);
+	TEST_ASSERT_EQUAL_INT(1, surface->pending_state->window_geometry->x);
+	TEST_ASSERT_EQUAL_INT(2, surface->pending_state->window_geometry->y);
+	TEST_ASSERT_EQUAL_INT(3, surface->pending_state->window_geometry->w);
+	TEST_ASSERT_EQUAL_INT(4, surface->pending_state->window_geometry->h);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+
+	// Clean up
+	bz_free_xdg_surface_data(xdg_surface);
+}
+
+void test_xdg_surface_set_window_geometry__does_not_reinitialize_state(void)
+{
+	// Set up
+	struct bz_xdg_surface *xdg_surface = bz_create_xdg_surface_data();
+	struct bz_surface *surface = xdg_surface->wlsurface;
+	wl_resource_get_user_data_fake.return_val = xdg_surface;
+
+	// Call once to initialize the state.
+	bz_xdg_surface_implementation.set_window_geometry(nullptr, nullptr, 1, 2, 3, 4);
+	TEST_ASSERT_NOT_NULL(surface->pending_state->window_geometry);
+	struct bz_rect *original = surface->pending_state->window_geometry;
+	TEST_ASSERT_EQUAL_INT(1, surface->pending_state->window_geometry->x);
+	TEST_ASSERT_EQUAL_INT(2, surface->pending_state->window_geometry->y);
+	TEST_ASSERT_EQUAL_INT(3, surface->pending_state->window_geometry->w);
+	TEST_ASSERT_EQUAL_INT(4, surface->pending_state->window_geometry->h);
+
+	// Call again, making sure it's the same reference/pointer, but the values are replaced
+	bz_xdg_surface_implementation.set_window_geometry(nullptr, nullptr, 5, 6, 7, 8);
+	TEST_ASSERT_NOT_NULL(surface->pending_state->window_geometry);
+	TEST_ASSERT_EQUAL_PTR(original, surface->pending_state->window_geometry);
+	TEST_ASSERT_EQUAL_INT(5, surface->pending_state->window_geometry->x);
+	TEST_ASSERT_EQUAL_INT(6, original->y);
+	TEST_ASSERT_EQUAL_INT(7, surface->pending_state->window_geometry->w);
+	TEST_ASSERT_EQUAL_INT(8, original->h);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+
+	// Clean up
+	bz_free_xdg_surface_data(xdg_surface);
+}
+
+void test_xdg_surface_set_window_geometry__zero_raises_error(void)
+{
+	// Set up
+	struct bz_xdg_surface *xdg_surface = bz_create_xdg_surface_data();
+	struct bz_surface *surface = xdg_surface->wlsurface;
+	wl_resource_get_user_data_fake.return_val = xdg_surface;
+
+	// Test
+	TEST_ASSERT_NULL(surface->pending_state->window_geometry);
+	bz_xdg_surface_implementation.set_window_geometry(nullptr, nullptr, 0, 0, 0, 0);
+	TEST_ASSERT_NULL(surface->pending_state->window_geometry);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(XDG_SURFACE_ERROR_INVALID_SIZE, wl_resource_post_error_fake.arg1_val);
+
+	// Clean up
+	bz_free_xdg_surface_data(xdg_surface);
+}
+
+void test_xdg_surface_set_window_geometry__negative_raises_error(void)
+{
+	// Set up
+	struct bz_xdg_surface *xdg_surface = bz_create_xdg_surface_data();
+	struct bz_surface *surface = xdg_surface->wlsurface;
+	wl_resource_get_user_data_fake.return_val = xdg_surface;
+
+	// Test
+	TEST_ASSERT_NULL(surface->pending_state->window_geometry);
+	bz_xdg_surface_implementation.set_window_geometry(nullptr, nullptr, 0, 0, 0, 0);
+	TEST_ASSERT_NULL(surface->pending_state->window_geometry);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(XDG_SURFACE_ERROR_INVALID_SIZE, wl_resource_post_error_fake.arg1_val);
+
+	// Clean up
+	bz_free_xdg_surface_data(xdg_surface);
+}
+
+
+// =================================================================================================
 //  Test bz_xdg_surface_ack_configure()
 // -------------------------------------------------------------------------------------------------
 
@@ -347,8 +439,10 @@ int main(void) {
 	// TODO
 
 	// Test bz_xdg_surface_set_window_geometry()
-	// RUN_TEST(test_xdg_surface_set_window_geometry__);
-	// TODO
+	RUN_TEST(test_xdg_surface_set_window_geometry__initializes_new_state);
+	RUN_TEST(test_xdg_surface_set_window_geometry__does_not_reinitialize_state);
+	RUN_TEST(test_xdg_surface_set_window_geometry__zero_raises_error);
+	RUN_TEST(test_xdg_surface_set_window_geometry__negative_raises_error);
 
 	// Test bz_xdg_surface_ack_configure()
 	RUN_TEST(test_xdg_surface_ack_configure__state_is_updated);

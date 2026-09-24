@@ -61,6 +61,14 @@ int32_t bz_rand_int(int min, int max)
 	return (rand() % (max - min + 1)) + min;
 }
 
+int32_t bz_min(int32_t v1, int32_t v2)
+{
+	return v1 < v2 ? v1 : v2;
+}
+int32_t bz_max(int32_t v1, int32_t v2)
+{
+	return v1 > v2 ? v1 : v2;
+}
 int32_t bz_clamp(int32_t value, int32_t min, int32_t max)
 {
 	if (value < min) return min;
@@ -69,18 +77,15 @@ int32_t bz_clamp(int32_t value, int32_t min, int32_t max)
 }
 
 /** Rectangle bounds are inclusive. If w/h are negative, the rectangle will be "normalized" first. */
-bool bz_contains_point(
-	struct bz_position *rect_pos,
-	struct bz_dimension *rect_size,
-	struct bz_position *point
-) {
+bool bz_contains_point(struct bz_rect *rect, struct bz_position *point)
+{
 	struct bz_position normal_pos = {
-		.x = rect_size->w > 0 ? rect_pos->x : rect_pos->x + rect_size->w,
-		.y = rect_size->h > 0 ? rect_pos->y : rect_pos->y + rect_size->h,
+		.x = rect->w > 0 ? rect->x : rect->x + rect->w,
+		.y = rect->h > 0 ? rect->y : rect->y + rect->h,
 	};
 	struct bz_dimension normal_size = {
-		.w = abs(rect_size->w),
-		.h = abs(rect_size->h),
+		.w = abs(rect->w),
+		.h = abs(rect->h),
 	};
 	return (normal_pos.x <= point->x) && (point->x <= normal_pos.x + normal_size.w) &&
 		   (normal_pos.y <= point->y) && (point->y <= normal_pos.y + normal_size.h);

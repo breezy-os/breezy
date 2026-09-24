@@ -35,11 +35,11 @@ struct bz_gbm {
 };
 
 struct bz_renderable {
-	struct bz_position position;
-	/** How far to shift the position before rendering. A positive number means the buffer should
-	 * be shifted to the right and down. For cursors, this is the "negative hotspot". */
-	struct bz_position offset;
-	struct bz_dimension size;
+	/** The bounds for the purposes of compositor placement, ignoring any render shifts. */
+	struct bz_rect logical_bounds;
+	/** The bounds for the purposes of rendering, computed from logical_bounds + shifts. */
+	struct bz_rect rendered_bounds;
+
 	GLuint texture;
 };
 
@@ -51,7 +51,9 @@ struct bz_gl {
 	bool is_dirty;
 	GLuint client_shader_program;
 	GLuint vbo;
+
 	struct bz_renderable cursor;
+	struct bz_position cursor_offset;
 };
 
 struct bz_seat {

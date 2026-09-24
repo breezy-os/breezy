@@ -15,6 +15,8 @@ static constexpr char CLIENT_VERT_SRC[] =
 "	 v_texCoord = a_texCoord;\n"
 "}\n";
 
+// TODO-dl??: Define a separate shader for XRGB surfaces since the alpha channel should be
+//   hardcoded to 1 for those.
 static constexpr char CLIENT_FRAG_SRC[] =
 "#version 320 es\n"
 "in lowp vec2 v_texCoord;\n"
