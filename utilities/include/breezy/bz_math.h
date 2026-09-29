@@ -4,13 +4,16 @@
 
 #include <stdint.h>
 
+constexpr double BZ_PI = 3.1415926;
+constexpr double BZ_PI_2 = BZ_PI / 2.0;
+
 struct bz_position  { int32_t x; int32_t y; };
-struct bz_dimension { int32_t w; int32_t h; };
-struct bz_rect { int32_t x; int32_t y; int32_t w; int32_t h; };
+struct bz_size { int32_t w; int32_t h; };
+struct bz_rect { int32_t x; int32_t y; int32_t w; int32_t h; }; // TODO-dl13: make w/h uint32_t?
 struct bz_rect_dbl { double x; double y; double w; double h; };
 
 struct bz_rect_dbl *bz_clone_rect_dbl(struct bz_rect_dbl *source);
-struct bz_dimension *bz_clone_dimension(struct bz_dimension *source);
+struct bz_size *bz_clone_size(struct bz_size *source);
 
 // -- Matrix format --
 // [0  3  6]
@@ -26,6 +29,8 @@ typedef float bz_mat4[16];
 void bz_fill_projection_matrix(bz_mat3 proj,
 	float x1, float y1, float w1, float h1,
 	float x2, float y2, float w2, float h2);
+void bz_fill_rotation_matrix(bz_mat3 proj, double radians);
+void bz_multiply_matrices(bz_mat3 result, bz_mat3 mat1, bz_mat3 mat2);
 
 double bz_distance(int x1, int y1, int x2, int y2);
 

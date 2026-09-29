@@ -81,12 +81,12 @@ struct bz_surface_state {
 
 	// Viewport state
 	struct bz_rect_dbl *vp_source;
-	struct bz_dimension *vp_dest;
+	struct bz_size *vp_dest;
 
 	// XDG state
 	struct bz_rect *window_geometry; // Nullable
-	struct bz_dimension *min_size;   // Nullable
-	struct bz_dimension *max_size;   // Nullable
+	struct bz_size *min_size;   // Nullable
+	struct bz_size *max_size;   // Nullable
 
 	enum wl_output_transform transform;
 	int32_t scale;
@@ -137,7 +137,7 @@ struct bz_content_update {
 };
 
 void bz_surface_dtor(struct wl_resource *data);
-void bz_recompute_rendered_bounds(struct bz_surface *surface);
+void bz_recompute_physical_position(struct bz_surface *surface);
 struct bz_surface *bz_get_root_surface(struct bz_surface *surface);
 
 

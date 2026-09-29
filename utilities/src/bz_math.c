@@ -14,10 +14,10 @@ struct bz_rect_dbl *bz_clone_rect_dbl(struct bz_rect_dbl *source)
 	return dest;
 }
 
-struct bz_dimension *bz_clone_dimension(struct bz_dimension *source)
+struct bz_size *bz_clone_size(struct bz_size *source)
 {
 	if (source == nullptr) { return nullptr; }
-	struct bz_dimension *dest = calloc(1, sizeof(*dest));
+	struct bz_size *dest = calloc(1, sizeof(*dest));
 	*dest = *source;
 	return dest;
 }
@@ -47,6 +47,30 @@ void bz_fill_projection_matrix(
 
 	// Our favorite hardcoded 1 in the bottom right <3
 	proj[8] = 1.0f;
+}
+
+void bz_fill_rotation_matrix(bz_mat3 proj, double radians) {
+	// Zero the matrix
+	memset(proj, 0, sizeof(*proj));
+
+	proj[0] = cos(radians);
+	proj[1] = sin(radians);
+	proj[3] = -sin(radians);
+	proj[4] = cos(radians);
+
+	// Our favorite hardcoded 1 in the bottom right <3
+	proj[8] = 1.0f;
+}
+
+void bz_multiply_matrices(bz_mat3 result, bz_mat3 mat1, bz_mat3 mat2) {
+	for (int row = 0; row < 3; row++) {
+		for (int col = 0; col < 3; col++) {
+			result[row + 3*col] =
+				mat1[row+0] * mat2[3*col + 0] +
+				mat1[row+3] * mat2[3*col + 1] +
+				mat1[row+6] * mat2[3*col + 2];
+		}
+	}
 }
 
 double bz_distance(int x1, int y1, int x2, int y2)
@@ -83,7 +107,7 @@ bool bz_contains_point(struct bz_rect *rect, struct bz_position *point)
 		.x = rect->w > 0 ? rect->x : rect->x + rect->w,
 		.y = rect->h > 0 ? rect->y : rect->y + rect->h,
 	};
-	struct bz_dimension normal_size = {
+	struct bz_size normal_size = {
 		.w = abs(rect->w),
 		.h = abs(rect->h),
 	};

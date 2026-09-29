@@ -214,9 +214,9 @@ void test_viewport_set_destination__all_negative_ones_clears_destination(void)
 	wl_resource_get_user_data_fake.return_val = vp_data;
 
 	// Start with some initial data for us to clear. Must be calloc'd to properly be freed.
-	struct bz_dimension *initial_dim = calloc(1, sizeof(*initial_dim));
-	*initial_dim = (struct bz_dimension){ .w = 1, .h = 2 };
-	surface_data->pending_state->vp_dest = initial_dim;
+	struct bz_size *initial_size = calloc(1, sizeof(*initial_size));
+	*initial_size = (struct bz_size){ .w = 1, .h = 2 };
+	surface_data->pending_state->vp_dest = initial_size;
 
 	// Run the test
 	TEST_ASSERT_NOT_NULL(surface_data->pending_state->vp_dest);

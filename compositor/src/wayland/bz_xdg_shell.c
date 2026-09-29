@@ -9,6 +9,7 @@
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_math.h"
+#include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
 
 
@@ -594,10 +595,10 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		configevt->serial = wl_display_next_serial(wl_client_get_display(client));
 		configevt->type = BZ_XDG_SURF_TOPLEVEL;
 		wl_array_init(&configevt->toplevel.states);
-		configevt->toplevel.max_size.w = globals->drm.mode_info.hdisplay;
-		configevt->toplevel.max_size.h = globals->drm.mode_info.vdisplay;
+		configevt->toplevel.max_size.w = globals->drm.current_output->compositor_bounds.w;
+		configevt->toplevel.max_size.h = globals->drm.current_output->compositor_bounds.h;
 		// Set recommended size based on min/max size.
-		struct bz_dimension rec_size = { .w = 1920, .h = 1080 };
+		struct bz_size rec_size = { .w = 1920, .h = 1080 };
 		if (bzsurf->active_state->min_size) {
 			rec_size.w = bz_max(rec_size.w, bzsurf->active_state->min_size->w);
 			rec_size.h = bz_max(rec_size.h, bzsurf->active_state->min_size->h);
@@ -607,11 +608,6 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 			rec_size.h = bz_min(rec_size.h, bzsurf->active_state->max_size->h);
 		}
 		configevt->toplevel.recommended_size = rec_size;
-
-		// Send initial state values
-		// TODO-dl13
-		//   wl_surface_send_preferred_buffer_scale(resource, 1);
-		//   wl_surface_send_preferred_buffer_transform(resource, 0);
 
 		if (wl_resource_get_version(bzsurf->xdgtoplevel->resource) >= XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION) {
 			xdg_toplevel_send_configure_bounds(
@@ -633,8 +629,10 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 
 		xdg_toplevel_send_configure(
 			bzsurf->xdgtoplevel->resource,
-			configevt->toplevel.recommended_size.w,
-			configevt->toplevel.recommended_size.h,
+			// configevt->toplevel.recommended_size.w,
+			// configevt->toplevel.recommended_size.h,
+			0,
+			0,
 			&configevt->toplevel.states
 		);
 	} else if (bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
@@ -823,10 +821,10 @@ static void bz_xdg_toplevel_set_max_size(
 	// Store our new max size
 	struct bz_xdg_toplevel *xdg_toplevel = wl_resource_get_user_data(resource);
 	if (xdg_toplevel->wlsurface->pending_state->max_size == nullptr) {
-		struct bz_dimension *max_size = calloc(1, sizeof(*max_size));
+		struct bz_size *max_size = calloc(1, sizeof(*max_size));
 		xdg_toplevel->wlsurface->pending_state->max_size = max_size;
 	}
-	*xdg_toplevel->wlsurface->pending_state->max_size = (struct bz_dimension){ .w = width, .h = height };
+	*xdg_toplevel->wlsurface->pending_state->max_size = (struct bz_size){ .w = width, .h = height };
 }
 
 static void bz_xdg_toplevel_set_min_size(
@@ -847,10 +845,10 @@ static void bz_xdg_toplevel_set_min_size(
 	// Store our new min size
 	struct bz_xdg_toplevel *xdg_toplevel = wl_resource_get_user_data(resource);
 	if (xdg_toplevel->wlsurface->pending_state->min_size == nullptr) {
-		struct bz_dimension *min_size = calloc(1, sizeof(*min_size));
+		struct bz_size *min_size = calloc(1, sizeof(*min_size));
 		xdg_toplevel->wlsurface->pending_state->min_size = min_size;
 	}
-	*xdg_toplevel->wlsurface->pending_state->min_size = (struct bz_dimension){ .w = width, .h = height };
+	*xdg_toplevel->wlsurface->pending_state->min_size = (struct bz_size){ .w = width, .h = height };
 }
 
 static void bz_xdg_toplevel_set_maximized(struct wl_client *client, struct wl_resource *resource)

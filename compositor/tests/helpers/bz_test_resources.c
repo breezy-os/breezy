@@ -70,10 +70,12 @@ struct bz_breezy *bz_create_breezy_data(void)
 {
 	struct bz_breezy *data = calloc(1, sizeof(*data));
 
-	data->drm.mode_info.hdisplay = 1920;
-	data->drm.mode_info.vdisplay = 1080;
 	data->window_mgmt.activable_surfaces = bz_list_create();
 	data->wayland.clients = bz_list_create();
+
+	data->drm.current_output = calloc(1, sizeof(*data->drm.current_output));
+	data->drm.current_output->output_bounds.w = 1920;
+	data->drm.current_output->output_bounds.h = 1080;
 
 	return data;
 }
@@ -86,6 +88,9 @@ void bz_free_breezy_data(struct bz_breezy *data)
 		}
 		if (data->wayland.clients != nullptr) {
 			bz_list_free(data->wayland.clients, nullptr);
+		}
+		if (data->drm.current_output != nullptr) {
+			free(data->drm.current_output);
 		}
 		free(data);
 	}

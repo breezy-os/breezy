@@ -19,10 +19,8 @@ struct bz_drm {
 	int device_id;
 	uint32_t connector_id;
 	uint32_t crtc_id;
-	drmModeModeInfo mode_info;
 	uint32_t mode_blob_id;
 	uint32_t plane_id;
-	bz_mat3 output_projection;
 	bool retry_render_on_page_flip;
 	struct bz_output *current_output;
 };
@@ -35,10 +33,12 @@ struct bz_gbm {
 };
 
 struct bz_renderable {
+	/** The size of the raw, provided wl_buffer (when applicable). */
+	struct bz_size *buffer_size;
 	/** The bounds for the purposes of compositor placement, ignoring any render shifts. */
-	struct bz_rect logical_bounds;
-	/** The bounds for the purposes of rendering, computed from logical_bounds + shifts. */
-	struct bz_rect rendered_bounds;
+	struct bz_rect compositor_bounds; // Pointers only use x/y for this.
+	/** The bounds for the purposes of rendering, computed from compositor_bounds + shifts. */
+	struct bz_rect render_bounds;
 
 	GLuint texture;
 };

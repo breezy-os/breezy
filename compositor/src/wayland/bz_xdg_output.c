@@ -88,8 +88,8 @@ static void bz_zxdg_output_manager_v1_get_xdg_output(
 
 	// Emit the things
 	struct bz_output *output_data = wl_resource_get_user_data(output);
-	zxdg_output_v1_send_logical_position(res, output_data->position.x, output_data->position.y);
-	zxdg_output_v1_send_logical_size(res, output_data->size.w, output_data->size.h);
+	zxdg_output_v1_send_logical_position(res, output_data->compositor_bounds.x, output_data->compositor_bounds.y);
+	zxdg_output_v1_send_logical_size(res, output_data->compositor_bounds.w, output_data->compositor_bounds.h);
 	if (wl_resource_get_version(res) >= ZXDG_OUTPUT_V1_NAME_SINCE_VERSION) {
 		zxdg_output_v1_send_name(res, output_data->name);
 	}

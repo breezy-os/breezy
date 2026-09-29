@@ -36,12 +36,12 @@ enum bz_xdg_surface_type {
 };
 struct bz_toplevel_configure {
 	struct wl_array states;
-	struct bz_dimension max_size;
-	struct bz_dimension recommended_size;
+	struct bz_size max_size;
+	struct bz_size recommended_size;
 };
 struct bz_popup_configure {
 	struct bz_position position;
-	struct bz_dimension size;
+	struct bz_size size;
 };
 struct bz_xdg_surface_configure {
 	uint32_t serial;

@@ -32,6 +32,11 @@ static struct bz_surface *bz_mgmt_check_window_overlap(struct bz_window_mgmt *mg
 int bz_mgmt_initialize(struct bz_window_mgmt *mgmt)
 {
 	mgmt->activable_surfaces = bz_list_create();
+	if (mgmt->activable_surfaces == nullptr) {
+		bz_error(BZ_LOG_WINDOW_MGMT, "Failed to allocate space for activable surfaces.");
+		return 1;
+	}
+
 	return 0;
 }
 
@@ -77,8 +82,8 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 	struct wl_client *client = wl_resource_get_client(surface->resource);
 	struct bz_client *client_data = wl_client_get_user_data(client);
 	struct bz_renderable *cursor = &client_data->breezy->gl.cursor;
-	cursor->logical_bounds.x = surface->renderable.logical_bounds.x;
-	cursor->logical_bounds.y = surface->renderable.logical_bounds.y;
+	cursor->compositor_bounds.x = surface->renderable.compositor_bounds.x;
+	cursor->compositor_bounds.y = surface->renderable.compositor_bounds.y;
 	bz_mgmt_update_pointer_position(mgmt, cursor);
 }
 
@@ -267,8 +272,8 @@ static void bz_mgmt_change_pointer_focus(
 	if (new_surface != nullptr) {
 		struct wl_client *new_client = wl_resource_get_client(new_surface->resource);
 		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
-		wl_fixed_t x_pos = wl_fixed_from_int(mgmt->last_cursor_loc.x - new_surface->renderable.logical_bounds.x);
-		wl_fixed_t y_pos = wl_fixed_from_int(mgmt->last_cursor_loc.y - new_surface->renderable.logical_bounds.y);
+		wl_fixed_t x_pos = wl_fixed_from_int(mgmt->last_cursor_loc.x - new_surface->renderable.compositor_bounds.x);
+		wl_fixed_t y_pos = wl_fixed_from_int(mgmt->last_cursor_loc.y - new_surface->renderable.compositor_bounds.y);
 		uint32_t serial = wl_display_next_serial(new_client_data->breezy->wayland.display);
 		new_client_data->last_enter_serial = serial;
 		struct bz_wl_seat *seat; bz_list_foreach(seat, new_client_data->seats) {
@@ -290,8 +295,8 @@ static void bz_mgmt_change_pointer_focus(
  */
 struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_renderable *cursor)
 {
-	mgmt->last_cursor_loc.x = cursor->logical_bounds.x;
-	mgmt->last_cursor_loc.y = cursor->logical_bounds.y;
+	mgmt->last_cursor_loc.x = cursor->compositor_bounds.x;
+	mgmt->last_cursor_loc.y = cursor->compositor_bounds.y;
 
 	// Iterate over our list, BACKWARDS, until we overlap with a window (or run out of items)
 	struct bz_surface *surf; bz_list_foreach_rev(surf, mgmt->activable_surfaces) {
@@ -323,7 +328,7 @@ static struct bz_surface *bz_mgmt_check_window_overlap(struct bz_window_mgmt *mg
 		struct bz_renderable surf_rect = subsurf->renderable;
 
 		// Check if cursor is overlapping
-		if (bz_contains_point(&surf_rect.rendered_bounds, &mgmt->last_cursor_loc)) {
+		if (bz_contains_point(&surf_rect.render_bounds, &mgmt->last_cursor_loc)) {
 			// If it doesn't already have pointer focus, send an enter event for pointers.
 			if (mgmt->pointer_focus != subsurf) {
 				bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, subsurf);

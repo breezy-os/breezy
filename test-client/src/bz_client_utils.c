@@ -107,7 +107,7 @@ struct bz_buff_alloc *bz_allocate_shm_buffers(
 	for (uint8_t i = 0; i < num_buffers; i++) {
 		size_t offset = i * allocation->buffer_size;
 		allocation->buffers[i].is_released = true;
-		allocation->buffers[i].size = (struct bz_dimension){ .w = width, .h = height };
+		allocation->buffers[i].size = (struct bz_size){ .w = width, .h = height };
 		allocation->buffers[i].pixel_data = (uint32_t *)(&allocation->pool_data[offset]);
 		allocation->buffers[i].buffer = wl_shm_pool_create_buffer(
 			allocation->shm_pool,

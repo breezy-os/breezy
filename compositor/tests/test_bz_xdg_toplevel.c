@@ -117,7 +117,7 @@ void test_xdg_toplevel_set_max_size__does_not_reinitialize_state(void)
 	// Call once to initialize the state.
 	bz_xdg_toplevel_implementation.set_max_size(nullptr, nullptr, 1, 2);
 	TEST_ASSERT_NOT_NULL(surface->pending_state->max_size);
-	struct bz_dimension *original = surface->pending_state->max_size;
+	struct bz_size *original = surface->pending_state->max_size;
 	TEST_ASSERT_EQUAL_INT(1, surface->pending_state->max_size->w);
 	TEST_ASSERT_EQUAL_INT(2, surface->pending_state->max_size->h);
 
@@ -213,7 +213,7 @@ void test_xdg_toplevel_set_min_size__does_not_reinitialize_state(void)
 	// Call once to initialize the state.
 	bz_xdg_toplevel_implementation.set_min_size(nullptr, nullptr, 1, 2);
 	TEST_ASSERT_NOT_NULL(surface->pending_state->min_size);
-	struct bz_dimension *original = surface->pending_state->min_size;
+	struct bz_size *original = surface->pending_state->min_size;
 	TEST_ASSERT_EQUAL_INT(1, surface->pending_state->min_size->w);
 	TEST_ASSERT_EQUAL_INT(2, surface->pending_state->min_size->h);
 

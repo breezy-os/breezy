@@ -36,16 +36,20 @@ void bz_keyboard_dtor(struct wl_resource *data);
 void bz_output_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
 struct bz_output {
-	struct bz_position position;
-	struct bz_dimension size; // Resolution in pixels
+	uint32_t scale;
+	enum wl_output_transform transform;
+	/** Monitor resolution (from mode) and placement. */
+	struct bz_rect output_bounds;
+	/** Compositor's "resolution" for the purposes of surface placement. */
+	struct bz_rect compositor_bounds;
 	int32_t refresh_rate;
-	struct bz_dimension physical_size; // Size in millimeters
+	struct bz_size size_in_mms; // Size in millimeters
 	char *make;
 	char *model;
 	char *name;
 	char *description;
 	enum wl_output_subpixel subpixel;
-	enum wl_output_transform transform;
+	bz_mat3 projection;
 };
 
 // -- wl_data_device_manager --

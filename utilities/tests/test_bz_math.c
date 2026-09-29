@@ -48,13 +48,13 @@ void test_clone_rect_dbl__succeeds_for_null_source(void)
 
 
 // =================================================================================================
-//  Test bz_clone_dimension()
+//  Test bz_clone_size()
 // -------------------------------------------------------------------------------------------------
 
-void test_clone_dimension__deep_copies_data(void)
+void test_clone_size__deep_copies_data(void)
 {
-	struct bz_dimension source = { .w = 1, .h = 2 };
-	struct bz_dimension *result = bz_clone_dimension(&source);
+	struct bz_size source = { .w = 1, .h = 2 };
+	struct bz_size *result = bz_clone_size(&source);
 	TEST_ASSERT_NOT_EQUAL(&source, result);
 	TEST_ASSERT_EQUAL_INT(1, result->w);
 	TEST_ASSERT_EQUAL_INT(2, result->h);
@@ -65,9 +65,9 @@ void test_clone_dimension__deep_copies_data(void)
 	free(result);
 }
 
-void test_clone_dimension__succeeds_for_null_source(void)
+void test_clone_size__succeeds_for_null_source(void)
 {
-	struct bz_dimension *result = bz_clone_dimension(nullptr);
+	struct bz_size *result = bz_clone_size(nullptr);
 	TEST_ASSERT_NULL(result);
 }
 
@@ -234,9 +234,9 @@ int main(void) {
 	RUN_TEST(test_clone_rect_dbl__deep_copies_data);
 	RUN_TEST(test_clone_rect_dbl__succeeds_for_null_source);
 
-	// -- bz_clone_dimension() --
-	RUN_TEST(test_clone_dimension__deep_copies_data);
-	RUN_TEST(test_clone_dimension__succeeds_for_null_source);
+	// -- bz_clone_size() --
+	RUN_TEST(test_clone_size__deep_copies_data);
+	RUN_TEST(test_clone_size__succeeds_for_null_source);
 
 	// -- bz_distance() --
 	RUN_TEST(test_distance__returns_correct_distance);
