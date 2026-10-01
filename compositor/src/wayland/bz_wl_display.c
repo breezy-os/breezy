@@ -688,7 +688,13 @@ static void bz_surface_attach(
 
 	if (wl_resource_get_version(resource) < 5) {
 		// x and y can only be used if the version is less than 5
-		// TODO: accommodate x and y. Consider how this would apply for both XDG surfaces and cursors.
+		if (surf_data->role == BZ_SURF_ROLE_WL_CURSOR && surf_data->cursor != nullptr) {
+			surf_data->cursor->hotspot.x -= x;
+			surf_data->cursor->hotspot.y -= y;
+		} else {
+			surf_data->pending_state->offset.x = x;
+			surf_data->pending_state->offset.y = y;
+		}
 	} else if (x != 0 || y != 0) {
 		// If a non-zero x or y value is given for >= version 5, then it's a protocol error
 		wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_OFFSET,
@@ -1052,10 +1058,14 @@ static void bz_surface_offset(
 	int32_t x,
 	int32_t y
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.offset not implemented");
-	// TODO
-	// TODO: (since version 5)
-	// TODO: Make sure to ignore this request for subsurfaces.
+	struct bz_surface *surface = wl_resource_get_user_data(resource);
+	if (surface->role == BZ_SURF_ROLE_WL_CURSOR && surface->cursor != nullptr) {
+		surface->cursor->hotspot.x -= x;
+		surface->cursor->hotspot.y -= y;
+	} else if (surface->role != BZ_SURF_ROLE_WL_SUBSURFACE) {
+		surface->pending_state->offset.x = x;
+		surface->pending_state->offset.y = y;
+	}
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------
@@ -1072,7 +1082,9 @@ void bz_recompute_physical_position(struct bz_surface *surface)
 		surface->renderable.render_bounds.y -= surface->active_state->window_geometry->y;
 	}
 
-	// TODO-dl13: Shift by the accumulated offset.
+	// Shift by the accumulated offset.
+	surface->renderable.render_bounds.x += surface->active_state->offset.x;
+	surface->renderable.render_bounds.y += surface->active_state->offset.y;
 
 	if (surface->role == BZ_SURF_ROLE_WL_SUBSURFACE && surface->subsurface) {
 		// Shift by the parent location
@@ -1314,6 +1326,8 @@ static struct bz_surface_state *bz_promote_pending_to_content_update(
 	}
 
 	// Buffer transform/scale
+	cu_state->offset = pending_state->offset;
+	pending_state->offset = (struct bz_position){ .x = 0, .y = 0 };
 	cu_state->transform = pending_state->transform;
 	cu_state->scale = pending_state->scale;
 
@@ -1412,8 +1426,8 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 			surface->renderable.buffer_size = calloc(1, sizeof(*surface->renderable.buffer_size));
 			full_redraw = true;
 		} else { // If both new and old commits had buffers
-			full_redraw = full_redraw || surface->renderable.buffer_size->w != wl_shm_buffer_get_width(shmbuf);
-			full_redraw = full_redraw || surface->renderable.buffer_size->h != wl_shm_buffer_get_height(shmbuf);
+			full_redraw |= full_redraw || (surface->renderable.buffer_size->w != wl_shm_buffer_get_width(shmbuf));
+			full_redraw |= full_redraw || (surface->renderable.buffer_size->h != wl_shm_buffer_get_height(shmbuf));
 		}
 		surface->renderable.buffer_size->w = wl_shm_buffer_get_width(shmbuf);
 		surface->renderable.buffer_size->h = wl_shm_buffer_get_height(shmbuf);
@@ -1460,7 +1474,6 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	if (active_state->vp_dest)   { free(active_state->vp_dest); }
 	active_state->vp_source = bz_clone_rect_dbl(cu->state->vp_source);
 	active_state->vp_dest = bz_clone_size(cu->state->vp_dest);
-	// TODO-dl13-vp: Lots of errors to check for and throw, possibly at the top of "commit".
 
 	// >> XDG State
 	if (cu->state->window_geometry != nullptr) {
@@ -1486,8 +1499,11 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	}
 
 	// >> Buffer transform and scale
-	full_redraw = full_redraw || active_state->transform != cu->state->transform;
-	full_redraw = full_redraw || active_state->scale != cu->state->scale;
+	full_redraw |= full_redraw || (cu->state->offset.x != 0) || (cu->state->offset.y != 0);
+	full_redraw |= full_redraw || (active_state->transform != cu->state->transform);
+	full_redraw |= full_redraw || (active_state->scale != cu->state->scale);
+	active_state->offset.x += cu->state->offset.x;
+	active_state->offset.y += cu->state->offset.y;
 	active_state->transform = cu->state->transform;
 	active_state->scale = cu->state->scale;
 

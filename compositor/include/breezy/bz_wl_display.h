@@ -88,6 +88,7 @@ struct bz_surface_state {
 	struct bz_size *min_size;   // Nullable
 	struct bz_size *max_size;   // Nullable
 
+	struct bz_position offset;
 	enum wl_output_transform transform;
 	int32_t scale;
 };

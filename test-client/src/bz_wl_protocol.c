@@ -497,6 +497,12 @@ static void bz_pointer_button(
 	case BTN_RIGHT:
 		window->bg_color = bz_random_color();
 		break;
+	case BTN_MIDDLE:
+		// Move the cursor:
+		// wl_surface_offset(seat_data->globals->cursor->wlsurface, -2, -2);
+		// Move the window:
+		wl_surface_offset(seat_data->globals->window->wlsurface, -5, -5);
+		break;
 	}
 }
 
@@ -727,8 +733,9 @@ static void bz_draw_frame(struct bz_application_window *window)
 		bz_draw_area(window, 0, 0, buffer->size.w, buffer->size.h, circle_x, circle_y);
 		window->has_been_drawn = true;
 	} else {
-		bz_draw_area(window, window->last_circle_center.x - window->radius, window->last_circle_center.y - window->radius, window->last_circle_center.x + window->radius, window->last_circle_center.y + window->radius, circle_x, circle_y);
-		bz_draw_area(window, circle_x - window->radius, circle_y - window->radius, circle_x + window->radius, circle_y + window->radius, circle_x, circle_y);
+		bz_draw_area(window, 0, 0, buffer->size.w, buffer->size.h, circle_x, circle_y);
+		// bz_draw_area(window, window->last_circle_center.x - window->radius, window->last_circle_center.y - window->radius, window->last_circle_center.x + window->radius, window->last_circle_center.y + window->radius, circle_x, circle_y);
+		// bz_draw_area(window, circle_x - window->radius, circle_y - window->radius, circle_x + window->radius, circle_y + window->radius, circle_x, circle_y);
 	}
 }
 

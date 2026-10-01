@@ -599,6 +599,7 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		configevt->toplevel.max_size.h = globals->drm.current_output->compositor_bounds.h;
 		// Set recommended size based on min/max size.
 		struct bz_size rec_size = { .w = 1920, .h = 1080 };
+		// struct bz_size rec_size = { .w = 800, .h = 600 };
 		if (bzsurf->active_state->min_size) {
 			rec_size.w = bz_max(rec_size.w, bzsurf->active_state->min_size->w);
 			rec_size.h = bz_max(rec_size.h, bzsurf->active_state->min_size->h);

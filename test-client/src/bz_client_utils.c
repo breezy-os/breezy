@@ -140,7 +140,8 @@ struct bz_buff_alloc *bz_allocate_shm_buffers(
 
 uint32_t bz_random_color(void)
 {
-	return ((uint32_t)(rand() & 0xFF) << 16) |  // R
+	return ((uint32_t)(0xFF) << 24) |  // A
+		   ((uint32_t)(rand() & 0xFF) << 16) |  // R
 		   ((uint32_t)(rand() & 0xFF) << 8)  |  // G
 		   ((uint32_t)(rand() & 0xFF));         // B
 }

@@ -120,35 +120,74 @@ void test_surface_attach__contents_are_double_buffered(void)
 }
 
 /**
- * New size of surface is calculated based on buffer size transformed by the inverse
- * buffer_transform and inverse buffer_scale.
- */
-void test_surface_attach__size_is_properly_calculated(void)
-{
-	// TODO
-}
-
-/**
- * X and Y specify the new pending buffer's upper-left corner RELATIVE to the current buffer's
- * upper-left corner, in SURFACE-local coordinates.
- */
-void test_surface_attach__x_y_are_relative(void)
-{
-	// TODO
-}
-
-/**
  * When surface version is v5 or higher, passing non-zero X or Y will raise an invalid_offset error.
  */
 void test_surface_attach__x_y_for_v5_raises_an_error(void)
 {
-	// TODO
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surf_data;
+	wl_resource_get_version_fake.return_val = 5;
+
+	// Run our test
+	bz_surface_implementation.attach(nullptr, nullptr, nullptr, 1, -2);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(WL_SURFACE_ERROR_INVALID_OFFSET, wl_resource_post_error_fake.arg1_val);
+
+	// Cleanup
+	bz_free_surface_data(surf_data);
 }
 
 /** When surface version is v4 or lower, passing non-zero X or Y is allowed. */
-void test_surface_attach__x_y_for_v4_is_allowed(void)
+void test_surface_attach__x_y_for_v4_is_double_buffered(void)
 {
-	// TODO
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surf_data;
+	wl_resource_get_version_fake.return_val = 4;
+
+	// Run our test
+	struct wl_resource *buffer = calloc(1, sizeof(*buffer));
+	bz_surface_implementation.attach(nullptr, nullptr, buffer, 1, -2);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1,  surf_data->pending_state->offset.x);
+	TEST_ASSERT_EQUAL_INT(-2, surf_data->pending_state->offset.y);
+	TEST_ASSERT_EQUAL_INT(0,  surf_data->active_state->offset.x);
+	TEST_ASSERT_EQUAL_INT(0,  surf_data->active_state->offset.y);
+
+	// Cleanup
+	bz_free_surface_data(surf_data);
+	free(buffer);
+}
+
+/** When surface version is v4 or lower, and the surface is a cursor, the hotspot is set instead of offset. */
+void test_surface_attach__x_y_for_v4_cursor_modifies_hotspot(void)
+{
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	surf_data->role = BZ_SURF_ROLE_WL_CURSOR;
+	struct bz_cursor *cursor = calloc(1, sizeof(*cursor));
+	surf_data->cursor = cursor;
+	cursor->surface = surf_data;
+	cursor->hotspot = (struct bz_position){ .x = 5, .y = 10 };
+	wl_resource_get_user_data_fake.return_val = surf_data;
+	wl_resource_get_version_fake.return_val = 4;
+
+	// Run our test
+	struct wl_resource *buffer = calloc(1, sizeof(*buffer));
+	bz_surface_implementation.attach(nullptr, nullptr, buffer, 1, -2);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	// Offset should be unchanged
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->offset.x);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->offset.y);
+	// Cursor hotspot should be shifted negatively, not simply assigned.
+	TEST_ASSERT_EQUAL_INT(5 - 1,   surf_data->cursor->hotspot.x);
+	TEST_ASSERT_EQUAL_INT(10 - -2, surf_data->cursor->hotspot.y);
+
+	// Cleanup
+	free(buffer);
+	free(cursor);
+	bz_free_surface_data(surf_data);
 }
 
 
@@ -805,6 +844,70 @@ void test_surface_damage_buffer__tracked_independently_from_surface_damage(void)
 //  Test bz_surface_offset()
 // -------------------------------------------------------------------------------------------------
 
+void test_surface_offset__values_are_double_buffered(void)
+{
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	wl_resource_get_user_data_fake.return_val = surf_data;
+
+	// Run our test
+	bz_surface_implementation.offset(nullptr, nullptr, 1, -2);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1,  surf_data->pending_state->offset.x);
+	TEST_ASSERT_EQUAL_INT(-2, surf_data->pending_state->offset.y);
+	TEST_ASSERT_EQUAL_INT(0,  surf_data->active_state->offset.x);
+	TEST_ASSERT_EQUAL_INT(0,  surf_data->active_state->offset.y);
+
+	// Cleanup
+	bz_free_surface_data(surf_data);
+}
+
+void test_surface_offset__cursor_role_modifies_hotspot(void)
+{
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	surf_data->role = BZ_SURF_ROLE_WL_CURSOR;
+	struct bz_cursor *cursor = calloc(1, sizeof(*cursor));
+	surf_data->cursor = cursor;
+	cursor->surface = surf_data;
+	cursor->hotspot = (struct bz_position){ .x = 5, .y = 10 };
+	wl_resource_get_user_data_fake.return_val = surf_data;
+	wl_resource_get_version_fake.return_val = 4;
+
+	// Run our test
+	bz_surface_implementation.offset(nullptr, nullptr, 1, -2);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	// Offset should be unchanged
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->offset.x);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->offset.y);
+	// Cursor hotspot should be shifted negatively, not simply assigned.
+	TEST_ASSERT_EQUAL_INT(5 - 1,   surf_data->cursor->hotspot.x);
+	TEST_ASSERT_EQUAL_INT(10 - -2, surf_data->cursor->hotspot.y);
+
+	// Cleanup
+	free(cursor);
+	bz_free_surface_data(surf_data);
+}
+
+void test_surface_offset__subsurface_role_does_nothing(void)
+{
+	// Prep our mocks
+	struct bz_surface *surf_data = bz_create_surface_data();
+	surf_data->role = BZ_SURF_ROLE_WL_SUBSURFACE;
+	wl_resource_get_user_data_fake.return_val = surf_data;
+
+	// Run our test
+	bz_surface_implementation.offset(nullptr, nullptr, 1, -2);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->offset.x);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->pending_state->offset.y);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->active_state->offset.x);
+	TEST_ASSERT_EQUAL_INT(0, surf_data->active_state->offset.y);
+
+	// Cleanup
+	bz_free_surface_data(surf_data);
+}
+
 
 // =================================================================================================
 //  Runner
@@ -820,10 +923,9 @@ int main(void) {
 
 	// Test bz_surface_attach()
 	RUN_TEST(test_surface_attach__contents_are_double_buffered);
-	RUN_TEST(test_surface_attach__size_is_properly_calculated); // TODO
-	RUN_TEST(test_surface_attach__x_y_are_relative); // TODO
-	RUN_TEST(test_surface_attach__x_y_for_v5_raises_an_error); // TODO
-	RUN_TEST(test_surface_attach__x_y_for_v4_is_allowed); // TODO
+	RUN_TEST(test_surface_attach__x_y_for_v5_raises_an_error);
+	RUN_TEST(test_surface_attach__x_y_for_v4_is_double_buffered);
+	RUN_TEST(test_surface_attach__x_y_for_v4_cursor_modifies_hotspot);
 
 	// Test bz_surface_damage()
 	RUN_TEST(test_surface_damage__damage_is_double_buffered);
@@ -870,8 +972,9 @@ int main(void) {
 	RUN_TEST(test_surface_damage_buffer__tracked_independently_from_surface_damage);
 
 	// Test bz_surface_offset()
-	// RUN_TEST(test_surface_offset_...);
-	// TODO
+	RUN_TEST(test_surface_offset__values_are_double_buffered);
+	RUN_TEST(test_surface_offset__cursor_role_modifies_hotspot);
+	RUN_TEST(test_surface_offset__subsurface_role_does_nothing);
 
 	return UNITY_END();
 }
