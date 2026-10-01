@@ -1,12 +1,14 @@
 
 #include "breezy/bz_wl_display.h"
 
+#include <fractional-scale-v1-server-protocol.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <wayland-server.h>
 #include <xdg-shell-server-protocol.h>
+#include <viewporter-server-protocol.h>
 
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
@@ -17,6 +19,7 @@
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_wp_viewporter.h"
+#include "breezy/bz_wp_fractional_scale.h"
 
 
 // =================================================================================================
@@ -175,16 +178,6 @@ static void bz_compositor_create_surface(
 	// Starts with only itself in its stack of surfaces.
 	bz_list_append(surface->pending_state->surface_stack, surface);
 	bz_list_append(surface->active_state->surface_stack, surface);
-
-	// Send initial state values
-	struct bz_client *client_data = wl_client_get_user_data(client);
-	struct bz_output *current_output = client_data->breezy->drm.current_output;
-	if (wl_resource_get_version(res) >= WL_SURFACE_PREFERRED_BUFFER_SCALE_SINCE_VERSION) {
-		wl_surface_send_preferred_buffer_scale(res, current_output->scale);
-	}
-	if (wl_resource_get_version(res) >= WL_SURFACE_PREFERRED_BUFFER_TRANSFORM_SINCE_VERSION) {
-		wl_surface_send_preferred_buffer_transform(res, current_output->transform);
-	}
 
 	// Everything succeeded!
 	return;
@@ -632,6 +625,11 @@ void bz_surface_dtor(struct wl_resource *data)
 		bzsurf->viewport->surface = nullptr;
 		bzsurf->viewport = nullptr;
 	}
+	// Remove the association with the fractional scale (if present)
+	if (bzsurf->fractional_scale != nullptr) {
+		bzsurf->fractional_scale->surface = nullptr;
+		bzsurf->fractional_scale = nullptr;
+	}
 
 	// Other/misc stuff
 	if (bzsurf->renderable.buffer_size != nullptr) { free(bzsurf->renderable.buffer_size); }
@@ -820,9 +818,9 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 {
 	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
 
-	// Verify surface-level double-buffered state
+	// Verify state that spanned across multiple requests
 
-	// > Min/Max sizes must be compatible
+	// >> Min/Max sizes must be compatible
 	if (
 		bzsurf->pending_state->min_size != nullptr &&
 		bzsurf->pending_state->max_size != nullptr && (
@@ -840,8 +838,8 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 		return;
 	}
 
-	// > Buffer size must be an even multiple of the scale.
-	if (bzsurf->pending_state->buffer) {
+	// >> Buffer size must be an even multiple of the scale.
+	if (bzsurf->pending_state->buffer != nullptr) {
 		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->pending_state->buffer);
 		if (
 			bzsurf->role != BZ_SURF_ROLE_WL_CURSOR && // Cursors don't always obey this requirement.
@@ -858,6 +856,52 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 				bzsurf->pending_state->scale);
 			return;
 		}
+	}
+
+	// >> Viewport
+	// "If src_width or src_height are not integers and destination size is not set, the bad_size
+	//   protocol error is raised when the surface state is applied."
+	if (bzsurf->pending_state->vp_source != nullptr && bzsurf->pending_state->vp_dest == nullptr) {
+		struct bz_rect_dbl *src = bzsurf->pending_state->vp_source;
+		if (!bz_dbl_is_int(src->w) || !bz_dbl_is_int(src->h)) {
+			wl_resource_post_error(resource, WP_VIEWPORT_ERROR_BAD_SIZE,
+				"No destination, and provided source w/h not integers.");
+			bz_error(BZ_LOG_WL_DISPLAY,
+				"No vp_dest set, and provided vp_source.w/h not integers (%f, %f).",
+				src->w, src->h);
+			return;
+		}
+	}
+	// "If the source rectangle is partially or completely outside of the non-NULL wl_buffer, then
+	//   the out_of_buffer protocol error is raised when the surface state is applied."
+	if (bzsurf->pending_state->buffer != nullptr && bzsurf->pending_state->vp_source != nullptr) {
+		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->pending_state->buffer);
+		int32_t width = wl_shm_buffer_get_width(shmbuf);
+		int32_t height = wl_shm_buffer_get_height(shmbuf);
+		struct bz_rect_dbl *src = bzsurf->pending_state->vp_source;
+		if (src->x + src->w >= width || src->y + src->h >= height) {
+			wl_resource_post_error(resource, WP_VIEWPORT_ERROR_OUT_OF_BUFFER,
+				"Viewport source extends beyond the provided buffer.");
+			bz_error(BZ_LOG_WL_DISPLAY,
+				"Viewport source (%f, %f, %f, %f) extends beyond the provided buffer (%d, %d).",
+				src->x, src->y, src->w, src->h, width, height);
+			return;
+		}
+	}
+
+	// Send initial state values
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_output *current_output = client_data->breezy->drm.current_output;
+	if (wl_resource_get_version(resource) >= WL_SURFACE_PREFERRED_BUFFER_SCALE_SINCE_VERSION) {
+		wl_surface_send_preferred_buffer_scale(resource, ceil(current_output->scale/120.0));
+	}
+	if (wl_resource_get_version(resource) >= WL_SURFACE_PREFERRED_BUFFER_TRANSFORM_SINCE_VERSION) {
+		wl_surface_send_preferred_buffer_transform(resource, current_output->transform);
+	}
+	if (bzsurf->fractional_scale != nullptr) {
+		wp_fractional_scale_v1_send_preferred_scale(
+			bzsurf->fractional_scale->resource,
+			current_output->scale);
 	}
 
 	// Copy over our pending state into a content update
@@ -1018,8 +1062,6 @@ static void bz_surface_offset(
 
 void bz_recompute_physical_position(struct bz_surface *surface)
 {
-	// TODO-dl13: Are either of the scales or transforms supposed to come into play here..?
-
 	// Start with the logical/compositor bounds
 	surface->renderable.render_bounds.x = surface->renderable.compositor_bounds.x;
 	surface->renderable.render_bounds.y = surface->renderable.compositor_bounds.y;
@@ -1114,7 +1156,20 @@ static void bz_write_surface_texture(struct bz_surface *surface_data, bool full_
 			*transformed = *rect;
 
 			// 1. Apply viewport
-			// TODO-dl13
+			struct bz_rect_dbl *vp_source = surface_data->active_state->vp_source;
+			struct bz_size *vp_dest = surface_data->active_state->vp_dest;
+			if (vp_source != nullptr || vp_dest != nullptr) {
+				struct bz_size *vp_src_size = (vp_dest != nullptr)
+					? vp_dest
+					: &(struct bz_size){ .w = vp_source->w, .h = vp_source->h };
+				transformed->x *= (vp_source->w / vp_src_size->w);
+				transformed->y *= (vp_source->h / vp_src_size->h);
+				transformed->w *= (vp_source->w / vp_src_size->w);
+				transformed->h *= (vp_source->h / vp_src_size->h);
+
+				transformed->x += vp_source->x;
+				transformed->y += vp_source->y;
+			}
 
 			// 2. Apply buffer scale
 			transformed->x *= surface_data->active_state->scale;
@@ -1147,6 +1202,12 @@ static void bz_write_surface_texture(struct bz_surface *surface_data, bool full_
 				transformed->h = tw;
 				break;
 			}
+
+			// Pad by 1 to cover potential rounding issues
+			transformed->x -= 1;
+			transformed->y -= 1;
+			transformed->w += 2;
+			transformed->h += 2;
 
 			bz_list_append(transformed_damage, transformed);
 		}
@@ -1393,11 +1454,13 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	}
 
 	// >> Viewporter stuff
-	// TODO-dl13: Set "full_redraw" flag if these change.
+	full_redraw |= !bz_dbl_rects_are_equal(active_state->vp_source, cu->state->vp_source);
+	full_redraw |= !bz_sizes_are_equal(active_state->vp_dest, cu->state->vp_dest);
 	if (active_state->vp_source) { free(active_state->vp_source); }
 	if (active_state->vp_dest)   { free(active_state->vp_dest); }
 	active_state->vp_source = bz_clone_rect_dbl(cu->state->vp_source);
 	active_state->vp_dest = bz_clone_size(cu->state->vp_dest);
+	// TODO-dl13-vp: Lots of errors to check for and throw, possibly at the top of "commit".
 
 	// >> XDG State
 	if (cu->state->window_geometry != nullptr) {
@@ -1405,9 +1468,9 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 			active_state->window_geometry = calloc(1, sizeof(*active_state->window_geometry));
 		}
 		*active_state->window_geometry = *cu->state->window_geometry;
-		// TODO-dl13: May need to swap compositor w/h when surface is transformed..?
 		surface->renderable.compositor_bounds.w = active_state->window_geometry->w;
 		surface->renderable.compositor_bounds.h = active_state->window_geometry->h;
+		// The x/y coordinates are taken into consideration when computing the "render_bounds"
 	}
 	if (cu->state->min_size != nullptr) {
 		if (active_state->min_size == nullptr) {
@@ -1436,15 +1499,24 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 		bz_write_surface_texture(surface, full_redraw);
 
 		// Update our displayed window size
-		surface->renderable.render_bounds.w = surface->renderable.buffer_size->w / (surface->active_state->scale);
-		surface->renderable.render_bounds.h = surface->renderable.buffer_size->h / (surface->active_state->scale);
-		if (surface->active_state->transform & 1) { // "is an odd transform"
-			int32_t swap = surface->renderable.render_bounds.w;
-			surface->renderable.render_bounds.w = surface->renderable.render_bounds.h;
-			surface->renderable.render_bounds.h = swap;
+		if (active_state->vp_dest != nullptr) {
+			// If destination is set, it alone determines the surface size.
+			surface->renderable.render_bounds.w = active_state->vp_dest->w;
+			surface->renderable.render_bounds.h = active_state->vp_dest->h;
+		} else if (active_state->vp_source != nullptr) {
+			// If only set_source is set, the surface size is the source size, which must then be an integer.
+			surface->renderable.render_bounds.w = active_state->vp_source->w;
+			surface->renderable.render_bounds.h = active_state->vp_source->h;
+		} else {
+			// If neither is set, the surface size is the buffer size after transform and scale.
+			surface->renderable.render_bounds.w = surface->renderable.buffer_size->w / (surface->active_state->scale);
+			surface->renderable.render_bounds.h = surface->renderable.buffer_size->h / (surface->active_state->scale);
+			if (surface->active_state->transform & 1) { // "is an odd transform"
+				int32_t swap = surface->renderable.render_bounds.w;
+				surface->renderable.render_bounds.w = surface->renderable.render_bounds.h;
+				surface->renderable.render_bounds.h = swap;
+			}
 		}
-		// TODO-dl13: Crop to viewport source rectangle
-		// TODO-dl13: Scale to viewport destination. (if set, the surface size becomes dest)
 
 		// Since the buffer contents are saved on our OpenGL texture, release the buffer.
 		// TODO-dl??: This might need to be deferred for the DMA-BUF protocol..?

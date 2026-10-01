@@ -7,15 +7,26 @@
 constexpr double BZ_PI = 3.1415926;
 constexpr double BZ_PI_2 = BZ_PI / 2.0;
 
+// -- Positions --
+
 struct bz_position  { int32_t x; int32_t y; };
 struct bz_size { int32_t w; int32_t h; };
 struct bz_rect { int32_t x; int32_t y; int32_t w; int32_t h; }; // TODO-dl13: make w/h uint32_t?
 struct bz_rect_dbl { double x; double y; double w; double h; };
 
+bool bz_sizes_are_equal(struct bz_size *s1, struct bz_size *s2);
+
+bool bz_rects_are_equal(struct bz_rect *r1, struct bz_rect *r2);
+bool bz_dbl_rects_are_equal(struct bz_rect_dbl *r1, struct bz_rect_dbl *r2);
 struct bz_rect_dbl *bz_clone_rect_dbl(struct bz_rect_dbl *source);
+bool bz_contains_point(struct bz_rect *rect, struct bz_position *point);
+
 struct bz_size *bz_clone_size(struct bz_size *source);
 
-// -- Matrix format --
+double bz_distance(int x1, int y1, int x2, int y2);
+
+// -- Matrices --
+
 // [0  3  6]
 // [1  4  7]
 // [2  5  8]
@@ -32,7 +43,8 @@ void bz_fill_projection_matrix(bz_mat3 proj,
 void bz_fill_rotation_matrix(bz_mat3 proj, double radians);
 void bz_multiply_matrices(bz_mat3 result, bz_mat3 mat1, bz_mat3 mat2);
 
-double bz_distance(int x1, int y1, int x2, int y2);
+
+// -- Misc --
 
 int32_t bz_rand_int(int min, int max);
 
@@ -40,7 +52,7 @@ int32_t bz_min(int32_t v1, int32_t v2);
 int32_t bz_max(int32_t v1, int32_t v2);
 int32_t bz_clamp(int32_t value, int32_t min, int32_t max);
 
-bool bz_contains_point(struct bz_rect *rect, struct bz_position *point);
+bool bz_dbl_is_int(double val);
 
 // #################################################################################################
 #endif

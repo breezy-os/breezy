@@ -65,7 +65,7 @@ static void bz_gles_render_and_commit(void *data);
 static void bz_gles_render_applications(struct bz_breezy *breezy);
 static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surface *surface);
 static void bz_gles_render_cursor(struct bz_breezy *breezy);
-static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians);
+static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians, struct bz_rect_dbl *viewport, struct bz_size *buff_size);
 // Shaders
 static GLuint bz_gles_create_client_shader_program(void);
 static GLuint compile_shader(GLenum type, const char *code);
@@ -233,14 +233,14 @@ static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct
 	snprintf(description, desc_len, "%s %s (%s)", conn_data->make, conn_data->model, name);
 
 	// Set all values
-	out->scale = 2;
+	out->scale = 210; // Numerator over 120 (fractional scale protocol support)
 	out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
 	out->output_bounds = (struct bz_rect){ .x = 0, .y = 0, .w = mode->hdisplay, .h = mode->vdisplay };
 	out->compositor_bounds = (struct bz_rect){
-		.x = out->output_bounds.x / out->scale,
-		.y = out->output_bounds.y / out->scale,
-		.w = (out->transform & 1 ? out->output_bounds.h : out->output_bounds.w) / out->scale,
-		.h = (out->transform & 1 ? out->output_bounds.w : out->output_bounds.h) / out->scale
+		.x = out->output_bounds.x / (out->scale/120.0),
+		.y = out->output_bounds.y / (out->scale/120.0),
+		.w = (out->transform & 1 ? out->output_bounds.h : out->output_bounds.w) / (out->scale/120.0),
+		.h = (out->transform & 1 ? out->output_bounds.w : out->output_bounds.h) / (out->scale/120.0)
 	};
 	out->refresh_rate = mode->vrefresh;
 	out->size_in_mms = (struct bz_size){
@@ -256,11 +256,11 @@ static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct
 	// Create the buffer transformation
 	enum wl_output_transform transform = out->transform;
 	// > Rotation and vertical flip
-	bz_mat3 vflip;       bz_fill_projection_matrix(vflip, 0, 0, 1, 1, 0, 0, transform >= 4 ? -1 : 1, 1);
-	bz_mat3 rotate;      bz_fill_rotation_matrix(rotate, (transform & 3) * BZ_PI_2);
-	bz_mat3 rotate_flip; bz_multiply_matrices(rotate_flip, vflip, rotate);
+	bz_mat3 vflip = {0};       bz_fill_projection_matrix(vflip, 0, 0, 1, 1, 0, 0, transform >= 4 ? -1 : 1, 1);
+	bz_mat3 rotate = {0};      bz_fill_rotation_matrix(rotate, (transform & 3) * BZ_PI_2);
+	bz_mat3 rotate_flip = {0}; bz_multiply_matrices(rotate_flip, vflip, rotate);
 	// > Scale and translation
-	bz_mat3 scale_translate;
+	bz_mat3 scale_translate = {0};
 	bz_fill_projection_matrix(
 		scale_translate,
 		out->compositor_bounds.x, out->compositor_bounds.y, out->compositor_bounds.w, out->compositor_bounds.h,
@@ -914,10 +914,10 @@ static void bz_gles_render_and_commit(void *data) {
 	// -- Render time! --
 	glViewport(0, 0, breezy->drm.current_output->output_bounds.w, breezy->drm.current_output->output_bounds.h);
 	glClear(GL_COLOR_BUFFER_BIT);            // First, clear the screen
-
-	// TODO-dl??: Disable blend for fully opaque surfaces
-	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+	glEnable(GL_BLEND); // TODO-dl??: Do this per-surface, and disable blend for fully opaque surfaces
+	// glDisable(GL_BLEND);
 
 	if (breezy->gl.vbo != 0) {
 		bz_gles_render_applications(breezy); // Then render the applications.
@@ -988,8 +988,13 @@ static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surfac
 
 				// Invert the buffer transformation
 				enum wl_output_transform transform = physical_surface->active_state->transform;
-				bz_mat3 uv_proj;
-				bz_gles_build_uv_projection(uv_proj, transform >= 4, 2*BZ_PI - (transform & 3) * BZ_PI_2);
+				bz_mat3 uv_proj = {0};
+				bz_gles_build_uv_projection(uv_proj,
+					transform >= 4,
+					2*BZ_PI - (transform & 3) * BZ_PI_2,
+					physical_surface->active_state->vp_source,
+					physical_surface->renderable.buffer_size
+				);
 				GLint uvProjId = glGetUniformLocation(client_program, "u_surfaceUVProj");
 				glUniformMatrix3fv(uvProjId, 1, GL_FALSE, uv_proj);
 
@@ -1009,6 +1014,8 @@ static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surfac
 static void bz_gles_render_cursor(struct bz_breezy *breezy)
 {
 	struct bz_renderable *cursor = nullptr;
+	struct bz_rect_dbl *viewport = nullptr;
+	struct bz_size *buff_size = nullptr;
 	if (breezy->window_mgmt.pointer_focus == nullptr) {
 		cursor = &breezy->gl.cursor;
 		cursor->render_bounds.x = cursor->compositor_bounds.x - breezy->gl.cursor_offset.x;
@@ -1021,6 +1028,8 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 			cursor = &client_data->cursor_surface->renderable;
 			cursor->render_bounds.x = cursor->compositor_bounds.x - client_data->cursor_surface->cursor->hotspot.x;
 			cursor->render_bounds.y = cursor->compositor_bounds.y - client_data->cursor_surface->cursor->hotspot.y;
+			viewport = client_data->cursor_surface->active_state->vp_source;
+			buff_size = client_data->cursor_surface->renderable.buffer_size;
 		}
 	}
 	if (cursor != nullptr && cursor->texture != 0) {
@@ -1048,7 +1057,7 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
 
 		// Invert the buffer transformation
-		bz_mat3 transform; bz_gles_build_uv_projection(transform, false, 0);
+		bz_mat3 transform = {0}; bz_gles_build_uv_projection(transform, false, 0, viewport, buff_size);
 		GLint uvProj = glGetUniformLocation(client_program, "u_surfaceUVProj");
 		glUniformMatrix3fv(uvProj, 1, GL_FALSE, transform);
 
@@ -1063,21 +1072,35 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 	}
 }
 
-static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians)
+static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians, struct bz_rect_dbl *viewport, struct bz_size *buff_size)
 {
 	// First, our flip/rotation matrix
-	bz_mat3 vflip;     bz_fill_projection_matrix(vflip, 0, 0, 1, 1, 0, 0, flip ? -1 : 1, 1);
-	bz_mat3 rotate;    bz_fill_rotation_matrix(rotate, radians);
-	bz_mat3 transform; bz_multiply_matrices(transform, vflip, rotate);
+	bz_mat3 vflip = {0};     bz_fill_projection_matrix(vflip, 0, 0, 1, 1, 0, 0, flip ? -1 : 1, 1);
+	bz_mat3 rotate = {0};    bz_fill_rotation_matrix(rotate, radians);
+	bz_mat3 transform = {0}; bz_multiply_matrices(transform, vflip, rotate);
 
 	// Need our result matrix to apply the transform around the origin, so multiply through
 	//   something that shifts it up/left by half size, then back down/right by half size.
-	bz_mat3 negshift;  bz_fill_projection_matrix(negshift, 0, 0, 1, 1, -0.5, -0.5, 1, 1);
-	bz_mat3 posshift;  bz_fill_projection_matrix(posshift, 0, 0, 1, 1, 0.5, 0.5, 1, 1);
-	// Multiply them out! (pos * transform * neg)
-	bz_mat3 translated_neg;
-	bz_multiply_matrices(translated_neg, transform, negshift);
-	bz_multiply_matrices(result, posshift, translated_neg);
+	bz_mat3 negshift = {0};  bz_fill_projection_matrix(negshift, 0, 0, 1, 1, -0.5, -0.5, 1, 1);
+	bz_mat3 posshift = {0};  bz_fill_projection_matrix(posshift, 0, 0, 1, 1, 0.5, 0.5, 1, 1);
+	// Multiply them out! ([vp *] pos * transform * neg)
+	bz_mat3 translated_neg = {0};
+	bz_mat3 translated_pos = {0};
+
+	if (viewport != nullptr && buff_size != nullptr) {
+		bz_mat3 vp = {0}; bz_fill_projection_matrix(vp,
+			0, 0, 1, 1,
+			// The 0.5/1 shift is to avoid edge bleeding from the linear min/mag filter.
+			(viewport->x+0.5)/buff_size->w, (viewport->y+0.5)/buff_size->h, (viewport->w-1)/buff_size->w, (viewport->h-1)/buff_size->h
+		);
+
+		bz_multiply_matrices(translated_neg, transform, negshift);
+		bz_multiply_matrices(translated_pos, posshift, translated_neg);
+		bz_multiply_matrices(result, vp, translated_pos);
+	} else {
+		bz_multiply_matrices(translated_neg, transform, negshift);
+		bz_multiply_matrices(result, posshift, translated_neg);
+	}
 }
 
 static GLuint bz_gles_create_client_shader_program(void)

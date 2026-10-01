@@ -21,6 +21,174 @@ void tearDown(void) {}
 
 
 // =================================================================================================
+//  Test bz_sizes_are_equal()
+// -------------------------------------------------------------------------------------------------
+
+void test_sizes_are_equal__nulls_are_equal(void)
+{
+	TEST_ASSERT_TRUE(bz_sizes_are_equal(nullptr, nullptr));
+}
+
+void test_sizes_are_equal__mixed_nulls_not_equal(void)
+{
+	TEST_ASSERT_FALSE(bz_sizes_are_equal(&(struct bz_size){ .w = 1, .h = 2 }, nullptr));
+	TEST_ASSERT_FALSE(bz_sizes_are_equal(nullptr, &(struct bz_size){ .w = 1, .h = 2 }));
+}
+
+void test_sizes_are_equal__equal_widths_and_heights(void)
+{
+	TEST_ASSERT_TRUE(bz_sizes_are_equal(
+		&(struct bz_size){ .w = 1, .h = 2 },
+		&(struct bz_size){ .w = 1, .h = 2 }
+	));
+	TEST_ASSERT_TRUE(bz_sizes_are_equal(
+		&(struct bz_size){ .w = -1, .h = -2 },
+		&(struct bz_size){ .w = -1, .h = -2 }
+	));
+	TEST_ASSERT_TRUE(bz_sizes_are_equal(
+		&(struct bz_size){ .w = 0, .h = 0 },
+		&(struct bz_size){ .w = 0, .h = 0 }
+	));
+}
+
+void test_sizes_are_equal__unequal_widths_and_heights(void)
+{
+	TEST_ASSERT_FALSE(bz_sizes_are_equal(
+		&(struct bz_size){ .w = 1, .h = 2 },
+		&(struct bz_size){ .w = -1, .h = -2 }
+	));
+	TEST_ASSERT_FALSE(bz_sizes_are_equal(
+		&(struct bz_size){ .w = 1, .h = 1 },
+		&(struct bz_size){ .w = 2, .h = 2 }
+	));
+	TEST_ASSERT_FALSE(bz_sizes_are_equal(
+		&(struct bz_size){ .w = 0, .h = 0 },
+		&(struct bz_size){ .w = 10, .h = 10 }
+	));
+}
+
+
+// =================================================================================================
+//  Test bz_rects_are_equal()
+// -------------------------------------------------------------------------------------------------
+
+void test_rects_are_equal__nulls_are_equal(void)
+{
+	TEST_ASSERT_TRUE(bz_rects_are_equal(nullptr, nullptr));
+}
+
+void test_rects_are_equal__mixed_nulls_not_equal(void)
+{
+	TEST_ASSERT_FALSE(bz_rects_are_equal(
+		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 },
+		nullptr
+	));
+	TEST_ASSERT_FALSE(bz_rects_are_equal(
+		nullptr,
+		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+	));
+}
+
+void test_rects_are_equal__equal_cases(void)
+{
+	TEST_ASSERT_TRUE(bz_rects_are_equal(
+		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 },
+		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+	));
+	TEST_ASSERT_TRUE(bz_rects_are_equal(
+		&(struct bz_rect){ .x = -1, .y = -2, .w = 3, .h = 4 },
+		&(struct bz_rect){ .x = -1, .y = -2, .w = 3, .h = 4 }
+	));
+	TEST_ASSERT_TRUE(bz_rects_are_equal(
+		&(struct bz_rect){ .x = 1, .y = 2, .w = -3, .h = -4 },
+		&(struct bz_rect){ .x = 1, .y = 2, .w = -3, .h = -4 }
+	));
+	TEST_ASSERT_TRUE(bz_rects_are_equal(
+		&(struct bz_rect){ .x = 0, .y = 0, .w = 0, .h = 0 },
+		&(struct bz_rect){ .x = 0, .y = 0, .w = 0, .h = 0 }
+	));
+}
+
+void test_rects_are_equal__unequal_cases(void)
+{
+	TEST_ASSERT_FALSE(bz_rects_are_equal(
+		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 },
+		&(struct bz_rect){ .x = 5, .y = 6, .w = 7, .h = 8 }
+	));
+	TEST_ASSERT_FALSE(bz_rects_are_equal(
+		&(struct bz_rect){ .x = -1, .y = -2, .w = 3, .h = 4 },
+		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+	));
+	TEST_ASSERT_FALSE(bz_rects_are_equal(
+		&(struct bz_rect){ .x = 1, .y = 2, .w = -3, .h = -4 },
+		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+	));
+}
+
+
+// =================================================================================================
+//  Test bz_dbl_rects_are_equal()
+// -------------------------------------------------------------------------------------------------
+
+void test_dbl_rects_are_equal__nulls_are_equal(void)
+{
+	TEST_ASSERT_TRUE(bz_dbl_rects_are_equal(nullptr, nullptr));
+}
+
+void test_dbl_rects_are_equal__mixed_nulls_not_equal(void)
+{
+	TEST_ASSERT_FALSE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = 1.0, .y = 2.0, .w = 3.0, .h = 4.0 },
+		nullptr
+	));
+	TEST_ASSERT_FALSE(bz_dbl_rects_are_equal(
+		nullptr,
+		&(struct bz_rect_dbl){ .x = 1.0, .y = 2.0, .w = 3.0, .h = 4.0 }
+	));
+}
+
+void test_dbl_rects_are_equal__equal_cases(void)
+{
+	TEST_ASSERT_TRUE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = 1.1, .y = 2.2, .w = 3.3, .h = 4.4 },
+		&(struct bz_rect_dbl){ .x = 1.1, .y = 2.2, .w = 3.3, .h = 4.4 }
+	));
+	TEST_ASSERT_TRUE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = -1.0, .y = -2.0, .w = 3.0, .h = 4.0 },
+		&(struct bz_rect_dbl){ .x = -1.0, .y = -2.0, .w = 3.0, .h = 4.0 }
+	));
+	TEST_ASSERT_TRUE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = 1.0, .y = 2.0, .w = -3.0, .h = -4.0 },
+		&(struct bz_rect_dbl){ .x = 1.0, .y = 2.0, .w = -3.0, .h = -4.0 }
+	));
+	TEST_ASSERT_TRUE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = 0.0, .y = 0.0, .w = 0.0, .h = 0.0 },
+		&(struct bz_rect_dbl){ .x = 0.0, .y = 0.0, .w = 0.0, .h = 0.0 }
+	));
+}
+
+void test_dbl_rects_are_equal__unequal_cases(void)
+{
+	TEST_ASSERT_FALSE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = 1.1, .y = 2.2, .w = 3.3, .h = 4.4 },
+		&(struct bz_rect_dbl){ .x = 5.5, .y = 6.6, .w = 7.7, .h = 8.8 }
+	));
+	TEST_ASSERT_FALSE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = -1.1, .y = -2.2, .w = 3.3, .h = 4.4 },
+		&(struct bz_rect_dbl){ .x = 1.1, .y = 2.2, .w = 3.3, .h = 4.4 }
+	));
+	TEST_ASSERT_FALSE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = 1.1, .y = 2.2, .w = -3.3, .h = -4.4 },
+		&(struct bz_rect_dbl){ .x = 1.1, .y = 2.2, .w = 3.3, .h = 4.4 }
+	));
+	TEST_ASSERT_FALSE(bz_dbl_rects_are_equal(
+		&(struct bz_rect_dbl){ .x = 0.0, .y = 0.0, .w = 0.0, .h = 0.0 },
+		&(struct bz_rect_dbl){ .x = 0.01, .y = 0.02, .w = 0.03, .h = 0.04 }
+	));
+}
+
+
+// =================================================================================================
 //  Test bz_clone_rect_dbl()
 // -------------------------------------------------------------------------------------------------
 
@@ -44,6 +212,67 @@ void test_clone_rect_dbl__succeeds_for_null_source(void)
 {
 	struct bz_rect_dbl *result = bz_clone_rect_dbl(nullptr);
 	TEST_ASSERT_NULL(result);
+}
+
+
+// =================================================================================================
+//  Test bz_contains_point()
+// -------------------------------------------------------------------------------------------------
+
+static bool bz_test_contains_point_wrapper(int x, int y, int w, int h, int px, int py)
+{
+	return bz_contains_point(
+		&(struct bz_rect){ .x = x, .y = y, .w = w, .h = h },
+		&(struct bz_position){ .x = px, .y = py }
+	);
+}
+
+void test_contains_point__true_cases(void)
+{
+	// Verify fully positive values, and bounds are inclusive
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, 2, 2, 10, 10));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, 2, 2, 11, 11));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, 2, 2, 12, 12));
+	// Test mixed rectangle bounds (some positive, some negative)
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, -5, -5));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, -2, -2));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, 0, 0));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, 3, 3));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, 5, 5));
+	// Test fully negative bounds
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -5, -5));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -4, -4));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -3, -3));
+	// Test negative dimensions
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 8, 8));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 9, 9));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 10, 10));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, -2, -2));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, -1, -1));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, 0, 0));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -3, -3));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -2, -2));
+	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -1, -1));
+}
+
+void test_contains_point__false_cases(void)
+{
+	// Verify fully positive values
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, 2, 2, 9, 9));
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, 2, 2, 13, 13));
+	// Test mixed rectangle bounds (some positive, some negative)
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 10, 10, -6, -6));
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 10, 10, 6, 6));
+	// Test fully negative bounds
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -6, -6));
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -2, -2));
+	// Test negative dimensions
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, -2, -2, 7, 7));
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, -2, -2, 11, 11));
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(0, 0, -2, -2, -3, -3));
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(0, 0, -2, -2, 1, 1));
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -4, -4));
+	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-1, -1, -2, -2, 0, 0));
 }
 
 
@@ -163,63 +392,25 @@ void test_clamp__valid_number_is_unchanged(void)
 
 
 // =================================================================================================
-//  Test bz_contains_point()
+//  Test bz_dbl_is_int()
 // -------------------------------------------------------------------------------------------------
 
-static bool bz_test_contains_point_wrapper(int x, int y, int w, int h, int px, int py)
+void test_dbl_is_int__true_cases(void)
 {
-	return bz_contains_point(
-		&(struct bz_rect){ .x = x, .y = y, .w = w, .h = h },
-		&(struct bz_position){ .x = px, .y = py }
-	);
+	TEST_ASSERT_TRUE(bz_dbl_is_int(1.0));
+	TEST_ASSERT_TRUE(bz_dbl_is_int(-1.0));
+	TEST_ASSERT_TRUE(bz_dbl_is_int(42.0));
+	TEST_ASSERT_TRUE(bz_dbl_is_int(0.0));
+	TEST_ASSERT_TRUE(bz_dbl_is_int(10));
 }
 
-void test_contains_point__true_cases(void)
+void test_dbl_is_int__false_cases(void)
 {
-	// Verify fully positive values, and bounds are inclusive
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, 2, 2, 10, 10));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, 2, 2, 11, 11));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, 2, 2, 12, 12));
-	// Test mixed rectangle bounds (some positive, some negative)
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, -5, -5));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, -2, -2));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, 0, 0));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, 3, 3));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 10, 10, 5, 5));
-	// Test fully negative bounds
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -5, -5));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -4, -4));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -3, -3));
-	// Test negative dimensions
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 8, 8));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 9, 9));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 10, 10));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, -2, -2));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, -1, -1));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, 0, 0));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -3, -3));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -2, -2));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -1, -1));
-}
-
-void test_contains_point__false_cases(void)
-{
-	// Verify fully positive values
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, 2, 2, 9, 9));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, 2, 2, 13, 13));
-	// Test mixed rectangle bounds (some positive, some negative)
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 10, 10, -6, -6));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 10, 10, 6, 6));
-	// Test fully negative bounds
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -6, -6));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -2, -2));
-	// Test negative dimensions
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, -2, -2, 7, 7));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, -2, -2, 11, 11));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(0, 0, -2, -2, -3, -3));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(0, 0, -2, -2, 1, 1));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -4, -4));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-1, -1, -2, -2, 0, 0));
+	TEST_ASSERT_FALSE(bz_dbl_is_int(1.1));
+	TEST_ASSERT_FALSE(bz_dbl_is_int(-1.1002));
+	TEST_ASSERT_FALSE(bz_dbl_is_int(42.9));
+	TEST_ASSERT_FALSE(bz_dbl_is_int(0.5));
+	TEST_ASSERT_FALSE(bz_dbl_is_int(10.0001));
 }
 
 
@@ -230,9 +421,31 @@ void test_contains_point__false_cases(void)
 int main(void) {
 	UNITY_BEGIN();
 
+	// -- bz_sizes_are_equal() --
+	RUN_TEST(test_sizes_are_equal__nulls_are_equal);
+	RUN_TEST(test_sizes_are_equal__mixed_nulls_not_equal);
+	RUN_TEST(test_sizes_are_equal__equal_widths_and_heights);
+	RUN_TEST(test_sizes_are_equal__unequal_widths_and_heights);
+
+	// -- bz_rects_are_equal() --
+	RUN_TEST(test_rects_are_equal__nulls_are_equal);
+	RUN_TEST(test_rects_are_equal__mixed_nulls_not_equal);
+	RUN_TEST(test_rects_are_equal__equal_cases);
+	RUN_TEST(test_rects_are_equal__unequal_cases);
+
+	// -- bz_dbl_rects_are_equal() --
+	RUN_TEST(test_dbl_rects_are_equal__nulls_are_equal);
+	RUN_TEST(test_dbl_rects_are_equal__mixed_nulls_not_equal);
+	RUN_TEST(test_dbl_rects_are_equal__equal_cases);
+	RUN_TEST(test_dbl_rects_are_equal__unequal_cases);
+
 	// -- bz_clone_rect_dbl() --
 	RUN_TEST(test_clone_rect_dbl__deep_copies_data);
 	RUN_TEST(test_clone_rect_dbl__succeeds_for_null_source);
+
+	// -- bz_contains_point() --
+	RUN_TEST(test_contains_point__true_cases);
+	RUN_TEST(test_contains_point__false_cases);
 
 	// -- bz_clone_size() --
 	RUN_TEST(test_clone_size__deep_copies_data);
@@ -255,9 +468,9 @@ int main(void) {
 	RUN_TEST(test_clamp__big_number_is_reduced);
 	RUN_TEST(test_clamp__valid_number_is_unchanged);
 
-	// -- bz_contains_point() --
-	RUN_TEST(test_contains_point__true_cases);
-	RUN_TEST(test_contains_point__false_cases);
+	// -- bz_dbl_is_int() --
+	RUN_TEST(test_dbl_is_int__true_cases);
+	RUN_TEST(test_dbl_is_int__false_cases);
 
 	return UNITY_END();
 }

@@ -5,6 +5,7 @@
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_wp_viewporter.h"
+#include "breezy/bz_wp_fractional_scale.h"
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_list.h"
 
@@ -48,6 +49,10 @@ void bz_free_data_device_data(struct bz_data_device *data);
 // -- bz_wp_viewport --
 struct bz_wp_viewport *bz_create_wp_viewport_data(void);
 void bz_free_wp_viewport_data(struct bz_wp_viewport *data);
+
+// -- bz_wp_fractional_scale --
+struct bz_wp_fractional_scale *bz_create_wp_fractional_scale_data(void);
+void bz_free_wp_fractional_scale_data(struct bz_wp_fractional_scale *data);
 
 // -- bz_xdg_surface --
 struct bz_xdg_surface *bz_create_xdg_surface_data();
@@ -327,6 +332,24 @@ struct bz_wp_viewport *bz_create_wp_viewport_data(void)
 }
 
 void bz_free_wp_viewport_data(struct bz_wp_viewport *data)
+{
+	if (data) {
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_wp_fractional_scale
+// -------------------------------------------------------------------------------------------------
+
+struct bz_wp_fractional_scale *bz_create_wp_fractional_scale_data(void)
+{
+	struct bz_wp_fractional_scale *data = calloc(1, sizeof(*data));
+	return data;
+}
+
+void bz_free_wp_fractional_scale_data(struct bz_wp_fractional_scale *data)
 {
 	if (data) {
 		free(data);

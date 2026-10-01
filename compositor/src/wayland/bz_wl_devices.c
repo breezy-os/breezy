@@ -469,7 +469,7 @@ void bz_output_constructor(struct wl_client *client, void *data, uint32_t versio
 		output->refresh_rate
 	);
 	if (wl_resource_get_version(res) >= WL_OUTPUT_SCALE_SINCE_VERSION) {
-		wl_output_send_scale(res, output->scale);
+		wl_output_send_scale(res, ceil(output->scale/120.0));
 	}
 	if (wl_resource_get_version(res) >= WL_OUTPUT_NAME_SINCE_VERSION) {
 		wl_output_send_name(res, output->name);

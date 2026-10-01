@@ -123,6 +123,7 @@ struct bz_surface {
 	// Display data
 	struct bz_renderable renderable;
 	struct bz_wp_viewport *viewport; // Nullable
+	struct bz_wp_fractional_scale *fractional_scale; // Nullable
 };
 
 struct bz_content_update {

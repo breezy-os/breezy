@@ -36,6 +36,7 @@ void bz_keyboard_dtor(struct wl_resource *data);
 void bz_output_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
 struct bz_output {
+	/** Numerator over 120 (see fractional scaling protocol) */
 	uint32_t scale;
 	enum wl_output_transform transform;
 	/** Monitor resolution (from mode) and placement. */
