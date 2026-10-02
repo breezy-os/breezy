@@ -44,6 +44,7 @@ struct bz_region_mutation {
 };
 
 void bz_region_dtor(struct wl_resource *data);
+bool bz_region_contain_point(struct bz_rect *bounds, struct bz_list *mutations, struct bz_position *point);
 
 
 // -- wl_surface --
@@ -72,7 +73,7 @@ struct bz_surface_state {
 	struct bz_list *surface_damage;  // List of "struct bz_rect *"
 	struct bz_list *buffer_damage;   // List of "struct bz_rect *"
 
-	// TODO-dl13: Make use of opaque regions
+	// TODO-dl??: Make use of opaque regions
 	bool dirty_opaque_region;
 	struct bz_list *opaque_region;   // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
 	// TODO-dl13: Make use of input regions

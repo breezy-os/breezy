@@ -328,7 +328,12 @@ static struct bz_surface *bz_mgmt_check_window_overlap(struct bz_window_mgmt *mg
 		struct bz_renderable surf_rect = subsurf->renderable;
 
 		// Check if cursor is overlapping
-		if (bz_contains_point(&surf_rect.render_bounds, &mgmt->last_cursor_loc)) {
+		bool contains_cursor = bz_region_contain_point(
+			&surf_rect.render_bounds,
+			subsurf->active_state->input_region,
+			&mgmt->last_cursor_loc
+		);
+		if (contains_cursor) {
 			// If it doesn't already have pointer focus, send an enter event for pointers.
 			if (mgmt->pointer_focus != subsurf) {
 				bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, subsurf);

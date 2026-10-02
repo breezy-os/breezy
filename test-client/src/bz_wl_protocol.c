@@ -628,6 +628,13 @@ static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface
 	bz_initialize_surface_buffers(client_globals, window);
 	bz_draw_frame(window);
 	bz_submit_frame(window);
+
+	// // Splits the area into 5 vertical sections of differing input reception.
+	// struct wl_region *region = wl_compositor_create_region(client_globals->compositor);
+	// wl_region_add(region, 100, 0, window->size.w - 200, window->size.h);
+	// wl_region_subtract(region, window->size.w/2 - 50, 0, 100, window->size.h);
+	// wl_surface_set_input_region(window->wlsurface, region);
+	// wl_region_destroy(region);
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------

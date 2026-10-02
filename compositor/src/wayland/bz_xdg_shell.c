@@ -598,7 +598,8 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		configevt->toplevel.max_size.w = globals->drm.current_output->compositor_bounds.w;
 		configevt->toplevel.max_size.h = globals->drm.current_output->compositor_bounds.h;
 		// Set recommended size based on min/max size.
-		struct bz_size rec_size = { .w = 1920, .h = 1080 };
+		// struct bz_size rec_size = { .w = 1920, .h = 1080 };
+		struct bz_size rec_size = { .w = 1280, .h = 720 };
 		// struct bz_size rec_size = { .w = 800, .h = 600 };
 		if (bzsurf->active_state->min_size) {
 			rec_size.w = bz_max(rec_size.w, bzsurf->active_state->min_size->w);
@@ -630,10 +631,10 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 
 		xdg_toplevel_send_configure(
 			bzsurf->xdgtoplevel->resource,
-			// configevt->toplevel.recommended_size.w,
-			// configevt->toplevel.recommended_size.h,
-			0,
-			0,
+			configevt->toplevel.recommended_size.w,
+			configevt->toplevel.recommended_size.h,
+			// 0,
+			// 0,
 			&configevt->toplevel.states
 		);
 	} else if (bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {

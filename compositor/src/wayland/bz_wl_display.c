@@ -52,6 +52,7 @@ static void bz_region_add(struct wl_client *client, struct wl_resource *resource
 static void bz_region_subtract(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
 // Helpers
 static void bz_region_append_mutation(struct wl_client *client, struct bz_region *region_data, enum bz_region_op operation, int32_t x, int32_t y, int32_t width, int32_t height);
+bool bz_region_contain_point(struct bz_rect *bounds, struct bz_list *mutations, struct bz_position *point);
 
 // -- wl_surface --
 
@@ -521,6 +522,8 @@ static void bz_region_subtract(
 	bz_region_append_mutation(client, region_data, OP_SUBTRACT, x, y, width, height);
 }
 
+// ---  Helpers  -----------------------------------------------------------------------------------
+
 static void bz_region_append_mutation(
 	struct wl_client *client,
 	struct bz_region *region_data,
@@ -556,6 +559,34 @@ static void bz_region_append_mutation(
 		free(mutation);
 	calloc_failed:
 		bz_error(BZ_LOG_WL_DISPLAY, "Failed to add or subtract rectangle to wl_region.");
+}
+
+bool bz_region_contain_point(struct bz_rect *bounds, struct bz_list *mutations, struct bz_position *point)
+{
+	// If the overall bounds don't contain the point, we can early exit.
+	if (!bz_contains_point(bounds, point)) {
+		return false;
+	}
+
+	// Null mutations indicates "infinite region".
+	if (mutations == nullptr) {
+		return true;
+	}
+
+	// Iterating backwards because only the final intersecting region impacts the result.
+	struct bz_region_mutation *mut; bz_list_foreach_rev(mut, mutations) {
+		struct bz_rect area = {
+			.x = mut->x + bounds->x,
+			.y = mut->y + bounds->y,
+			.w = mut->w,
+			.h = mut->h
+		};
+		if (!bz_contains_point(&area, point)) {
+			continue;
+		}
+		return (mut->op == OP_ADD) ? true : false;
+	}
+	return false;
 }
 
 
