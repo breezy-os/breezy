@@ -65,7 +65,7 @@ static void bz_gles_render_and_commit(void *data);
 static void bz_gles_render_applications(struct bz_breezy *breezy);
 static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surface *surface);
 static void bz_gles_render_cursor(struct bz_breezy *breezy);
-static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians, struct bz_rect_dbl *viewport, struct bz_size *buff_size);
+static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians, struct bz_rect_dbl *viewport, struct bz_size *buff_size, int32_t buff_scale);
 // Shaders
 static GLuint bz_gles_create_client_shader_program(void);
 static GLuint compile_shader(GLenum type, const char *code);
@@ -993,7 +993,8 @@ static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surfac
 					transform >= 4,
 					2*BZ_PI - (transform & 3) * BZ_PI_2,
 					physical_surface->active_state->vp_source,
-					physical_surface->renderable.buffer_size
+					physical_surface->renderable.buffer_size,
+					physical_surface->active_state->scale
 				);
 				GLint uvProjId = glGetUniformLocation(client_program, "u_surfaceUVProj");
 				glUniformMatrix3fv(uvProjId, 1, GL_FALSE, uv_proj);
@@ -1016,6 +1017,7 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 	struct bz_renderable *cursor = nullptr;
 	struct bz_rect_dbl *viewport = nullptr;
 	struct bz_size *buff_size = nullptr;
+	int32_t buff_scale = 1;
 	if (breezy->window_mgmt.pointer_focus == nullptr) {
 		cursor = &breezy->gl.cursor;
 		cursor->render_bounds.x = cursor->compositor_bounds.x - breezy->gl.cursor_offset.x;
@@ -1030,6 +1032,7 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 			cursor->render_bounds.y = cursor->compositor_bounds.y - client_data->cursor_surface->cursor->hotspot.y;
 			viewport = client_data->cursor_surface->active_state->vp_source;
 			buff_size = client_data->cursor_surface->renderable.buffer_size;
+			buff_scale = client_data->cursor_surface->active_state->scale;
 		}
 	}
 	if (cursor != nullptr && cursor->texture != 0) {
@@ -1057,7 +1060,7 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
 
 		// Invert the buffer transformation
-		bz_mat3 transform = {0}; bz_gles_build_uv_projection(transform, false, 0, viewport, buff_size);
+		bz_mat3 transform = {0}; bz_gles_build_uv_projection(transform, false, 0, viewport, buff_size, buff_scale);
 		GLint uvProj = glGetUniformLocation(client_program, "u_surfaceUVProj");
 		glUniformMatrix3fv(uvProj, 1, GL_FALSE, transform);
 
@@ -1072,7 +1075,7 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 	}
 }
 
-static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians, struct bz_rect_dbl *viewport, struct bz_size *buff_size)
+static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians, struct bz_rect_dbl *viewport, struct bz_size *buff_size, int32_t buff_scale)
 {
 	// First, our flip/rotation matrix
 	bz_mat3 vflip = {0};     bz_fill_projection_matrix(vflip, 0, 0, 1, 1, 0, 0, flip ? -1 : 1, 1);
@@ -1090,8 +1093,10 @@ static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radian
 	if (viewport != nullptr && buff_size != nullptr) {
 		bz_mat3 vp = {0}; bz_fill_projection_matrix(vp,
 			0, 0, 1, 1,
-			// The 0.5/1 shift is to avoid edge bleeding from the linear min/mag filter.
-			(viewport->x+0.5)/buff_size->w, (viewport->y+0.5)/buff_size->h, (viewport->w-1)/buff_size->w, (viewport->h-1)/buff_size->h
+			(viewport->x) / (buff_size->w/buff_scale),
+			(viewport->y) / (buff_size->h/buff_scale),
+			(viewport->w) / (buff_size->w/buff_scale),
+			(viewport->h) / (buff_size->h/buff_scale)
 		);
 
 		bz_multiply_matrices(translated_neg, transform, negshift);
