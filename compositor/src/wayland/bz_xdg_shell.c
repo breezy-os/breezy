@@ -11,6 +11,7 @@
 #include "breezy/bz_math.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
+#include "breezy/bz_xdg_shell.h"
 
 
 // =================================================================================================
@@ -39,6 +40,9 @@ static void bz_xdg_positioner_set_offset(struct wl_client *client, struct wl_res
 static void bz_xdg_positioner_set_reactive(struct wl_client *client, struct wl_resource *resource);
 static void bz_xdg_positioner_set_parent_size(struct wl_client *client, struct wl_resource *resource, int32_t parent_width, int32_t parent_height);
 static void bz_xdg_positioner_set_parent_configure(struct wl_client *client, struct wl_resource *resource, uint32_t serial);
+// Helpers
+static struct bz_xdg_positioner *bz_positioner_clone(struct bz_xdg_positioner *pos);
+static void bz_free_xdg_positioner(struct bz_xdg_positioner *positioner);
 
 // -- xdg_surface --
 
@@ -51,6 +55,7 @@ static void bz_xdg_surface_set_window_geometry(struct wl_client *client, struct 
 static void bz_xdg_surface_ack_configure(struct wl_client *client, struct wl_resource *resource, uint32_t serial);
 // Helpers
 void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surface *bzsurf);
+static struct bz_rect *bz_calculate_popup_position(struct bz_xdg_positioner *positioner);
 static bool bz_serial_matches(void *item, void *serial);
 static bool bz_serial_is_newer(void *item, void *serial);
 static void bz_free_xdg_surface_configure(void *xdg_surface_configure);
@@ -81,6 +86,8 @@ const struct xdg_popup_interface bz_xdg_popup_implementation;
 static void bz_xdg_popup_destroy(struct wl_client *client, struct wl_resource *resource);
 static void bz_xdg_popup_grab(struct wl_client *client, struct wl_resource *resource, struct wl_resource *seat, uint32_t serial);
 static void bz_xdg_popup_reposition(struct wl_client *client, struct wl_resource *resource, struct wl_resource *positioner, uint32_t token);
+// Helpers
+struct bz_surface *bz_popup_get_associated_toplevel(struct bz_surface *surface);
 
 
 // =================================================================================================
@@ -228,8 +235,7 @@ static void bz_xdg_wm_base_pong(
 
 void bz_xdg_positioner_dtor(struct wl_resource *data)
 {
-	struct bz_xdg_positioner *positioner = wl_resource_get_user_data(data);
-	free(positioner);
+	bz_free_xdg_positioner(wl_resource_get_user_data(data));
 }
 
 const struct xdg_positioner_interface bz_xdg_positioner_implementation = {
@@ -256,8 +262,21 @@ static void bz_xdg_positioner_set_size(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_size() not implemented.");
-	// TODO
+	// Parameter validation
+	if (width <= 0 || height <= 0) {
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Provided positioner size cannot be non-positive.");
+		wl_resource_post_error(resource, XDG_POSITIONER_ERROR_INVALID_INPUT,
+			"Provided size (%d, %d) was non-positive.", width, height);
+		return;
+	}
+
+	struct bz_xdg_positioner *positioner = wl_resource_get_user_data(resource);
+
+	if (positioner->size == nullptr) {
+		positioner->size = calloc(1, sizeof(*positioner->size));
+	}
+	positioner->size->w = width;
+	positioner->size->h = height;
 }
 
 static void bz_xdg_positioner_set_anchor_rect(
@@ -268,8 +287,23 @@ static void bz_xdg_positioner_set_anchor_rect(
 	int32_t width,
 	int32_t height
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_anchor_rect() not implemented.");
-	// TODO
+	// Parameter validation
+	if (width < 0 || height < 0) {
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Provided positioner anchor rectangle cannot have negative size.");
+		wl_resource_post_error(resource, XDG_POSITIONER_ERROR_INVALID_INPUT,
+			"Provided anchor rect size (%d, %d) was negative.", width, height);
+		return;
+	}
+
+	struct bz_xdg_positioner *positioner = wl_resource_get_user_data(resource);
+
+	if (positioner->anchor_rect == nullptr) {
+		positioner->anchor_rect = calloc(1, sizeof(*positioner->anchor_rect));
+	}
+	positioner->anchor_rect->x = x;
+	positioner->anchor_rect->y = y;
+	positioner->anchor_rect->w = width;
+	positioner->anchor_rect->h = height;
 }
 
 static void bz_xdg_positioner_set_anchor(
@@ -277,8 +311,16 @@ static void bz_xdg_positioner_set_anchor(
 	struct wl_resource *resource,
 	uint32_t anchor
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_anchor() not implemented.");
-	// TODO
+	// Parameter validation
+	if (anchor > 8) {
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Provided anchor is not a valid value.");
+		wl_resource_post_error(resource, XDG_POSITIONER_ERROR_INVALID_INPUT,
+			"Provided anchor (%d) is not valid.", anchor);
+		return;
+	}
+
+	struct bz_xdg_positioner *positioner = wl_resource_get_user_data(resource);
+	positioner->anchor = anchor;
 }
 
 static void bz_xdg_positioner_set_gravity(
@@ -286,8 +328,16 @@ static void bz_xdg_positioner_set_gravity(
 	struct wl_resource *resource,
 	uint32_t gravity
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_gravity() not implemented.");
-	// TODO
+	// Parameter validation
+	if (gravity > 8) {
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Provided gravity is not a valid value.");
+		wl_resource_post_error(resource, XDG_POSITIONER_ERROR_INVALID_INPUT,
+			"Provided gravity (%d) is not valid.", gravity);
+		return;
+	}
+
+	struct bz_xdg_positioner *positioner = wl_resource_get_user_data(resource);
+	positioner->gravity = gravity;
 }
 
 static void bz_xdg_positioner_set_constraint_adjustment(
@@ -305,8 +355,12 @@ static void bz_xdg_positioner_set_offset(
 	int32_t x,
 	int32_t y
 ) {
-	bz_error(BZ_LOG_WL_XDG_SHELL, "xdg_positioner.set_offset() not implemented.");
-	// TODO
+	struct bz_xdg_positioner *positioner = wl_resource_get_user_data(resource);
+	if (positioner->offset == nullptr) {
+		positioner->offset = calloc(1, sizeof(*positioner->offset));
+	}
+	positioner->offset->x = x;
+	positioner->offset->y = y;
 }
 
 static void bz_xdg_positioner_set_reactive(
@@ -336,6 +390,39 @@ static void bz_xdg_positioner_set_parent_configure(
 	// TODO
 }
 
+// ---  Helpers  -----------------------------------------------------------------------------------
+
+static struct bz_xdg_positioner *bz_positioner_clone(struct bz_xdg_positioner *pos)
+{
+	if (pos == nullptr) { return nullptr; }
+
+	struct bz_xdg_positioner *clone = calloc(1, sizeof(*clone));
+	if (pos->size != nullptr) {
+		clone->size = calloc(1, sizeof(*clone->size));
+		*clone->size = *pos->size;
+	}
+	if (pos->anchor_rect != nullptr) {
+		clone->anchor_rect = calloc(1, sizeof(*clone->anchor_rect));
+		*clone->anchor_rect = *pos->anchor_rect;
+	}
+	clone->anchor = pos->anchor;
+	clone->gravity = pos->gravity;
+	if (pos->offset != nullptr) {
+		clone->offset = calloc(1, sizeof(*clone->offset));
+		*clone->offset = *pos->offset;
+	}
+	return clone;
+}
+
+static void bz_free_xdg_positioner(struct bz_xdg_positioner *positioner)
+{
+	if (positioner == nullptr) { return; }
+
+	if (positioner->size != nullptr)        { free(positioner->size); }
+	if (positioner->anchor_rect != nullptr) { free(positioner->anchor_rect); }
+
+	free(positioner);
+}
 
 
 // =================================================================================================
@@ -457,6 +544,15 @@ static void bz_xdg_surface_get_popup(
 		goto initial_checks_failed;
 	}
 
+	// If the provided positioner isn't complete, raise an error
+	struct bz_xdg_positioner *positioner_data = wl_resource_get_user_data(positioner);
+	if (positioner_data->size == nullptr || positioner_data->anchor_rect == nullptr) {
+		wl_resource_post_error(resource, XDG_WM_BASE_ERROR_INVALID_POSITIONER,
+			"Positioner did not include required fields.");
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Positioner missing either size or anchor_rect.");
+		goto initial_checks_failed;
+	}
+
 	// Allocate our user data
 	struct bz_xdg_popup *popup = calloc(1, sizeof(*popup));
 	if (popup == nullptr) {
@@ -483,15 +579,23 @@ static void bz_xdg_surface_get_popup(
 	);
 
 	// Populate the surface's user data
-	struct bz_xdg_surface *xdgsurface = wl_resource_get_user_data(resource);
+	struct bz_xdg_surface *xdg_parent = parent == nullptr ? nullptr : wl_resource_get_user_data(parent);
+	struct bz_surface *parent_data = xdg_parent == nullptr ? nullptr : xdg_parent->wlsurface;
 	popup->resource = res;
-	popup->xdgsurface = xdgsurface;
-	popup->wlsurface = xdgsurface->wlsurface;
-	// TODO-dl12: store the "parent" and "positioner" parameters
+	popup->xdgsurface = xdgsurf;
+	popup->wlsurface = xdgsurf->wlsurface;
+	popup->parent = parent_data;
+	popup->positioner = bz_positioner_clone(positioner_data);
 
 	// Populate the surface's role.
-	xdgsurface->wlsurface->role = BZ_SURF_ROLE_XDG_POPUP;
-	xdgsurface->wlsurface->xdgpopup = popup;
+	xdgsurf->wlsurface->role = BZ_SURF_ROLE_XDG_POPUP;
+	xdgsurf->wlsurface->xdgpopup = popup;
+
+	// Tell the parent about this popup
+	// TODO-dl13-pu: Test this!
+	if (parent_data != nullptr && parent_data->popups != nullptr) {
+		bz_list_append(parent_data->popups, popup);
+	}
 
 	// Everything succeeded!
 	return;
@@ -649,18 +753,18 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		// Assign our initial state
 		configevt->serial = wl_display_next_serial(wl_client_get_display(client));
 		configevt->type = BZ_XDG_SURF_POPUP;
-		// TODO-dl13: Fill these in from the attached positioner
-		configevt->popup.position.x = 0;
-		configevt->popup.position.y = 0;
-		configevt->popup.size.w = 600;
-		configevt->popup.size.h = 600;
+		configevt->popup.bounds = bz_calculate_popup_position(bzsurf->xdgpopup->positioner);
+		// Popups treat these bounds as "relative to the parent".
+		bzsurf->renderable.compositor_bounds.x = configevt->popup.bounds->x;
+		bzsurf->renderable.compositor_bounds.y = configevt->popup.bounds->y;
+		// (renderable's w/h are computed from window geometry or buff size when content update applied.)
 
 		xdg_popup_send_configure(
 			bzsurf->xdgpopup->resource,
-			configevt->popup.position.x,
-			configevt->popup.position.y,
-			configevt->popup.size.w,
-			configevt->popup.size.h
+			configevt->popup.bounds->x,
+			configevt->popup.bounds->y,
+			configevt->popup.bounds->w,
+			configevt->popup.bounds->h
 		);
 	}
 
@@ -673,6 +777,68 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		free(configevt);
 	configevt_alloc_failed:
 		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to send initial configure sequence.");
+}
+
+static struct bz_rect *bz_calculate_popup_position(struct bz_xdg_positioner *positioner)
+{
+	struct bz_rect *bounds = calloc(1, sizeof(*bounds));
+
+	// We'll start by assuming it's the optimal/requested size
+	bounds->w = positioner->size->w;
+	bounds->h = positioner->size->h;
+
+	// Next, we'll put its upper-left corner on its anchor point.
+	// >> First, top-to-bottom placement
+	switch (positioner->anchor) {
+	case XDG_POSITIONER_ANCHOR_TOP_LEFT:    case XDG_POSITIONER_ANCHOR_TOP:    case XDG_POSITIONER_ANCHOR_TOP_RIGHT:
+		bounds->y = positioner->anchor_rect->y;
+		break;
+	case XDG_POSITIONER_ANCHOR_LEFT:        case XDG_POSITIONER_ANCHOR_NONE:   case XDG_POSITIONER_ANCHOR_RIGHT:
+		bounds->y = positioner->anchor_rect->y + positioner->anchor_rect->h/2;
+		break;
+	case XDG_POSITIONER_ANCHOR_BOTTOM_LEFT: case XDG_POSITIONER_ANCHOR_BOTTOM: case XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT:
+		bounds->y = positioner->anchor_rect->y + positioner->anchor_rect->h;
+		break;
+	}
+	// >> Then, left-to-right placement
+	switch (positioner->anchor) {
+	case XDG_POSITIONER_ANCHOR_TOP_LEFT:  case XDG_POSITIONER_ANCHOR_LEFT:  case XDG_POSITIONER_ANCHOR_BOTTOM_LEFT:
+		bounds->x = positioner->anchor_rect->x;
+		break;
+	case XDG_POSITIONER_ANCHOR_TOP:       case XDG_POSITIONER_ANCHOR_NONE:  case XDG_POSITIONER_ANCHOR_BOTTOM:
+		bounds->x = positioner->anchor_rect->x + positioner->anchor_rect->w/2;
+		break;
+	case XDG_POSITIONER_ANCHOR_TOP_RIGHT: case XDG_POSITIONER_ANCHOR_RIGHT: case XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT:
+		bounds->x = positioner->anchor_rect->x + positioner->anchor_rect->w;
+		break;
+	}
+
+	// Then shift it per its gravity
+	switch (positioner->gravity) {
+	case XDG_POSITIONER_GRAVITY_TOP_LEFT:    case XDG_POSITIONER_GRAVITY_TOP:    case XDG_POSITIONER_GRAVITY_TOP_RIGHT:
+		bounds->y -= bounds->h;
+		break;
+	case XDG_POSITIONER_GRAVITY_LEFT:        case XDG_POSITIONER_GRAVITY_NONE:   case XDG_POSITIONER_GRAVITY_RIGHT:
+		bounds->y -= bounds->h/2;
+		break;
+	}
+	// Then shift it per its gravity
+	switch (positioner->gravity) {
+	case XDG_POSITIONER_GRAVITY_TOP_LEFT:  case XDG_POSITIONER_GRAVITY_LEFT:  case XDG_POSITIONER_GRAVITY_BOTTOM_LEFT:
+		bounds->x -= bounds->w;
+		break;
+	case XDG_POSITIONER_GRAVITY_TOP:       case XDG_POSITIONER_GRAVITY_NONE:  case XDG_POSITIONER_GRAVITY_BOTTOM:
+		bounds->x -= bounds->w/2;
+		break;
+	}
+
+	// Lastly, add in any offset that might exist
+	if (positioner->offset != nullptr) {
+		bounds->x += positioner->offset->x;
+		bounds->y += positioner->offset->y;
+	}
+
+	return bounds;
 }
 
 static bool bz_serial_matches(void *item, void *serial)
@@ -701,7 +867,7 @@ static void bz_free_xdg_surface_configure(void *xdg_surface_configure)
 	if (configure->type == BZ_XDG_SURF_TOPLEVEL) {
 		wl_array_release(&configure->toplevel.states);
 	} else if (configure->type == BZ_XDG_SURF_POPUP) {
-		// Nothing to free (...at this point)
+		free(configure->popup.bounds);
 	}
 
 	free(configure);
@@ -899,6 +1065,17 @@ void bz_xdg_popup_dtor(struct wl_resource *data)
 		popup->wlsurface->xdgpopup = nullptr;
 	}
 
+	// Sever the bidirectional connection between this popup and its parent
+	if (popup->parent != nullptr) {
+		bz_list_remove(popup->parent->popups, popup, nullptr);
+		popup->parent = nullptr;
+	}
+
+	if (popup->positioner != nullptr) {
+		bz_free_xdg_positioner(popup->positioner);
+		popup->positioner = nullptr;
+	}
+
 	free(popup);
 }
 
@@ -933,4 +1110,26 @@ static void bz_xdg_popup_reposition(
 	// TODO
 }
 
+// ---  Helpers  -----------------------------------------------------------------------------------
 
+struct bz_surface *bz_popup_get_associated_toplevel(struct bz_surface *surface)
+{
+	if (surface->role != BZ_SURF_ROLE_XDG_POPUP || surface->xdgpopup == nullptr) {
+		return nullptr;
+	}
+
+	// Trace upwards to its toplevel to close
+	struct bz_surface *parent = surface->xdgpopup->parent;
+	while (
+		parent->role == BZ_SURF_ROLE_XDG_POPUP &&
+		parent->xdgpopup != nullptr &&
+		parent->xdgpopup->parent != nullptr
+	) {
+		parent = parent->xdgpopup->parent;
+	}
+
+	if (parent != nullptr && parent->role == BZ_SURF_ROLE_XDG_TOPLEVEL && parent->xdgtoplevel) {
+		return parent;
+	}
+	return nullptr;
+}

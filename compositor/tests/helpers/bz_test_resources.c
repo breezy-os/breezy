@@ -62,6 +62,14 @@ void bz_free_xdg_surface_data(struct bz_xdg_surface *data);
 struct bz_xdg_toplevel *bz_create_xdg_toplevel_data();
 void bz_free_xdg_toplevel_data(struct bz_xdg_toplevel *data);
 
+// -- bz_xdg_popup --
+struct bz_xdg_popup *bz_create_xdg_popup_data();
+void bz_free_xdg_popup_data(struct bz_xdg_popup *data);
+
+// -- bz_xdg_positioner --
+struct bz_xdg_positioner *bz_create_xdg_positioner_data();
+void bz_free_xdg_positioner_data(struct bz_xdg_positioner *data);
+
 // -- bz_xdg_surface_configure --
 struct bz_xdg_surface_configure *bz_create_xdg_surface_configure(uint32_t serial);
 void bz_free_xdg_surface_configure(struct bz_xdg_surface_configure *data);
@@ -181,6 +189,8 @@ struct bz_surface *bz_create_surface_data(void)
 	bz_list_insert(data->pending_state->surface_stack, data, nullptr);
 	bz_list_insert(data->active_state->surface_stack, data, nullptr);
 
+	data->popups = bz_list_create();
+
 	return data;
 }
 
@@ -219,6 +229,9 @@ void bz_free_surface_data(struct bz_surface *data)
 		}
 		if (data->content_updates) {
 			bz_list_free(data->content_updates, nullptr);
+		}
+		if (data->popups) {
+			bz_list_free(data->popups, nullptr);
 		}
 		free(data);
 	}
@@ -403,6 +416,48 @@ struct bz_xdg_toplevel *bz_create_xdg_toplevel_data()
 void bz_free_xdg_toplevel_data(struct bz_xdg_toplevel *data)
 {
 	if (data) {
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_xdg_popup
+// -------------------------------------------------------------------------------------------------
+
+struct bz_xdg_popup *bz_create_xdg_popup_data()
+{
+	struct bz_xdg_popup *data = calloc(1, sizeof(*data));
+
+	return data;
+}
+
+void bz_free_xdg_popup_data(struct bz_xdg_popup *data)
+{
+	if (data) {
+		if (data->positioner) { bz_free_xdg_positioner_data(data->positioner); }
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_xdg_positioner
+// -------------------------------------------------------------------------------------------------
+
+struct bz_xdg_positioner *bz_create_xdg_positioner_data()
+{
+	struct bz_xdg_positioner *data = calloc(1, sizeof(*data));
+
+	return data;
+}
+
+void bz_free_xdg_positioner_data(struct bz_xdg_positioner *data)
+{
+	if (data) {
+		if (data->size)        { free(data->size); }
+		if (data->anchor_rect) { free(data->anchor_rect); }
+		if (data->offset)      { free(data->offset); }
 		free(data);
 	}
 }

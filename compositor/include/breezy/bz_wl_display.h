@@ -13,7 +13,7 @@
 
 // -- wl_compositor --
 
-#define BZ_COMPOSITOR_VERSION 6
+#define BZ_COMPOSITOR_VERSION 6 // TODO: Latest is 7
 
 void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
@@ -27,7 +27,7 @@ void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t
 
 // -- wl_region --
 
-#define BZ_REGION_VERSION 7
+#define BZ_REGION_VERSION 6
 
 struct bz_region {
 	struct wl_resource *resource;
@@ -76,7 +76,6 @@ struct bz_surface_state {
 	// TODO-dl??: Make use of opaque regions
 	bool dirty_opaque_region;
 	struct bz_list *opaque_region;   // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
-	// TODO-dl13: Make use of input regions
 	bool dirty_input_region;
 	struct bz_list *input_region;    // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
 
@@ -126,6 +125,8 @@ struct bz_surface {
 	struct bz_renderable renderable;
 	struct bz_wp_viewport *viewport; // Nullable
 	struct bz_wp_fractional_scale *fractional_scale; // Nullable
+
+	struct bz_list *popups; // List of "struct bz_xdg_popup *"
 };
 
 struct bz_content_update {

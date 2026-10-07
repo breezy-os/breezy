@@ -148,6 +148,11 @@ static void bz_compositor_create_surface(
 		wl_client_post_no_memory(client);
 		goto content_updates_alloc_failed;
 	}
+	struct bz_list *popups = bz_list_create();
+	if (popups == nullptr) {
+		wl_client_post_no_memory(client);
+		goto popups_alloc_failed;
+	}
 
 	// Create the resource, bound to the data
 	struct wl_resource *res = wl_resource_create(
@@ -175,6 +180,7 @@ static void bz_compositor_create_surface(
 	surface->content_updates = content_updates;
 	surface->renderable.compositor_bounds.x = 0;
 	surface->renderable.compositor_bounds.y = 0;
+	surface->popups = popups;
 
 	// Starts with only itself in its stack of surfaces.
 	bz_list_append(surface->pending_state->surface_stack, surface);
@@ -185,6 +191,8 @@ static void bz_compositor_create_surface(
 
 	// Error cleanups
 	resource_failed:
+		bz_list_free(popups, nullptr);
+	popups_alloc_failed:
 		bz_list_free(content_updates, nullptr);
 	content_updates_alloc_failed:
 		bz_free_surface_state(active);
@@ -321,7 +329,7 @@ static void bz_free_surface_state(struct bz_surface_state *state)
 	if (state->frame_callbacks != nullptr) {
 		bz_list_free(state->frame_callbacks, nullptr);
 	}
-	if (state->frame_callbacks != nullptr) {
+	if (state->surface_stack != nullptr) {
 		bz_list_free(state->surface_stack, nullptr);
 	}
 	if (state->surface_damage != nullptr) {
@@ -641,6 +649,11 @@ void bz_surface_dtor(struct wl_resource *data)
 		free(bzsurf->cursor);
 		bzsurf->cursor = nullptr; // Shouldn't matter since surf is about to be freed, but eh.
 	}
+
+	// If this surface had popups, sever the links
+	struct bz_xdg_popup *popup; bz_list_foreach(popup, bzsurf->popups) { popup->parent = nullptr; }
+	bz_list_free(bzsurf->popups, nullptr);
+	bzsurf->popups = nullptr;
 
 	// Free our allocated state
 	bz_free_surface_state(bzsurf->pending_state);
@@ -1127,10 +1140,23 @@ void bz_recompute_physical_position(struct bz_surface *surface)
 		surface->renderable.render_bounds.y += surface->subsurface->position.y;
 	}
 
+	if (surface->role == BZ_SURF_ROLE_XDG_POPUP && surface->xdgpopup) {
+		// Shift by the parent's WINDOW GEOMETRY location
+		struct bz_surface *parent = surface->xdgpopup->parent;
+		surface->renderable.render_bounds.x += parent->renderable.compositor_bounds.x;
+		surface->renderable.render_bounds.y += parent->renderable.compositor_bounds.y;
+	}
+
 	// Update all child surfaces, recursively.
 	struct bz_surface *child; bz_list_foreach(child, surface->active_state->surface_stack) {
 		if (child == surface) continue;
 		bz_recompute_physical_position(child);
+	}
+
+	// Update all popups, recursively.
+	struct bz_xdg_popup *popup; bz_list_foreach(popup, surface->popups) {
+		if (popup->wlsurface == surface) continue;
+		bz_recompute_physical_position(popup->wlsurface);
 	}
 }
 
@@ -1514,7 +1540,6 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 		*active_state->window_geometry = *cu->state->window_geometry;
 		surface->renderable.compositor_bounds.w = active_state->window_geometry->w;
 		surface->renderable.compositor_bounds.h = active_state->window_geometry->h;
-		// The x/y coordinates are taken into consideration when computing the "render_bounds"
 	}
 	if (cu->state->min_size != nullptr) {
 		if (active_state->min_size == nullptr) {

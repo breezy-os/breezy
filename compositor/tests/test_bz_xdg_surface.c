@@ -238,6 +238,271 @@ void test_xdg_surface_get_toplevel__resource_failed(void)
 
 
 // =================================================================================================
+//  Test bz_xdg_surface_get_popup()
+// -------------------------------------------------------------------------------------------------
+
+/** No errors on a standard happy-path call. Associated wl_surface user data is updated as well. */
+void test_xdg_surface_get_popup__initializes_properly(void)
+{
+	// Set up our test data
+	struct bz_client *client_data = bz_create_client_data();
+	struct bz_surface *parent_data = bz_create_surface_data();
+	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
+	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
+	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
+	struct bz_xdg_positioner *positioner = bz_create_xdg_positioner_data();
+	positioner->size = calloc(1, sizeof(*positioner->size));
+	*positioner->size = (struct bz_size){ .w = 2, .h = 3 };
+	positioner->anchor_rect = calloc(1, sizeof(*positioner->anchor_rect));
+	*positioner->anchor_rect = (struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 };
+
+	// ...and our mocks
+	wl_client_get_user_data_fake.return_val = client_data;
+	wl_resource_create_fake.return_val = xdgpopup_res;
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_data };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
+
+	// Run our test!
+	bz_xdg_surface_implementation.get_popup(nullptr, nullptr, 0, parent_res, nullptr);
+
+	// Make our assertions
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
+	TEST_ASSERT_EQUAL(xdgpopup_res, wl_resource_set_implementation_fake.arg0_val); // Resource
+	TEST_ASSERT_NOT_NULL(wl_resource_set_implementation_fake.arg1_val);            // Interface
+	TEST_ASSERT_NOT_NULL(wl_resource_set_implementation_fake.arg2_val);            // User Data
+
+	// Also verify some of our (more important) user data
+	struct bz_xdg_popup *xdgpopup_data = wl_resource_set_implementation_fake.arg2_val;
+	TEST_ASSERT_EQUAL(xdgpopup_res, xdgpopup_data->resource);
+	TEST_ASSERT_EQUAL(xdgsurf_data, xdgpopup_data->xdgsurface);
+	TEST_ASSERT_EQUAL(xdgsurf_data->wlsurface, xdgpopup_data->wlsurface);
+	TEST_ASSERT_EQUAL(BZ_SURF_ROLE_XDG_POPUP, xdgsurf_data->wlsurface->role);
+
+	// Cleanup
+	bz_free_xdg_positioner_data(positioner);
+	bz_free_xdg_surface_data(xdgsurf_data);
+	bz_free_xdg_popup_data(xdgpopup_data);
+	free(xdgpopup_res);
+	free(parent_res);
+	bz_free_surface_data(parent_data);
+	bz_free_client_data(client_data);
+}
+
+/** The associated surface holds the "popup" role after this call. */
+void test_xdg_surface_get_popup__assigns_popup_role(void)
+{
+	// Set up our test data
+	struct bz_client *client_data = bz_create_client_data();
+	struct bz_surface *parent_data = bz_create_surface_data();
+	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
+	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
+	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
+	struct bz_xdg_positioner *positioner = bz_create_xdg_positioner_data();
+	positioner->size = calloc(1, sizeof(*positioner->size));
+	*positioner->size = (struct bz_size){ .w = 2, .h = 3 };
+	positioner->anchor_rect = calloc(1, sizeof(*positioner->anchor_rect));
+	*positioner->anchor_rect = (struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 };
+
+	// ...and our mocks
+	wl_client_get_user_data_fake.return_val = client_data;
+	wl_resource_create_fake.return_val = xdgpopup_res;
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_data };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
+
+	// Run our test!
+	TEST_ASSERT_EQUAL(BZ_SURF_ROLE_NONE, xdgsurf_data->wlsurface->role);
+	bz_xdg_surface_implementation.get_popup(nullptr, nullptr, 0, parent_res, nullptr);
+	TEST_ASSERT_EQUAL(BZ_SURF_ROLE_XDG_POPUP, xdgsurf_data->wlsurface->role);
+
+	// Cleanup
+	bz_free_xdg_positioner_data(positioner);
+	bz_free_xdg_surface_data(xdgsurf_data);
+	bz_free_xdg_popup_data(wl_resource_set_implementation_fake.arg2_val);
+	free(xdgpopup_res);
+	free(parent_res);
+	bz_free_surface_data(parent_data);
+	bz_free_client_data(client_data);
+}
+
+/** If the surface already held a non-popup role, a role error is sent. */
+void test_xdg_surface_get_popup__cannot_change_existing_role(void)
+{
+	// Set up our mocks
+	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
+	wl_resource_get_user_data_fake.return_val = xdgsurf_data;
+	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
+	wl_resource_create_fake.return_val = xdgpopup_res;
+
+	// Run our test!
+	xdgsurf_data->wlsurface->role = BZ_SURF_ROLE_XDG_TOPLEVEL;
+	bz_xdg_surface_implementation.get_popup(nullptr, nullptr, 0, nullptr, nullptr);
+
+	// Do our assertions
+	// -- Role error should be posted --
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL(XDG_WM_BASE_ERROR_ROLE, wl_resource_post_error_fake.arg1_val);
+	// -- Nothing should have changed / executed --
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_create_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_set_implementation_fake.call_count);
+	TEST_ASSERT_EQUAL(BZ_SURF_ROLE_XDG_TOPLEVEL, xdgsurf_data->wlsurface->role);
+
+	// Cleanup
+	bz_free_xdg_surface_data(xdgsurf_data);
+	bz_free_xdg_popup_data(wl_resource_set_implementation_fake.arg2_val);
+	free(xdgpopup_res);
+}
+
+/** If the positioner doesn't have all the required fields, an error is raised. */
+void test_xdg_surface_get_popup__positioner_must_be_complete(void)
+{
+	// Set up our test data
+	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
+	struct bz_xdg_positioner *positioner = bz_create_xdg_positioner_data();
+
+	// Set up our mocks
+	void *ret_vals[2] = { xdgsurf_data, positioner };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 2);
+
+	// Run our test!
+	bz_xdg_surface_implementation.get_popup(nullptr, nullptr, 0, nullptr, nullptr);
+
+	// Do our assertions
+	// -- Role error should be posted --
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_error_fake.call_count);
+	TEST_ASSERT_EQUAL(XDG_WM_BASE_ERROR_INVALID_POSITIONER, wl_resource_post_error_fake.arg1_val);
+	// -- Nothing should have changed / executed --
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_create_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_set_implementation_fake.call_count);
+
+	// Cleanup
+	bz_free_xdg_positioner_data(positioner);
+	bz_free_xdg_surface_data(xdgsurf_data);
+}
+
+/** If the surface already held a popup role, everything still works ok. */
+void test_xdg_surface_get_popup__can_reassign_same_role(void)
+{
+	// Set up our test data
+	struct bz_client *client_data = bz_create_client_data();
+	struct bz_surface *parent_data = bz_create_surface_data();
+	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
+	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
+	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
+	struct bz_xdg_positioner *positioner = bz_create_xdg_positioner_data();
+	positioner->size = calloc(1, sizeof(*positioner->size));
+	*positioner->size = (struct bz_size){ .w = 2, .h = 3 };
+	positioner->anchor_rect = calloc(1, sizeof(*positioner->anchor_rect));
+	*positioner->anchor_rect = (struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 };
+
+	// ...and our mocks
+	wl_client_get_user_data_fake.return_val = client_data;
+	wl_resource_create_fake.return_val = xdgpopup_res;
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_data };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
+
+	// Run our test!
+	xdgsurf_data->wlsurface->role = BZ_SURF_ROLE_XDG_POPUP;
+	bz_xdg_surface_implementation.get_popup(nullptr, nullptr, 0, parent_res, nullptr);
+
+	// Do our assertions
+	// -- Role error should NOT be posted --
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_error_fake.call_count);
+	// -- Everything should execute like normal --
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
+	TEST_ASSERT_EQUAL(BZ_SURF_ROLE_XDG_POPUP, xdgsurf_data->wlsurface->role);
+
+	// Cleanup
+	bz_free_xdg_positioner_data(positioner);
+	bz_free_xdg_surface_data(xdgsurf_data);
+	bz_free_xdg_popup_data(wl_resource_set_implementation_fake.arg2_val);
+	free(xdgpopup_res);
+	free(parent_res);
+	bz_free_surface_data(parent_data);
+	bz_free_client_data(client_data);
+}
+
+/** A "no memory" error is posted for failed Wayland resource creation. */
+void test_xdg_surface_get_popup__resource_failed(void)
+{
+	// Set up our test data
+	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
+	struct bz_xdg_positioner *positioner = bz_create_xdg_positioner_data();
+	positioner->size = calloc(1, sizeof(*positioner->size));
+	*positioner->size = (struct bz_size){ .w = 2, .h = 3 };
+	positioner->anchor_rect = calloc(1, sizeof(*positioner->anchor_rect));
+	*positioner->anchor_rect = (struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 };
+
+	// Set up our mocks
+	void *ret_vals[2] = { xdgsurf_data, positioner };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 2);
+
+	// Run our test!
+	wl_resource_create_fake.return_val = nullptr;
+	bz_xdg_surface_implementation.get_popup(nullptr, nullptr, 0, nullptr, nullptr);
+
+	// Do our assertions
+	TEST_ASSERT_EQUAL_INT(1, wl_client_post_no_memory_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(0, wl_resource_set_implementation_fake.call_count);
+
+	// Cleanup
+	bz_free_xdg_positioner_data(positioner);
+	bz_free_xdg_surface_data(xdgsurf_data);
+}
+
+void test_xdg_surface_get_popup__positioner_data_is_cloned(void)
+{
+	// Set up our test data
+	struct bz_client *client_data = bz_create_client_data();
+	struct bz_surface *parent_data = bz_create_surface_data();
+	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
+	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
+	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
+	struct bz_xdg_positioner *positioner = bz_create_xdg_positioner_data();
+	positioner->size = calloc(1, sizeof(*positioner->size));
+	positioner->size->w = 2;
+	positioner->size->h = 3;
+	positioner->anchor_rect = calloc(1, sizeof(*positioner->anchor_rect));
+	positioner->anchor_rect->w = 4;
+	positioner->anchor_rect->h = 5;
+
+	// ...and our mocks
+	wl_client_get_user_data_fake.return_val = client_data;
+	wl_resource_create_fake.return_val = xdgpopup_res;
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_data };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
+
+	// Run our test!
+	bz_xdg_surface_implementation.get_popup(nullptr, nullptr, 0, parent_res, nullptr);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_create_fake.call_count);
+	TEST_ASSERT_EQUAL_INT(1, wl_resource_set_implementation_fake.call_count);
+
+	// Make our assertions
+	struct bz_xdg_popup *xdgpopup_data = wl_resource_set_implementation_fake.arg2_val;
+	struct bz_xdg_positioner *positioner_data = xdgpopup_data->positioner;
+	TEST_ASSERT_NOT_NULL(positioner_data);
+	TEST_ASSERT_NOT_EQUAL(positioner, positioner_data); // Data should be cloned, not referenced.
+	TEST_ASSERT_NOT_EQUAL(positioner->anchor_rect, positioner_data->anchor_rect);
+	TEST_ASSERT_NOT_EQUAL(positioner->size, positioner_data->size);
+	TEST_ASSERT_EQUAL_INT(2, positioner_data->size->w);
+	TEST_ASSERT_EQUAL_INT(3, positioner_data->size->h);
+	TEST_ASSERT_EQUAL_INT(4, positioner_data->anchor_rect->w);
+	TEST_ASSERT_EQUAL_INT(5, positioner_data->anchor_rect->h);
+
+	// Cleanup
+	bz_free_xdg_positioner_data(positioner);
+	bz_free_xdg_surface_data(xdgsurf_data);
+	bz_free_xdg_popup_data(xdgpopup_data);
+	free(xdgpopup_res);
+	free(parent_res);
+	bz_free_surface_data(parent_data);
+	bz_free_client_data(client_data);
+}
+
+
+// =================================================================================================
 //  Test bz_xdg_surface_set_window_geometry()
 // -------------------------------------------------------------------------------------------------
 
@@ -435,8 +700,13 @@ int main(void) {
 	RUN_TEST(test_xdg_surface_get_toplevel__resource_failed);
 
 	// Test bz_xdg_surface_get_popup()
-	// RUN_TEST(test_xdg_surface_get_popup__);
-	// TODO
+	RUN_TEST(test_xdg_surface_get_popup__initializes_properly);
+	RUN_TEST(test_xdg_surface_get_popup__assigns_popup_role);
+	RUN_TEST(test_xdg_surface_get_popup__cannot_change_existing_role);
+	RUN_TEST(test_xdg_surface_get_popup__positioner_must_be_complete);
+	RUN_TEST(test_xdg_surface_get_popup__can_reassign_same_role);
+	RUN_TEST(test_xdg_surface_get_popup__resource_failed);
+	RUN_TEST(test_xdg_surface_get_popup__positioner_data_is_cloned);
 
 	// Test bz_xdg_surface_set_window_geometry()
 	RUN_TEST(test_xdg_surface_set_window_geometry__initializes_new_state);

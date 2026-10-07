@@ -22,7 +22,7 @@ static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, voi
 static void bz_mgmt_change_keyboard_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
 static void bz_mgmt_change_pointer_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
 
-static struct bz_surface *bz_mgmt_check_window_overlap(struct bz_window_mgmt *mgmt, struct bz_surface *root_surf, struct bz_surface *surface);
+static struct bz_surface *bz_mgmt_check_surface_overlap(struct bz_window_mgmt *mgmt, struct bz_surface *root_surf, struct bz_surface *surface);
 
 
 // =================================================================================================
@@ -54,37 +54,43 @@ void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt)
 
 void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface)
 {
-	// Make sure it's a supported surface role
-	struct wl_resource *res = nullptr;
-	if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
-		res = surface->xdgtoplevel->resource;
-	} else if (surface->role == BZ_SURF_ROLE_XDG_POPUP) {
-		res = surface->xdgpopup->resource;
-	} else {
-		bz_warn(BZ_LOG_WINDOW_MGMT, "Unsupported surface role in window manager: %d", surface->role);
-		return;
-	}
-
 	// Make sure it wasn't already mapped / is being displayed.
 	if (bz_list_contains(mgmt->activable_surfaces, surface)) {
 		return;
 	}
 
-	// Remove it when the surface is destroyed.
-	surface->disable_on_destroy.notify = bz_mgmt_untrack_surface_on_destroy;
-	wl_resource_add_destroy_listener(res, &surface->disable_on_destroy);
+	// Make sure it's a supported surface role
+	if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+		struct wl_resource *toplevel_res = surface->xdgtoplevel->resource;
 
-	// Focus the new window
-	struct bz_surface *orig_surf = bz_mgmt_get_active_surface(mgmt);
-	bz_mgmt_change_keyboard_focus(mgmt, orig_surf, surface);
+		// Remove it when the surface is destroyed.
+		surface->disable_on_destroy.notify = bz_mgmt_untrack_surface_on_destroy;
+		wl_resource_add_destroy_listener(toplevel_res, &surface->disable_on_destroy);
 
-	// Also update our pointer's position to be in the window (which also adjusts its focus)
-	struct wl_client *client = wl_resource_get_client(surface->resource);
-	struct bz_client *client_data = wl_client_get_user_data(client);
-	struct bz_renderable *cursor = &client_data->breezy->gl.cursor;
-	cursor->compositor_bounds.x = surface->renderable.compositor_bounds.x;
-	cursor->compositor_bounds.y = surface->renderable.compositor_bounds.y;
-	bz_mgmt_update_pointer_position(mgmt, cursor);
+		// Focus the new window
+		struct bz_surface *orig_surf = bz_mgmt_get_active_surface(mgmt);
+		bz_mgmt_change_keyboard_focus(mgmt, orig_surf, surface);
+
+		// Also update our pointer's position to be in the window (which also adjusts its focus)
+		struct wl_client *client = wl_resource_get_client(surface->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		struct bz_renderable *cursor = &client_data->breezy->gl.cursor;
+		cursor->compositor_bounds.x = surface->renderable.compositor_bounds.x + surface->renderable.compositor_bounds.w/2;
+		cursor->compositor_bounds.y = surface->renderable.compositor_bounds.y + surface->renderable.compositor_bounds.h/2;
+		bz_mgmt_update_pointer_position(mgmt, cursor);
+
+	} else if (surface->role == BZ_SURF_ROLE_XDG_POPUP) {
+		struct wl_resource *popup_res = surface->xdgpopup->resource;
+
+		// Remove it when the surface is destroyed.
+		surface->disable_on_destroy.notify = bz_mgmt_untrack_surface_on_destroy;
+		wl_resource_add_destroy_listener(popup_res, &surface->disable_on_destroy);
+
+		bz_list_append(mgmt->activable_surfaces, surface);
+	} else {
+		bz_warn(BZ_LOG_WINDOW_MGMT, "Non-toplevel surface provided in window manager: %d", surface->role);
+		return;
+	}
 }
 
 int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt)
@@ -96,6 +102,11 @@ int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt)
 	struct bz_surface *surf_data = mgmt->activable_surfaces->tail->data;
 	if (surf_data->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
 		xdg_toplevel_send_close(surf_data->xdgtoplevel->resource);
+	} else if (surf_data->role == BZ_SURF_ROLE_XDG_POPUP) {
+		struct bz_surface *toplevel = bz_popup_get_associated_toplevel(surf_data);
+		if (toplevel != nullptr) {
+			xdg_toplevel_send_close(toplevel->xdgtoplevel->resource);
+		}
 	} else {
 		bz_error(BZ_LOG_WINDOW_MGMT, "Unrecognized surface role when closing.");
 		return -1;
@@ -293,14 +304,20 @@ static void bz_mgmt_change_pointer_focus(
 /**
  * Returns the ROOT-level surface containing the cursor.
  */
-struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, struct bz_renderable *cursor)
-{
+struct bz_surface *bz_mgmt_update_pointer_position(
+	struct bz_window_mgmt *mgmt,
+	struct bz_renderable *cursor
+) {
 	mgmt->last_cursor_loc.x = cursor->compositor_bounds.x;
 	mgmt->last_cursor_loc.y = cursor->compositor_bounds.y;
 
-	// Iterate over our list, BACKWARDS, until we overlap with a window (or run out of items)
+	// Iterate over our list in reverse render order until we either overlap with a window or run out of items.
 	struct bz_surface *surf; bz_list_foreach_rev(surf, mgmt->activable_surfaces) {
-		struct bz_surface *target = bz_mgmt_check_window_overlap(mgmt, surf, surf);
+		// We treat toplevels as "the root of all windows". Popups and subsurfaces are checked through them.
+		if (surf->role != BZ_SURF_ROLE_XDG_TOPLEVEL) { continue; }
+
+		// Check each surface belonging to this toplevel
+		struct bz_surface *target = bz_mgmt_check_surface_overlap(mgmt, surf, surf);
 		if (target != nullptr) {
 			return target;
 		}
@@ -313,40 +330,57 @@ struct bz_surface *bz_mgmt_update_pointer_position(struct bz_window_mgmt *mgmt, 
 	return nullptr;
 }
 
-static struct bz_surface *bz_mgmt_check_window_overlap(struct bz_window_mgmt *mgmt, struct bz_surface *root_surf, struct bz_surface *surface)
-{
-	struct bz_surface *subsurf; bz_list_foreach_rev(subsurf, surface->active_state->surface_stack) {
-		// Recursively loop into subsurfaces
-		if (subsurf != surface) {
-			struct bz_surface *overlap = bz_mgmt_check_window_overlap(mgmt, root_surf, subsurf);
-			if (overlap != nullptr) {
-				return overlap;
-			}
+static struct bz_surface *bz_mgmt_check_surface_overlap(
+	struct bz_window_mgmt *mgmt,
+	struct bz_surface *root_surf,
+	struct bz_surface *surface
+) {
+	// First, check each popup. Popups are considered valid "root_surfs" for keyboard focus.
+	struct bz_xdg_popup *popup; bz_list_foreach_rev(popup, surface->popups) {
+		// If the popup was *just* removed, we don't want to accidentally reconsider it here.
+		if (!bz_list_contains(mgmt->activable_surfaces, popup->wlsurface)) {
 			continue;
 		}
 
-		struct bz_renderable surf_rect = subsurf->renderable;
+		struct bz_surface *overlap = bz_mgmt_check_surface_overlap(mgmt, popup->wlsurface, popup->wlsurface);
+		if (overlap != nullptr) {
+			return overlap;
+		}
+	}
 
-		// Check if cursor is overlapping
-		bool contains_cursor = bz_region_contain_point(
-			&surf_rect.render_bounds,
-			subsurf->active_state->input_region,
-			&mgmt->last_cursor_loc
-		);
-		if (contains_cursor) {
-			// If it doesn't already have pointer focus, send an enter event for pointers.
-			if (mgmt->pointer_focus != subsurf) {
-				bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, subsurf);
+	// Then, check each item in the stack, which includes both the main "surface" and its subsurfaces>
+	struct bz_surface *stack_item; bz_list_foreach_rev(stack_item, surface->active_state->surface_stack) {
+		if (stack_item != surface) {
+			struct bz_surface *overlap = bz_mgmt_check_surface_overlap(mgmt, root_surf, stack_item);
+			if (overlap != nullptr) {
+				return overlap;
 			}
 
-			// If it doesn't have keyboard focus, send an enter event for keyboards.
-			struct bz_surface *original_focus = bz_mgmt_get_active_surface(mgmt);
-			struct bz_surface *new_kb_focus = subsurf->role == BZ_SURF_ROLE_WL_SUBSURFACE ? root_surf : subsurf;
-			if (original_focus != new_kb_focus) {
-				bz_mgmt_change_keyboard_focus(mgmt, original_focus, new_kb_focus);
-			}
+		} else {
+			// Check if cursor is overlapping
+			bool contains_cursor = bz_region_contain_point(
+				&stack_item->renderable.render_bounds,
+				stack_item->active_state->input_region,
+				&mgmt->last_cursor_loc
+			);
+			if (contains_cursor) {
+				// If it doesn't already have pointer focus, send an enter event for pointers.
+				if (mgmt->pointer_focus != stack_item) {
+					bz_mgmt_change_pointer_focus(mgmt, mgmt->pointer_focus, stack_item);
+				}
 
-			return root_surf;
+				// TODO-dl13-pu: ...popups can have kb focus, but I don't want to REMOVE their focus
+				//     until the mouse cursor has entered a totally different toplevel. ...I think.
+
+				// If it doesn't have keyboard focus, send an enter event for keyboards.
+				struct bz_surface *original_focus = bz_mgmt_get_active_surface(mgmt);
+				struct bz_surface *new_kb_focus = stack_item->role == BZ_SURF_ROLE_WL_SUBSURFACE ? root_surf : stack_item;
+				if (original_focus != new_kb_focus) {
+					bz_mgmt_change_keyboard_focus(mgmt, original_focus, new_kb_focus);
+				}
+
+				return root_surf;
+			}
 		}
 	}
 

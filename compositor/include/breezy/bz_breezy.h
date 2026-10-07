@@ -35,7 +35,7 @@ struct bz_gbm {
 struct bz_renderable {
 	/** The size of the raw, provided wl_buffer (when applicable). */
 	struct bz_size *buffer_size;
-	/** The bounds for the purposes of compositor placement, ignoring any render shifts. */
+	/** The bounds for the purposes of compositor placement, ignoring things like client decorations. */
 	struct bz_rect compositor_bounds; // Pointers only use x/y for this.
 	/** The bounds for the purposes of rendering, computed from compositor_bounds + shifts. */
 	struct bz_rect render_bounds;
@@ -93,8 +93,9 @@ struct bz_wayland {
 
 struct bz_window_mgmt {
 	/**
-	 * These are keyboard-focusable surfaces, and include xdg_toplevel, xdg_popup, and
-	 * sometimes wlr_layer_surfaces. The final item in the list has "keyboard focus".
+	 * These are keyboard-focusable surfaces, and include xdg_toplevel, xdg_popup, and sometimes
+	 * wlr_layer_surfaces. The final item in the list has "keyboard focus". Mostly intended for
+	 * returning focus to the previously-focused window on request or when the current one closes.
 	 */
 	struct bz_list *activable_surfaces; // Each item is of type "struct bz_surface *"
 

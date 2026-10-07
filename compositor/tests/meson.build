@@ -57,9 +57,11 @@ foreach t : [
     'bz_wp_fractional_scale_manager',
     'bz_wp_viewport',
     'bz_wp_viewporter',
-    'bz_xdg_wm_base',
+    'bz_xdg_popup',
+    'bz_xdg_positioner',
     'bz_xdg_surface',
     'bz_xdg_toplevel',
+    'bz_xdg_wm_base',
 ]
     exe = executable('test_' + t,
         'test_' + t + '.c',
