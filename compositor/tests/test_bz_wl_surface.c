@@ -320,7 +320,9 @@ void test_surface_frame__multiple_frame_requests(void)
 
 	// Trigger the callbacks to run
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_event_fake.call_count);
-	bz_graphics_process_frame_callbacks(surfaces, 0);
+	struct bz_surface *surface; bz_list_foreach(surface, surfaces) {
+		bz_graphics_process_frame_callbacks(surface, 0);
+	}
 	TEST_ASSERT_EQUAL_INT(2, wl_resource_post_event_fake.call_count);
 	TEST_ASSERT_EQUAL_INT(WL_CALLBACK_DONE, wl_resource_post_event_fake.arg1_history[0]);
 	TEST_ASSERT_EQUAL_INT(WL_CALLBACK_DONE, wl_resource_post_event_fake.arg1_history[1]);
@@ -356,7 +358,9 @@ void test_surface_frame__callback_is_destroyed_immediately(void)
 
 	// Trigger the callback to run
 	TEST_ASSERT_EQUAL_INT(0, wl_resource_post_event_fake.call_count);
-	bz_graphics_process_frame_callbacks(surfaces, 0);
+	struct bz_surface *surface; bz_list_foreach(surface, surfaces) {
+		bz_graphics_process_frame_callbacks(surface, 0);
+	}
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_post_event_fake.call_count);
 
 	// Verify the thing being tested

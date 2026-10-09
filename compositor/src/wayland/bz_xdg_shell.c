@@ -420,6 +420,7 @@ static void bz_free_xdg_positioner(struct bz_xdg_positioner *positioner)
 
 	if (positioner->size != nullptr)        { free(positioner->size); }
 	if (positioner->anchor_rect != nullptr) { free(positioner->anchor_rect); }
+	if (positioner->offset != nullptr)      { free(positioner->offset); }
 
 	free(positioner);
 }

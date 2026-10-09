@@ -1014,7 +1014,7 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 			&& bzsurf->active_state->buffer == nullptr
 	) {
 		if (bzsurf->xdgsurface == nullptr) {
-			// TODO-dl13: This happened when CLion closed.
+			// TODO-dl13: This happened when CLion crashed.
 			bz_error(BZ_LOG_WL_DISPLAY,
 				"XDG surface object was null on wl_surface after being assigned. "
 				"THIS SHOULD NEVER HAPPEN.");

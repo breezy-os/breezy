@@ -483,7 +483,11 @@ void bz_drm_handle_pageflip(
 
 	// Emit the Wayland "done" event for all active frame callbacks.
 	uint32_t timestamp = (uint32_t)((uint64_t)tv_sec * 1000 + tv_usec / 1000);
-	bz_graphics_process_frame_callbacks(breezy->window_mgmt.activable_surfaces, timestamp);
+	struct bz_surface *surface; bz_list_foreach(surface, breezy->window_mgmt.activable_surfaces) {
+		if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+			bz_graphics_process_frame_callbacks(surface, timestamp);
+		}
+	}
 
 	// Occasionally, a render will fail due to both GBM buffers being unreleased. When that happens,
 	//   this flag gets set to true, prompting us to retry during this "release" step.
@@ -1382,16 +1386,25 @@ int bz_graphics_deactivate(struct bz_breezy *breezy)
  *
  * (Exposed as "public" for testing purposes only.)
  */
-void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp)
+void bz_graphics_process_frame_callbacks(struct bz_surface *surface, uint32_t timestamp)
 {
-	// TODO-dl14: Only emit for surfaces that are visible.
-	struct bz_surface *parent_surf; bz_list_foreach(parent_surf, surfaces) {
-		struct bz_surface *child_surf; bz_list_foreach(child_surf, parent_surf->active_state->surface_stack) {
-			struct wl_resource *curr_cb; bz_list_foreach(curr_cb, child_surf->active_state->frame_callbacks) {
+	// First, process the callbacks for each item in the surface stack.
+	struct bz_surface *stack_item; bz_list_foreach(stack_item, surface->active_state->surface_stack) {
+		if (stack_item == surface) {
+			// TODO-dl14: Only emit for surfaces that are visible.
+			struct wl_resource *curr_cb;
+			bz_list_foreach(curr_cb, stack_item->active_state->frame_callbacks) {
 				wl_callback_send_done(curr_cb, timestamp);
 				wl_resource_destroy(curr_cb);
 			}
-			bz_list_clear(child_surf->active_state->frame_callbacks, nullptr);
+			bz_list_clear(stack_item->active_state->frame_callbacks, nullptr);
+		} else {
+			bz_graphics_process_frame_callbacks(stack_item, timestamp);
 		}
+	}
+
+	// Next, process the callbacks for each popup.
+	struct bz_xdg_popup *popup; bz_list_foreach(popup, surface->popups) {
+		bz_graphics_process_frame_callbacks(popup->wlsurface, timestamp);
 	}
 }
