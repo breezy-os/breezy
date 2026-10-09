@@ -244,7 +244,7 @@ static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct
 		.w = (out->transform & 1 ? out->output_bounds.h : out->output_bounds.w) / (out->scale/120.0),
 		.h = (out->transform & 1 ? out->output_bounds.w : out->output_bounds.h) / (out->scale/120.0)
 	};
-	out->refresh_rate = mode->vrefresh;
+	out->refresh_rate = mode->vrefresh * 1000;
 	out->size_in_mms = (struct bz_size){
 		.w = conn_data->connector->mmWidth,
 		.h = conn_data->connector->mmHeight

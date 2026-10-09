@@ -707,12 +707,20 @@ void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surfac
 		struct bz_size rec_size = { .w = 1280, .h = 720 };
 		// struct bz_size rec_size = { .w = 800, .h = 600 };
 		if (bzsurf->active_state->min_size) {
-			rec_size.w = bz_max(rec_size.w, bzsurf->active_state->min_size->w);
-			rec_size.h = bz_max(rec_size.h, bzsurf->active_state->min_size->h);
+			if (bzsurf->active_state->min_size->w > 0) {
+				rec_size.w = bz_max(rec_size.w, bzsurf->active_state->min_size->w);
+			}
+			if (bzsurf->active_state->min_size->h > 0) {
+				rec_size.h = bz_max(rec_size.h, bzsurf->active_state->min_size->h);
+			}
 		}
 		if (bzsurf->active_state->max_size) {
-			rec_size.w = bz_min(rec_size.w, bzsurf->active_state->max_size->w);
-			rec_size.h = bz_min(rec_size.h, bzsurf->active_state->max_size->h);
+			if (bzsurf->active_state->max_size->w > 0) {
+				rec_size.w = bz_min(rec_size.w, bzsurf->active_state->max_size->w);
+			}
+			if (bzsurf->active_state->max_size->h > 0) {
+				rec_size.h = bz_min(rec_size.h, bzsurf->active_state->max_size->h);
+			}
 		}
 		configevt->toplevel.recommended_size = rec_size;
 

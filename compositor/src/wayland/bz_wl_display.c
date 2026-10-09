@@ -874,8 +874,8 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	if (
 		bzsurf->pending_state->min_size != nullptr &&
 		bzsurf->pending_state->max_size != nullptr && (
-			bzsurf->pending_state->min_size->h > bzsurf->pending_state->max_size->h ||
-			bzsurf->pending_state->min_size->w > bzsurf->pending_state->max_size->w
+			(bzsurf->pending_state->min_size->h > bzsurf->pending_state->max_size->h && bzsurf->pending_state->max_size->h != 0) ||
+			(bzsurf->pending_state->min_size->w > bzsurf->pending_state->max_size->w && bzsurf->pending_state->max_size->w != 0)
 		)
 	) {
 		wl_resource_post_error(resource, XDG_TOPLEVEL_ERROR_INVALID_SIZE,
@@ -929,7 +929,7 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 		int32_t width = wl_shm_buffer_get_width(shmbuf);
 		int32_t height = wl_shm_buffer_get_height(shmbuf);
 		struct bz_rect_dbl *src = bzsurf->pending_state->vp_source;
-		if (src->x + src->w >= width || src->y + src->h >= height) {
+		if (src->x + src->w > width || src->y + src->h > height) {
 			wl_resource_post_error(resource, WP_VIEWPORT_ERROR_OUT_OF_BUFFER,
 				"Viewport source extends beyond the provided buffer.");
 			bz_error(BZ_LOG_WL_DISPLAY,
@@ -1009,12 +1009,12 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	//   compositor will reply with initial wl_surface state, followed by xdg_surface.configure.
 	//   The client must acknowledge it, and can then proceed to attach a buffer / map the surface.
 	if ((bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->role == BZ_SURF_ROLE_XDG_POPUP)
+			&& (bzsurf->xdgtoplevel != nullptr || bzsurf->xdgpopup != nullptr)
 			&& bzsurf->pending_state->buffer == nullptr
 			// Also checking active because user might commit a NULL buffer to clear the surface.
 			&& bzsurf->active_state->buffer == nullptr
 	) {
 		if (bzsurf->xdgsurface == nullptr) {
-			// TODO-dl13: This happened when CLion crashed.
 			bz_error(BZ_LOG_WL_DISPLAY,
 				"XDG surface object was null on wl_surface after being assigned. "
 				"THIS SHOULD NEVER HAPPEN.");
@@ -1225,20 +1225,18 @@ static void bz_write_surface_texture(struct bz_surface *surface_data, bool full_
 			*transformed = *rect;
 
 			// 1. Apply viewport
-			struct bz_rect_dbl *vp_source = surface_data->active_state->vp_source;
-			struct bz_size *vp_dest = surface_data->active_state->vp_dest;
-			if (vp_source != nullptr || vp_dest != nullptr) {
-				struct bz_size *vp_src_size = (vp_dest != nullptr)
-					? vp_dest
-					: &(struct bz_size){ .w = vp_source->w, .h = vp_source->h };
-				transformed->x *= (vp_source->w / vp_src_size->w);
-				transformed->y *= (vp_source->h / vp_src_size->h);
-				transformed->w *= (vp_source->w / vp_src_size->w);
-				transformed->h *= (vp_source->h / vp_src_size->h);
-
-				transformed->x += vp_source->x;
-				transformed->y += vp_source->y;
-			}
+			struct bz_rect_dbl *vp_source = surface_data->active_state->vp_source != nullptr
+				? surface_data->active_state->vp_source
+				: &(struct bz_rect_dbl){ .x = 0, .y = 0, .w = width, .h = height };
+			struct bz_size *vp_dest = surface_data->active_state->vp_dest != nullptr
+				? surface_data->active_state->vp_dest
+				: &(struct bz_size){ .w = vp_source->w, .h = vp_source->h };
+			transformed->x *= (vp_source->w / vp_dest->w);
+			transformed->y *= (vp_source->h / vp_dest->h);
+			transformed->w *= (vp_source->w / vp_dest->w);
+			transformed->h *= (vp_source->h / vp_dest->h);
+			transformed->x += vp_source->x;
+			transformed->y += vp_source->y;
 
 			// 2. Apply buffer scale
 			transformed->x *= surface_data->active_state->scale;
