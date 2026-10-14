@@ -44,6 +44,7 @@ bz_main_lib = static_library(
         './bz_seat.c',
         './bz_graphics.c',
         './bz_input.c',
+        './bz_user_configuration.c',
         './bz_wayland.c',
         './bz_window_management.c',
         './gles2.c',

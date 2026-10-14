@@ -103,6 +103,11 @@ struct bz_window_mgmt {
 	struct bz_position last_cursor_loc;
 };
 
+struct bz_user_config {
+	char *config_dir;
+	GLuint bg_texture;
+};
+
 
 struct bz_breezy {
 	struct bz_drm drm;
@@ -112,6 +117,7 @@ struct bz_breezy {
 	struct bz_input input;
 	struct bz_wayland wayland;
 	struct bz_window_mgmt window_mgmt;
+	struct bz_user_config user_config;
 	bool is_terminating;
 };
 

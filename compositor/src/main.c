@@ -1,5 +1,9 @@
 #define _POSIX_C_SOURCE 200809L // NOLINT
 
+// This should only be done once, and it loads our stb_image functionality
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
 #include "breezy/bz_breezy.h"
 
 #include <signal.h>
@@ -13,6 +17,7 @@
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_seat.h"
+#include "breezy/bz_user_configuration.h"
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_window_management.h"
 
@@ -43,6 +48,13 @@ int main(void)
 		return -1; // If we're already failing to malloc this early, let's just exit.
 	}
 
+	// Load the user's configuration
+	retval = bz_user_config_initialize(&breezy.user_config);
+	if (retval != 0) {
+		bz_error(BZ_LOG_MAIN, "Failed to initialize user configuration. Error: %d", retval);
+		goto user_config_cleanup;
+	}
+
 	// Window management initialization
 	retval = bz_mgmt_initialize(&breezy.window_mgmt);
 	if (retval != 0) {
@@ -63,6 +75,9 @@ int main(void)
 		bz_error(BZ_LOG_MAIN, "Failed to initialize graphics code. Error: %d", retval);
 		goto graphics_cleanup;
 	}
+
+	// This depends on OpenGL, hence why it's done after that loads.
+	bz_load_random_desktop_background(&breezy.user_config);
 
 	// Input initialization
 	retval = bz_input_initialize(&breezy);
@@ -121,6 +136,8 @@ seat_cleanup:
 	bz_seat_cleanup(&breezy);
 window_management_cleanup:
 	bz_mgmt_cleanup(&breezy.window_mgmt);
+user_config_cleanup:
+	bz_user_config_cleanup(&breezy.user_config);
 
 	return retval;
 }

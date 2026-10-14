@@ -327,23 +327,6 @@ static void bz_input_process_kb_event(
 			bz_mgmt_close_active_window(&breezy->window_mgmt);
 			return;
 
-		// Change Colors
-		case XKB_KEY_1:
-			bz_graphics_set_color_index(0);
-			return;
-		case XKB_KEY_2:
-			bz_graphics_set_color_index(1);
-			return;
-		case XKB_KEY_3:
-			bz_graphics_set_color_index(2);
-			return;
-		case XKB_KEY_Up:
-			bz_graphics_change_color(breezy, 20.0f/255);
-			return;
-		case XKB_KEY_Down:
-			bz_graphics_change_color(breezy, -20.0f/255);
-			return;
-
 		default:
 			break; // Does nothing, but shuts up clang-tidy
 		}

@@ -63,6 +63,7 @@ static int bz_gles_assert_extension(const char *extensionList, const char *exten
 static char *bz_get_egl_error_text(EGLint error);
 static void bz_gles_print_egl_error(char *function_name, EGLint error);
 static void bz_gles_render_and_commit(void *data);
+static void bz_gles_render_background(struct bz_breezy *breezy);
 static void bz_gles_render_applications(struct bz_breezy *breezy);
 static void bz_gles_render_surface(GLuint client_program, struct bz_surface *surface);
 static void bz_gles_draw_surface(GLuint client_program, struct bz_surface *surface);
@@ -733,7 +734,7 @@ static int bz_gles_init(struct bz_breezy *breezy)
 		GLAD_VERSION_MAJOR(glad_version), GLAD_VERSION_MINOR(glad_version));
 
 	// Define some GLES configs
-	glClearColor(0.16f, 0.164f, 0.196f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	bz_gles_create_unit_quad(breezy);
 	bz_gles_init_client_cursor(breezy);
 
@@ -746,20 +747,6 @@ static int bz_gles_init(struct bz_breezy *breezy)
 
 	bz_debug(BZ_LOG_GRAPHICS, "Successfully initialized GLES.");
 	return 0;
-}
-
-// TODO: Very temp - delete
-int color_i = 0;
-void bz_graphics_set_color_index(int i) {
-	color_i = i;
-}
-float color[3] = { 0.16f, 0.164f, 0.196f };
-void bz_graphics_change_color(struct bz_breezy *breezy, float amount) {
-	color[color_i] += amount;
-	if (amount > 0 && color[color_i] > 1.0f) color[color_i] = 1.0f;
-	if (amount < 0 && color[color_i] < 0.0f) color[color_i] = 0.0f;
-	glClearColor(color[0], color[1], color[2], 1.0f);
-	bz_graphics_schedule_render(breezy);
 }
 
 /**
@@ -925,6 +912,8 @@ static void bz_gles_render_and_commit(void *data) {
 	glEnable(GL_BLEND); // TODO-dl??: Do this per-surface, and disable blend for fully opaque surfaces
 	// glDisable(GL_BLEND);
 
+	bz_gles_render_background(breezy);
+
 	if (breezy->gl.vbo != 0) {
 		bz_gles_render_applications(breezy); // Then render the applications.
 		bz_gles_render_cursor(breezy);       // Lastly, put the cursor on the top.
@@ -950,9 +939,54 @@ static void bz_gles_render_and_commit(void *data) {
 	}
 }
 
+static void bz_gles_render_background(struct bz_breezy *breezy)
+{
+	// Load our program
+	GLuint client_program = breezy->gl.client_shader_program;
+	glUseProgram(client_program);
+	// ...our projection matrix
+	GLint outputProj = glGetUniformLocation(client_program, "u_outputProj");
+	glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.current_output->projection);
+	// ...and our unit quad vbo
+	glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	// ...then render the background image fullscreen
+	GLuint bg_tex = breezy->user_config.bg_texture;
+	if (bg_tex != 0) {
+		// Load our surface projection matrix
+		bz_mat3 projection = {0};
+		struct bz_rect *out_bounds = &breezy->drm.current_output->compositor_bounds;
+		bz_fill_projection_matrix(projection,
+			0, 0, 1, 1,
+			out_bounds->x, out_bounds->y, out_bounds->w, out_bounds->h
+		);
+		GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+
+		// Invert the buffer transformation
+		bz_mat3 uv_proj = {0};
+		bz_gles_build_uv_projection(uv_proj, false, 0, nullptr, nullptr, 1);
+		GLint uvProjId = glGetUniformLocation(client_program, "u_surfaceUVProj");
+		glUniformMatrix3fv(uvProjId, 1, GL_FALSE, uv_proj);
+
+		// Prep the texture
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, bg_tex);
+		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+		// Render!
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	}
+}
+
 static void bz_gles_render_applications(struct bz_breezy *breezy)
 {
-	// ...then load our program
+	// Load our program
 	GLuint client_program = breezy->gl.client_shader_program;
 	glUseProgram(client_program);
 	// ...our projection matrix

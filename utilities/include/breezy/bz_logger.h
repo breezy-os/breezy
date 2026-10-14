@@ -28,12 +28,13 @@ void bz_error(uint8_t category, char *file, int line, const char *message_fmt, .
 #define BZ_LOG_WAYLAND 5, __FILE__, __LINE__
 #define BZ_LOG_LIST 6, __FILE__, __LINE__
 #define BZ_LOG_WINDOW_MGMT 7, __FILE__, __LINE__
-#define BZ_LOG_WL_DISPLAY 8, __FILE__, __LINE__
-#define BZ_LOG_WL_DEVICES 9, __FILE__, __LINE__
-#define BZ_LOG_WL_XDG_SHELL 10, __FILE__, __LINE__
-#define BZ_LOG_WL_XDG_OUTPUT 11, __FILE__, __LINE__
-#define BZ_LOG_WL_WP_VIEWPORTER 12, __FILE__, __LINE__
-#define BZ_LOG_WL_WP_FRACTIONAL_SCALE 13, __FILE__, __LINE__
+#define BZ_LOG_USER_CONFIG 8, __FILE__, __LINE__
+#define BZ_LOG_WL_DISPLAY 9, __FILE__, __LINE__
+#define BZ_LOG_WL_DEVICES 10, __FILE__, __LINE__
+#define BZ_LOG_WL_XDG_SHELL 11, __FILE__, __LINE__
+#define BZ_LOG_WL_XDG_OUTPUT 12, __FILE__, __LINE__
+#define BZ_LOG_WL_WP_VIEWPORTER 13, __FILE__, __LINE__
+#define BZ_LOG_WL_WP_FRACTIONAL_SCALE 14, __FILE__, __LINE__
 
 
 // #################################################################################################

@@ -20,10 +20,6 @@ int bz_graphics_deactivate(struct bz_breezy *breezy);
 
 void bz_graphics_process_frame_callbacks(struct bz_surface *surfaces, uint32_t timestamp);
 
-// TODO: temp fun
-void bz_graphics_set_color_index(int i);
-void bz_graphics_change_color(struct bz_breezy *breezy, float amount);
-
 // -- Data Structures --
 
 struct bz_gbm_bo_data {
