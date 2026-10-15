@@ -20,14 +20,14 @@ static constexpr char CLIENT_VERT_SRC[] =
 
 // TODO-dl??: Define a separate shader for XRGB surfaces since the alpha channel should be
 //   hardcoded to 1 for those. ie: fragColor = vec4(texture(u_texture, v_texCoord).rgb, 1.0);
-// TODO-dl13: Add an "alpha" uniform that gets multiplied by the texture result for full translucency.
 static constexpr char CLIENT_FRAG_SRC[] =
 "#version 320 es\n"
 "in lowp vec2 v_texCoord;\n"
 "uniform sampler2D u_texture;\n"
+"uniform lowp float u_alpha;\n"
 "out lowp vec4 fragColor;\n"
 "void main() {\n"
-"	 fragColor = texture(u_texture, v_texCoord);\n"
+"	 fragColor = texture(u_texture, v_texCoord) * u_alpha;\n"
 "}\n";
 
 // #################################################################################################

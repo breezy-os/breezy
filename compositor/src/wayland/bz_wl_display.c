@@ -1165,10 +1165,18 @@ struct bz_surface *bz_get_root_surface(struct bz_surface *surface)
 	if (surface == nullptr) return nullptr;
 
 	struct bz_surface *root = surface;
-	while (root->role == BZ_SURF_ROLE_WL_SUBSURFACE && root->subsurface != nullptr) {
-		root = root->subsurface->parent;
+	while (
+		(root->role == BZ_SURF_ROLE_WL_SUBSURFACE && root->subsurface != nullptr) ||
+		(root->role == BZ_SURF_ROLE_XDG_POPUP && root->xdgpopup != nullptr)
+	) {
+		if (root->role == BZ_SURF_ROLE_WL_SUBSURFACE && root->subsurface != nullptr) {
+			root = root->subsurface->parent;
+		} else if (root->role == BZ_SURF_ROLE_XDG_POPUP && root->xdgpopup != nullptr) {
+			root = root->xdgpopup->parent;
+		}
 	}
-	return root->role != BZ_SURF_ROLE_WL_SUBSURFACE ? root : nullptr;
+	return (root->role != BZ_SURF_ROLE_WL_SUBSURFACE && root->role != BZ_SURF_ROLE_XDG_POPUP)
+		? root : nullptr;
 }
 
 static void bz_write_surface_texture(struct bz_surface *surface_data, bool full_redraw)

@@ -21,6 +21,8 @@ static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, voi
 
 static void bz_mgmt_change_keyboard_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
 static void bz_mgmt_change_pointer_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
+static void bz_mgmt_update_focus_for_full_tree(struct bz_surface *surface, bool is_focused);
+static void bz_mgmt_update_focus_for_children(struct bz_surface *surface, bool is_focused);
 
 static struct bz_surface *bz_mgmt_check_surface_overlap(struct bz_window_mgmt *mgmt, struct bz_surface *root_surf, struct bz_surface *surface);
 
@@ -86,7 +88,12 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 		surface->disable_on_destroy.notify = bz_mgmt_untrack_surface_on_destroy;
 		wl_resource_add_destroy_listener(popup_res, &surface->disable_on_destroy);
 
+		// Add it as the focused surface, clearing the previously focused surface
+		if (bz_mgmt_get_active_surface(mgmt) != nullptr) {
+			bz_mgmt_update_focus_for_full_tree(bz_mgmt_get_active_surface(mgmt), false);
+		}
 		bz_list_append(mgmt->activable_surfaces, surface);
+		bz_mgmt_update_focus_for_full_tree(surface, true);
 	} else {
 		bz_warn(BZ_LOG_WINDOW_MGMT, "Non-toplevel surface provided in window manager: %d", surface->role);
 		return;
@@ -240,6 +247,9 @@ static void bz_mgmt_change_keyboard_focus(
 				wl_keyboard_send_leave(keyboard, serial, orig_surface->resource);
 			}
 		}
+
+		// Make all surfaces belonging to this stack unfocused
+		bz_mgmt_update_focus_for_full_tree(orig_surface, false);
 	}
 
 	// Iterate over each keyboard resource of the new client, emitting "enter" events
@@ -254,6 +264,8 @@ static void bz_mgmt_change_keyboard_focus(
 			bz_mgmt_notify_kb_enter(enter_serial, modifiers_serial, xkbstate, keyboard, new_surface->resource);
 		}
 	}
+	// Make all surfaces belonging to this stack focused
+	bz_mgmt_update_focus_for_full_tree(new_surface, true);
 }
 
 static void bz_mgmt_change_pointer_focus(
@@ -299,6 +311,31 @@ static void bz_mgmt_change_pointer_focus(
 
 	// Update our tracked pointer focus
 	mgmt->pointer_focus = new_surface;
+}
+
+static void bz_mgmt_update_focus_for_full_tree(struct bz_surface *surface, bool is_focused)
+{
+	struct bz_surface *root_surf = bz_get_root_surface(surface);
+	if (root_surf != nullptr) { // Should never be null.
+		bz_mgmt_update_focus_for_children(root_surf, is_focused);
+	}
+}
+
+static void bz_mgmt_update_focus_for_children(struct bz_surface *surface, bool is_focused)
+{
+	// First, set the focus for each item in the surface stack.
+	struct bz_surface *stack_item; bz_list_foreach(stack_item, surface->active_state->surface_stack) {
+		if (stack_item == surface) {
+			stack_item->appears_focused = is_focused;
+		} else {
+			bz_mgmt_update_focus_for_children(stack_item, is_focused);
+		}
+	}
+
+	// Next, set the focus for each popup.
+	struct bz_xdg_popup *popup; bz_list_foreach(popup, surface->popups) {
+		bz_mgmt_update_focus_for_children(popup->wlsurface, is_focused);
+	}
 }
 
 /**

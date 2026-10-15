@@ -979,6 +979,10 @@ static void bz_gles_render_background(struct bz_breezy *breezy)
 		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
 		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
 
+		// Set our alpha to "fully opaque"
+		GLint alphaLocation = glGetUniformLocation(client_program, "u_alpha");
+		glUniform1f(alphaLocation, 1.0f);
+
 		// Render!
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	}
@@ -1059,6 +1063,10 @@ static void bz_gles_draw_surface(GLuint client_program, struct bz_surface *surfa
 		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
 		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
 
+		// Set our alpha
+		GLint alphaLocation = glGetUniformLocation(client_program, "u_alpha");
+		glUniform1f(alphaLocation, surface->appears_focused ? 1.0f : 0.8f);
+
 		// Render!
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	}
@@ -1121,6 +1129,10 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 		glBindTexture(GL_TEXTURE_2D, cursor->texture);
 		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
 		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+		// Set our alpha to "fully opaque"
+		GLint alphaLocation = glGetUniformLocation(client_program, "u_alpha");
+		glUniform1f(alphaLocation, 1.0f);
 
 		// Render!
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
