@@ -41,12 +41,71 @@ bool bz_dbl_rects_are_equal(struct bz_rect_dbl *r1, struct bz_rect_dbl *r2)
 	);
 }
 
+struct bz_rect *bz_clone_rect(struct bz_rect *source)
+{
+	if (source == nullptr) { return nullptr; }
+	struct bz_rect *dest = calloc(1, sizeof(*dest));
+	*dest = *source;
+	return dest;
+}
+
 struct bz_rect_dbl *bz_clone_rect_dbl(struct bz_rect_dbl *source)
 {
 	if (source == nullptr) { return nullptr; }
 	struct bz_rect_dbl *dest = calloc(1, sizeof(*dest));
 	*dest = *source;
 	return dest;
+}
+
+/**
+ * Splits the given source rectangle into either 2 or 4 other rectangles, returning the result as a
+ * pointer to the split rectangles. If the given source is null, the return value is null.
+ *
+ * You must provide at least one of "h_split" or "v_split", and they must be between 0 and 1 (exclusive).
+ * Providing an out-of-range value to either one of these causes the split in that direction to be ignored.
+ * Not providing a valid h_split or v_split will result in the source rectangle being returned.
+ *
+ * Providing a valid h_split makes a horizontal cut in the source rectangle at the provided percentage height.
+ * Providing a valid v_split makes a vertical cut in the source rectangle at the provided percentage width.
+ *
+ * It's up to the caller to free the returned rectangle pointer.
+ */
+struct bz_rect *bz_split_rect(struct bz_rect *source, float h_split, float v_split, int32_t cut_size)
+{
+	if (source == nullptr) { return nullptr; }
+
+	struct bz_rect *results = source;
+	struct bz_rect full = *source;
+
+	if (h_split > 0.0f && h_split < 1.0f && v_split > 0.0f && v_split < 1.0f) {
+		results = calloc(4, sizeof(*results));
+		full.w -= cut_size;
+		full.h -= cut_size;
+		int32_t w1 = full.w * v_split; int32_t w2 = full.w - w1;
+		int32_t h1 = full.h * h_split; int32_t h2 = full.h - h1;
+		results[0] = (struct bz_rect){ .x = source->x,                 .y = source->y,                 .w = w1, .h = h1 };
+		results[1] = (struct bz_rect){ .x = source->x + w1 + cut_size, .y = source->y,                 .w = w2, .h = h1 };
+		results[2] = (struct bz_rect){ .x = source->x,                 .y = source->y + h1 + cut_size, .w = w1, .h = h2 };
+		results[3] = (struct bz_rect){ .x = source->x + w1 + cut_size, .y = source->y + h1 + cut_size, .w = w2, .h = h2 };
+
+	} else if (h_split > 0.0f && h_split < 1.0f) {
+		results = calloc(2, sizeof(*results));
+		full.h -= cut_size;
+		int32_t w = full.w;
+		int32_t h1 = full.h * h_split; int32_t h2 = full.h - h1;
+		results[0] = (struct bz_rect){ .x = source->x, .y = source->y,                 .w = w, .h = h1 };
+		results[1] = (struct bz_rect){ .x = source->x, .y = source->y + h1 + cut_size, .w = w, .h = h2 };
+
+	} else if (v_split > 0.0f && v_split < 1.0f) {
+		results = calloc(2, sizeof(*results));
+		full.w -= cut_size;
+		int32_t w1 = full.w * v_split; int32_t w2 = full.w - w1;
+		int32_t h = full.h;
+		results[0] = (struct bz_rect){ .x = source->x,                 .y = source->y, .w = w1, .h = h };
+		results[1] = (struct bz_rect){ .x = source->x + w1 + cut_size, .y = source->y, .w = w2, .h = h };
+	}
+
+	return results;
 }
 
 /** Rectangle bounds are inclusive. If w/h are negative, the rectangle will be "normalized" first. */

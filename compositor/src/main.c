@@ -55,13 +55,6 @@ int main(void)
 		goto user_config_cleanup;
 	}
 
-	// Window management initialization
-	retval = bz_mgmt_initialize(&breezy.window_mgmt);
-	if (retval != 0) {
-		bz_error(BZ_LOG_MAIN, "Failed to initialize window management. Error: %d", retval);
-		goto window_management_cleanup;
-	}
-
 	// Seat initialization
 	retval = bz_seat_initialize(&breezy);
 	if (retval != 0) {
@@ -74,6 +67,13 @@ int main(void)
 	if (retval != 0) {
 		bz_error(BZ_LOG_MAIN, "Failed to initialize graphics code. Error: %d", retval);
 		goto graphics_cleanup;
+	}
+
+	// Window management initialization
+	retval = bz_mgmt_initialize(&breezy);
+	if (retval != 0) {
+		bz_error(BZ_LOG_MAIN, "Failed to initialize window management. Error: %d", retval);
+		goto window_management_cleanup;
 	}
 
 	// This depends on OpenGL, hence why it's done after that loads.

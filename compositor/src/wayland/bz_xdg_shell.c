@@ -13,6 +13,8 @@
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_xdg_shell.h"
 
+#include "breezy/bz_window_management.h"
+
 
 // =================================================================================================
 //  File Variables / Declarations
@@ -54,7 +56,9 @@ static void bz_xdg_surface_get_popup(struct wl_client *client, struct wl_resourc
 static void bz_xdg_surface_set_window_geometry(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
 static void bz_xdg_surface_ack_configure(struct wl_client *client, struct wl_resource *resource, uint32_t serial);
 // Helpers
-void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surface *bzsurf);
+void bz_xdg_surface_initial_configure(struct bz_surface *bzsurf);
+void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf);
+void bz_xdg_surface_configure_popup(struct bz_surface *bzsurf);
 static struct bz_rect *bz_calculate_popup_position(struct bz_xdg_positioner *positioner);
 static bool bz_serial_matches(void *item, void *serial);
 static bool bz_serial_is_newer(void *item, void *serial);
@@ -674,118 +678,118 @@ static void bz_xdg_surface_ack_configure(
 
 // ---  Helpers  -----------------------------------------------------------------------------------
 
-void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surface *bzsurf)
+void bz_xdg_surface_initial_configure(struct bz_surface *bzsurf)
 {
+	if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+		bz_xdg_surface_configure_toplevel(bzsurf);
+	} else if (bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
+		bz_xdg_surface_configure_popup(bzsurf);
+	}
+}
+
+void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf)
+{
+	// Safety checks
+	if (bzsurf->role != BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->xdgtoplevel == nullptr) {
+		bz_warn(BZ_LOG_WL_XDG_SHELL, "XDG toplevel object does not exist on the surface.");
+		wl_resource_post_error(bzsurf->xdgsurface->resource, XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
+			"XDG toplevel object does not exist on the surface.");
+		return;
+	}
+
+	struct wl_client *client = wl_resource_get_client(bzsurf->resource);
 	struct bz_client *bzclient = wl_client_get_user_data(client);
 	struct bz_breezy *globals = bzclient->breezy;
-	struct bz_xdg_surface *xdgsurface = bzsurf->xdgsurface;
 
 	// Allocate our configure event
 	struct bz_xdg_surface_configure *configevt = calloc(1, sizeof(*configevt));
 	if (configevt == nullptr) {
 		wl_client_post_no_memory(client);
-		goto configevt_alloc_failed;
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to send toplevel configuration sequence.");
+		return;
 	}
 
-	if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
-		// Safety checks
-		if (bzsurf->xdgtoplevel == nullptr) {
-			bz_warn(BZ_LOG_WL_XDG_SHELL, "XDG toplevel object does not exist on the surface.");
-			wl_resource_post_error(bzsurf->xdgsurface->resource, XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
-				"XDG toplevel object does not exist on the surface.");
-			goto null_toplevel;
-		}
+	// Assign our initial state
+	configevt->serial = wl_display_next_serial(wl_client_get_display(client));
+	configevt->type = BZ_XDG_SURF_TOPLEVEL;
+	wl_array_init(&configevt->toplevel.states);
+	configevt->toplevel.max_size.w = globals->drm.current_output->compositor_bounds.w;
+	configevt->toplevel.max_size.h = globals->drm.current_output->compositor_bounds.h;
 
-		// Assign our initial state
-		configevt->serial = wl_display_next_serial(wl_client_get_display(client));
-		configevt->type = BZ_XDG_SURF_TOPLEVEL;
-		wl_array_init(&configevt->toplevel.states);
-		configevt->toplevel.max_size.w = globals->drm.current_output->compositor_bounds.w;
-		configevt->toplevel.max_size.h = globals->drm.current_output->compositor_bounds.h;
-		// Set recommended size based on min/max size.
-		// struct bz_size rec_size = { .w = 1920, .h = 1080 };
-		struct bz_size rec_size = { .w = 1280, .h = 720 };
-		// struct bz_size rec_size = { .w = 800, .h = 600 };
-		if (bzsurf->active_state->min_size) {
-			if (bzsurf->active_state->min_size->w > 0) {
-				rec_size.w = bz_max(rec_size.w, bzsurf->active_state->min_size->w);
-			}
-			if (bzsurf->active_state->min_size->h > 0) {
-				rec_size.h = bz_max(rec_size.h, bzsurf->active_state->min_size->h);
-			}
-		}
-		if (bzsurf->active_state->max_size) {
-			if (bzsurf->active_state->max_size->w > 0) {
-				rec_size.w = bz_min(rec_size.w, bzsurf->active_state->max_size->w);
-			}
-			if (bzsurf->active_state->max_size->h > 0) {
-				rec_size.h = bz_min(rec_size.h, bzsurf->active_state->max_size->h);
-			}
-		}
-		configevt->toplevel.recommended_size = rec_size;
+	// Set recommended size
+	struct bz_rect *bounds = &bzsurf->section->bounds;
+	bzsurf->renderable.compositor_bounds.x = bounds->x;
+	bzsurf->renderable.compositor_bounds.y = bounds->y;
+	configevt->toplevel.recommended_size = (struct bz_size){ .w = bounds->w, .h = bounds->h };
 
-		if (wl_resource_get_version(bzsurf->xdgtoplevel->resource) >= XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION) {
-			xdg_toplevel_send_configure_bounds(
-				bzsurf->xdgtoplevel->resource,
-				configevt->toplevel.max_size.w,
-				configevt->toplevel.max_size.h
-			);
-		}
-
-		// TODO-dl??: Set window capabilities..? (can be tested with foot)
-		// struct wl_array caps;
-		// wl_array_init(&caps);
-		// uint32_t *c1 = wl_array_add(&caps, sizeof(uint32_t));
-		// *c1 = XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN;
-		// uint32_t *c2 = wl_array_add(&caps, sizeof(uint32_t));
-		// *c2 = XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE;
-		// xdg_toplevel_send_wm_capabilities(bzsurf->xdgtoplevel->resource, &caps);
-		// wl_array_release(&caps);
-
-		xdg_toplevel_send_configure(
+	if (wl_resource_get_version(bzsurf->xdgtoplevel->resource) >= XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION) {
+		xdg_toplevel_send_configure_bounds(
 			bzsurf->xdgtoplevel->resource,
-			configevt->toplevel.recommended_size.w,
-			configevt->toplevel.recommended_size.h,
-			// 0,
-			// 0,
-			&configevt->toplevel.states
-		);
-	} else if (bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
-		// Safety checks
-		if (bzsurf->xdgpopup == nullptr) {
-			bz_warn(BZ_LOG_WL_XDG_SHELL, "XDG popup object does not exist on the surface.");
-			wl_resource_post_error(bzsurf->xdgsurface->resource, XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
-				"XDG popup object does not exist on the surface.");
-			goto null_popup;
-		}
-
-		// Assign our initial state
-		configevt->serial = wl_display_next_serial(wl_client_get_display(client));
-		configevt->type = BZ_XDG_SURF_POPUP;
-		configevt->popup.bounds = bz_calculate_popup_position(bzsurf->xdgpopup->positioner);
-		// Popups treat these bounds as "relative to the parent".
-		bzsurf->renderable.compositor_bounds.x = configevt->popup.bounds->x;
-		bzsurf->renderable.compositor_bounds.y = configevt->popup.bounds->y;
-		// (renderable's w/h are computed from window geometry or buff size when content update applied.)
-
-		xdg_popup_send_configure(
-			bzsurf->xdgpopup->resource,
-			configevt->popup.bounds->x,
-			configevt->popup.bounds->y,
-			configevt->popup.bounds->w,
-			configevt->popup.bounds->h
+			configevt->toplevel.max_size.w,
+			configevt->toplevel.max_size.h
 		);
 	}
 
-	bz_list_append(xdgsurface->pending_configures, configevt);
-	xdg_surface_send_configure(xdgsurface->resource, configevt->serial);
-	return;
+	// TODO-dl??: Set window capabilities..? (can be tested with foot)
+	// struct wl_array caps;
+	// wl_array_init(&caps);
+	// uint32_t *c1 = wl_array_add(&caps, sizeof(uint32_t));
+	// *c1 = XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN;
+	// uint32_t *c2 = wl_array_add(&caps, sizeof(uint32_t));
+	// *c2 = XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE;
+	// xdg_toplevel_send_wm_capabilities(bzsurf->xdgtoplevel->resource, &caps);
+	// wl_array_release(&caps);
 
-	null_toplevel:
-	null_popup:
-		free(configevt);
-	configevt_alloc_failed:
-		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to send initial configure sequence.");
+	xdg_toplevel_send_configure(
+		bzsurf->xdgtoplevel->resource,
+		configevt->toplevel.recommended_size.w,
+		configevt->toplevel.recommended_size.h,
+		&configevt->toplevel.states
+	);
+
+	bz_list_append(bzsurf->xdgsurface->pending_configures, configevt);
+	xdg_surface_send_configure(bzsurf->xdgsurface->resource, configevt->serial);
+}
+
+void bz_xdg_surface_configure_popup(struct bz_surface *bzsurf)
+{
+	// Safety checks
+	if (bzsurf->xdgpopup == nullptr) {
+		bz_warn(BZ_LOG_WL_XDG_SHELL, "XDG popup object does not exist on the surface.");
+		wl_resource_post_error(bzsurf->xdgsurface->resource, XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
+			"XDG popup object does not exist on the surface.");
+		return;
+	}
+
+	struct wl_client *client = wl_resource_get_client(bzsurf->resource);
+
+	// Allocate our configure event
+	struct bz_xdg_surface_configure *configevt = calloc(1, sizeof(*configevt));
+	if (configevt == nullptr) {
+		wl_client_post_no_memory(client);
+		bz_error(BZ_LOG_WL_XDG_SHELL, "Failed to send popup configuration sequence.");
+		return;
+	}
+
+	// Assign our initial state
+	configevt->serial = wl_display_next_serial(wl_client_get_display(client));
+	configevt->type = BZ_XDG_SURF_POPUP;
+	configevt->popup.bounds = bz_calculate_popup_position(bzsurf->xdgpopup->positioner);
+	// Popups treat these bounds as "relative to the parent".
+	bzsurf->renderable.compositor_bounds.x = configevt->popup.bounds->x;
+	bzsurf->renderable.compositor_bounds.y = configevt->popup.bounds->y;
+	// (renderable's w/h are computed from window geometry or buff size when content update applied.)
+
+	xdg_popup_send_configure(
+		bzsurf->xdgpopup->resource,
+		configevt->popup.bounds->x,
+		configevt->popup.bounds->y,
+		configevt->popup.bounds->w,
+		configevt->popup.bounds->h
+	);
+
+	bz_list_append(bzsurf->xdgsurface->pending_configures, configevt);
+	xdg_surface_send_configure(bzsurf->xdgsurface->resource, configevt->serial);
 }
 
 static struct bz_rect *bz_calculate_popup_position(struct bz_xdg_positioner *positioner)

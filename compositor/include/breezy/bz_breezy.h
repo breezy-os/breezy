@@ -101,11 +101,17 @@ struct bz_window_mgmt {
 
 	struct bz_surface *pointer_focus;  // nullptr if cursor isn't above a surface
 	struct bz_position last_cursor_loc;
+
+	struct bz_section *root_tile;
 };
 
 struct bz_user_config {
 	char *config_dir;
 	GLuint bg_texture;
+
+	uint32_t output_scale;
+	enum wl_output_transform output_transform;
+	int tile_gap;
 };
 
 

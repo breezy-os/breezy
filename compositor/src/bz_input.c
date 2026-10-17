@@ -164,35 +164,19 @@ static void bz_input_process_pointer_motion_event(
 	// Check for surface enter/leave events
 	bz_mgmt_update_pointer_position(&breezy->window_mgmt, &breezy->gl.cursor);
 
-	// If we're in "super" mode, then drag the current window.
-	// Otherwise, sent the action into the client.
-	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE);
-	if (super_held) {
-		// TODO-dl13 : This is all temporary nonsense. It'll be removed when we add tiling.
-		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
-		struct bz_surface *parent_surf = bz_get_root_surface(focused_surf);
-		if (parent_surf != nullptr && parent_surf->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
-			int32_t cursor_move_x = breezy->gl.cursor.compositor_bounds.x - start_x;
-			int32_t cursor_move_y = breezy->gl.cursor.compositor_bounds.y - start_y;
-			parent_surf->renderable.compositor_bounds.x += cursor_move_x;
-			parent_surf->renderable.compositor_bounds.y += cursor_move_y;
-		}
-
-	} else {
-		// Send motion events to all the focused surface's wl_pointers.
-		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
-		if (focused_surf != nullptr) {
-			uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
-			wl_fixed_t x_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.render_bounds.x);
-			wl_fixed_t y_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.render_bounds.y);
-			struct wl_client *client = wl_resource_get_client(focused_surf->resource);
-			struct bz_client *client_data = wl_client_get_user_data(client);
-			struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
-				struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
-					wl_pointer_send_motion(pointer, timestamp, x_pos, y_pos);
-					if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
-						wl_pointer_send_frame(pointer);
-					}
+	// Send motion events to all the focused surface's wl_pointers.
+	struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
+	if (focused_surf != nullptr) {
+		uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
+		wl_fixed_t x_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.render_bounds.x);
+		wl_fixed_t y_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.render_bounds.y);
+		struct wl_client *client = wl_resource_get_client(focused_surf->resource);
+		struct bz_client *client_data = wl_client_get_user_data(client);
+		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
+			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
+				wl_pointer_send_motion(pointer, timestamp, x_pos, y_pos);
+				if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
+					wl_pointer_send_frame(pointer);
 				}
 			}
 		}

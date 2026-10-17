@@ -18,7 +18,9 @@ bool bz_sizes_are_equal(struct bz_size *s1, struct bz_size *s2);
 
 bool bz_rects_are_equal(struct bz_rect *r1, struct bz_rect *r2);
 bool bz_dbl_rects_are_equal(struct bz_rect_dbl *r1, struct bz_rect_dbl *r2);
+struct bz_rect *bz_clone_rect(struct bz_rect *source); // TODO-dl13: Test this
 struct bz_rect_dbl *bz_clone_rect_dbl(struct bz_rect_dbl *source);
+struct bz_rect *bz_split_rect(struct bz_rect *source, float h_split, float v_split, int32_t cut_size); // TODO-dl13: Test this
 bool bz_contains_point(struct bz_rect *rect, struct bz_position *point);
 
 struct bz_size *bz_clone_size(struct bz_size *source);

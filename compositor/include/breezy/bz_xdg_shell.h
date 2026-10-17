@@ -68,7 +68,9 @@ struct bz_xdg_surface {
 };
 
 void bz_xdg_surface_dtor(struct wl_resource *data);
-void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surface *bzsurf);
+void bz_xdg_surface_initial_configure(struct bz_surface *bzsurf);
+void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf);
+void bz_xdg_surface_configure_popup(struct bz_surface *bzsurf);
 
 
 // -- xdg_toplevel --

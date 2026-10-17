@@ -236,8 +236,8 @@ static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct
 	snprintf(description, desc_len, "%s %s (%s)", conn_data->make, conn_data->model, name);
 
 	// Set all values
-	out->scale = 210; // Numerator over 120 (fractional scale protocol support)
-	out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	out->scale = breezy->user_config.output_scale; // Numerator over 120 (fractional scale protocol support)
+	out->transform = breezy->user_config.output_transform;
 	out->output_bounds = (struct bz_rect){ .x = 0, .y = 0, .w = mode->hdisplay, .h = mode->vdisplay };
 	out->compositor_bounds = (struct bz_rect){
 		.x = out->output_bounds.x / (out->scale/120.0),

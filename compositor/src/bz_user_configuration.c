@@ -36,6 +36,10 @@ int bz_user_config_initialize(struct bz_user_config *conf)
 		return 1;
 	}
 
+	conf->output_scale = 210; // Numerator over 120 (fractional scale protocol support)
+	conf->output_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	conf->tile_gap = 10;
+
 	return 0;
 }
 

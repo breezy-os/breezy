@@ -126,6 +126,7 @@ struct bz_surface {
 	struct bz_wp_viewport *viewport; // Nullable
 	struct bz_wp_fractional_scale *fractional_scale; // Nullable
 	bool appears_focused;
+	struct bz_section *section; // Location in the tiled layout
 
 	struct bz_list *popups; // List of "struct bz_xdg_popup *"
 };

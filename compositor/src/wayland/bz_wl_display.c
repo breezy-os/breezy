@@ -1013,6 +1013,8 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 			&& bzsurf->pending_state->buffer == nullptr
 			// Also checking active because user might commit a NULL buffer to clear the surface.
 			&& bzsurf->active_state->buffer == nullptr
+			// Make sure it's not already reserving space
+			&& bzsurf->section == nullptr
 	) {
 		if (bzsurf->xdgsurface == nullptr) {
 			bz_error(BZ_LOG_WL_DISPLAY,
@@ -1022,7 +1024,8 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 				"XDG surface object does not exist on the wl_surface.");
 			return;
 		}
-		bz_xdg_surface_initial_configure(client, bzsurf);
+		bz_mgmt_place_window(client_data->breezy, bzsurf);
+		bz_xdg_surface_initial_configure(bzsurf);
 	}
 
 	return;
@@ -1601,7 +1604,6 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 		wl_buffer_send_release(surface->active_state->buffer);
 
 		// Since the surface was just mapped (and therefore displayed), let's focus the surface
-		// TODO-dl13 : Also consider wlr_layer_surfaces
 		if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL || surface->role == BZ_SURF_ROLE_XDG_POPUP) {
 			struct wl_client *client = wl_resource_get_client(surface->resource);
 			struct bz_client *client_data = wl_client_get_user_data(client);
