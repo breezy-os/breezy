@@ -123,6 +123,15 @@ bool bz_contains_point(struct bz_rect *rect, struct bz_position *point)
 		   (normal_pos.y <= point->y) && (point->y <= normal_pos.y + normal_size.h);
 }
 
+struct bz_rect bz_get_bounding_rect(struct bz_rect *r1, struct bz_rect *r2)
+{
+	int32_t left   = bz_min(r1->x, r2->x);
+	int32_t right  = bz_max(r1->x + r1->w, r2->x + r2->w);
+	int32_t top    = bz_min(r1->y, r2->y);
+	int32_t bottom = bz_max(r1->y + r1->h, r2->y + r2->h);
+	return (struct bz_rect){ .x = left, .y = top, .w = right - left, .h = bottom - top };
+}
+
 struct bz_size *bz_clone_size(struct bz_size *source)
 {
 	if (source == nullptr) { return nullptr; }

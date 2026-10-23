@@ -2,6 +2,7 @@
 #define BZ_LIST_H
 // #################################################################################################
 
+#include <stdint.h>
 
 struct bz_node {
 	void *data;
@@ -12,7 +13,7 @@ struct bz_node {
 struct bz_list {
 	struct bz_node *head;
 	struct bz_node *tail;
-	int length;
+	uint32_t length;
 };
 
 #define bz_list_foreach(item, list) \
@@ -26,6 +27,8 @@ struct bz_list {
 struct bz_list *bz_list_create();
 int bz_list_append(struct bz_list *list, void *data);
 int bz_list_insert(struct bz_list *list, void *data, void *after_data);
+// TODO-dl13: test
+int bz_list_insert_list(struct bz_list *list, struct bz_list *data_list, void *after_data);
 void *bz_list_shift(struct bz_list *list);
 void *bz_list_pop(struct bz_list *list);
 int bz_list_replace(struct bz_list *list, void *search_data, void *replacement, void (*free_data)(void *));

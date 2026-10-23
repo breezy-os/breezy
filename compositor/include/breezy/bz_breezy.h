@@ -111,7 +111,7 @@ struct bz_user_config {
 
 	uint32_t output_scale;
 	enum wl_output_transform output_transform;
-	int tile_gap;
+	uint32_t tile_gap;
 };
 
 

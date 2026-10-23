@@ -6,6 +6,12 @@
 #include "./breezy/bz_logger.h"
 
 
+static void bz_list_link_nodes(struct bz_node *first, struct bz_node *second)
+{
+	first->next = second;
+	second->prev = first;
+}
+
 /**
  * Creates and returns a new linked list. The caller is expected to call bz_list_free() when they
  * are finished with the list. Returns a nullptr if the list creation fails for any reason, such as
@@ -54,7 +60,6 @@ int bz_list_append(struct bz_list *list, void *data)
 
 	return 0;
 }
-
 /**
  * Inserts an item after the provided "after_data" in the list. If "after_data" is null, then
  * the new item is inserted at the beginning. If "after_data" cannot be found in the list, the new
@@ -135,6 +140,91 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
 
 	// Failed to find after_data in the list.
 	return -2;
+}
+
+/**
+ * Inserts multiple items after the provided "after_data" in the list. If "after_data" is null, then
+ * the new items are inserted at the beginning. If "after_data" cannot be found in the list, the new
+ * items are not inserted, and a negative return value is given.
+ *
+ * The original "data_list" is emptied as a result of this operation, but is not freed.
+ *
+ * A return value of 0 indicates success, and a negative value indicates failure.
+ *
+ * Return values:
+ *   0: Insertion was successful!
+ *   -1: Provided list was not initialized
+ *   -2: Failed to find "after_data" in the list
+ *   -3: Failed to find "after_data" in the list
+ */
+int bz_list_insert_list(struct bz_list *list, struct bz_list *data_list, void *after_data)
+{
+	// Validate parameters
+	if (list == nullptr) {
+		bz_error(BZ_LOG_LIST, "Insertion failed: list was not initialized.");
+		return -1;
+	}
+	if (data_list == nullptr) {
+		bz_error(BZ_LOG_LIST, "Insertion failed: data_list was not initialized.");
+		return -2;
+	}
+
+	// Nothing to append
+	if (data_list->length == 0) {
+		goto clear_and_clean_exit;
+	}
+
+	// Target list was empty; just replace it.
+	if (list->length == 0) {
+		list->head = data_list->head;
+		list->tail = data_list->tail;
+		list->length = data_list->length;
+		goto clear_and_clean_exit;
+	}
+
+	// Insert at the beginning if "after_data" is null
+	if (after_data == nullptr) {
+		// The last item of data_list needs to point to the first item of list
+		bz_list_link_nodes(data_list->tail, list->head);
+
+		// The new head of the list is the start of data_list.
+		list->head = data_list->head;
+		list->length += data_list->length;
+
+		goto clear_and_clean_exit;
+	}
+
+	// Iterate over the list, looking for "after_data"
+	struct bz_node *curr = list->head;
+	while (curr != nullptr) {
+		// Not the node we're looking for. Move along.
+		if (curr->data != after_data) {
+			curr = curr->next;
+			continue;
+		}
+
+		struct bz_node *next = curr->next;
+		// Link the found node with the start of the data_list.
+		bz_list_link_nodes(curr, data_list->head);
+		// Link the end of the data_list as appropriate based on if we've reached the end of list.
+		if (next == nullptr) { list->tail = data_list->tail; }
+		else                 { bz_list_link_nodes(data_list->tail, next); }
+		// Update the overall list length
+		list->length += data_list->length;
+
+		goto clear_and_clean_exit;
+	}
+
+	// Failed to find after_data in the list.
+	return -3;
+
+	clear_and_clean_exit:
+		// Empty the data list without freeing anything.
+		data_list->head = nullptr;
+		data_list->tail = nullptr;
+		data_list->length = 0;
+
+		return 0; // Success!
 }
 
 /**

@@ -293,6 +293,9 @@ static void bz_input_process_kb_event(
 		return;
 	}
 
+	struct bz_position ping_coord;
+	struct bz_section *pinged_section;
+
 	// Now handle all Breezy keycombos (ie, those with "super")
 	if (super_held && press_state == XKB_KEY_DOWN) {
 		switch (xkb_keysym) {
@@ -309,6 +312,40 @@ static void bz_input_process_kb_event(
 			return;
 		case XKB_KEY_q:
 			bz_mgmt_close_active_window(&breezy->window_mgmt);
+			return;
+
+		// Move application and focus
+		case XKB_KEY_Up: case XKB_KEY_k:
+			ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, BZ_UP);
+			pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
+			if (pinged_section != nullptr) {
+				pinged_section = bz_mgmt_get_nearest_window(pinged_section);
+				bz_mgmt_focus_window(breezy, pinged_section->window);
+			}
+			return;
+		case XKB_KEY_Down: case XKB_KEY_j:
+			ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, BZ_DOWN);
+			pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
+			if (pinged_section != nullptr) {
+				pinged_section = bz_mgmt_get_nearest_window(pinged_section);
+				bz_mgmt_focus_window(breezy, pinged_section->window);
+			}
+			return;
+		case XKB_KEY_Left: case XKB_KEY_h:
+			ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, BZ_LEFT);
+			pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
+			if (pinged_section != nullptr) {
+				pinged_section = bz_mgmt_get_nearest_window(pinged_section);
+				bz_mgmt_focus_window(breezy, pinged_section->window);
+			}
+			return;
+		case XKB_KEY_Right: case XKB_KEY_l:
+			ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, BZ_RIGHT);
+			pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
+			if (pinged_section != nullptr) {
+				pinged_section = bz_mgmt_get_nearest_window(pinged_section);
+				bz_mgmt_focus_window(breezy, pinged_section->window);
+			}
 			return;
 
 		default:
