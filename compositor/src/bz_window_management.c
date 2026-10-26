@@ -1,6 +1,7 @@
 
 #include "breezy/bz_window_management.h"
 
+#include <limits.h>
 #include <stdlib.h>
 
 #include <wayland-server.h>
@@ -461,6 +462,10 @@ void bz_mgmt_focus_window(struct bz_breezy *breezy, struct bz_surface *surface)
 	if (current_focus == surface) {
 		return; // Nothing to do.
 	}
+	if (surface == nullptr) {
+		bz_warn(BZ_LOG_WINDOW_MGMT, "Attempted to focus null surface.");
+		return; // Nothing to do.
+	}
 
 	// Update cursor position and focus
 	struct bz_position new_cursor_location = {
@@ -599,8 +604,8 @@ struct bz_section *bz_mgmt_get_leaf_at_coordinates(
 		}
 	}
 
-	// If our leafmost section is a window, return it as-is.
-	if (leafmost_section->type == BZ_SECTION_WINDOW) {
+	// If our leafmost section is a window or divider, return it as-is.
+	if (leafmost_section->type == BZ_SECTION_WINDOW || leafmost_section->type == BZ_SECTION_DIVIDER) {
 		return leafmost_section;
 	}
 
@@ -649,7 +654,8 @@ struct bz_section *bz_mgmt_get_leaf_at_coordinates(
 }
 
 struct bz_section *bz_mgmt_get_nearest_window(
-	struct bz_section *section
+	struct bz_section *section,
+	struct bz_position coords
 ) {
 	if (section->type == BZ_SECTION_WINDOW) {
 		return section;
@@ -657,10 +663,42 @@ struct bz_section *bz_mgmt_get_nearest_window(
 	if (section->type == BZ_SECTION_DIVIDER) {
 		struct bz_section *to_return = section->divider->section_before;
 		bz_mgmt_free_section(section, false);
-		return to_return;
+		return bz_mgmt_get_nearest_window(to_return, coords);
+	}
+	if (section->type == BZ_SECTION_SPLIT) {
+		int min_dist = INT_MAX;
+		struct bz_section *closest = nullptr;
+		struct bz_section *inner; bz_list_foreach(inner, section->split->sections) {
+			int distance = section->split->direction == BZ_SPLIT_DIR_ROW
+				? abs(inner->bounds.x + inner->bounds.w/2 - coords.x)
+				: abs(inner->bounds.y + inner->bounds.h/2 - coords.y);
+			if (distance < min_dist || closest == nullptr) {
+				closest = inner;
+				min_dist = distance;
+			} else {
+				return bz_mgmt_get_nearest_window(closest, coords);
+			}
+		}
+		// In case the final item in the loop is the closest.
+		return bz_mgmt_get_nearest_window(closest, coords);
 	}
 	bz_error(BZ_LOG_WINDOW_MGMT, "Unsupported section given to get_nearest_window.");
 	return nullptr;
+}
+
+struct bz_section *bz_mgmt_get_prior_section_in_split(
+	struct bz_split *split,
+	struct bz_position coords
+) {
+	struct bz_section *prev = nullptr;
+	struct bz_section *inner; bz_list_foreach(inner, split->sections) {
+		int delta = split->direction == BZ_SPLIT_DIR_ROW
+			? inner->bounds.x + inner->bounds.w/2 - coords.x
+			: inner->bounds.y + inner->bounds.h/2 - coords.y;
+		if (delta > 0) { break; }
+		prev = inner;
+	}
+	return prev;
 }
 
 /** Creates and returns the section, but doesn't add it anywhere. */
@@ -682,9 +720,37 @@ struct bz_section *bz_mgmt_create_new_window_section(
 }
 
 /**
+ * The current root tile becomes a child to a new root tile. The new root tile is then returned. The
+ * current root must be a split or else this method returns a nullptr and is considered an error.
+ * The new split will be created in the opposite direction, and have only a single section in it.
+ */
+struct bz_section *bz_mgmt_convert_root_into_child_of_new_split(
+	struct bz_window_mgmt *mgmt
+) {
+	struct bz_section *initial_root = mgmt->root_tile;
+	if (initial_root->type != BZ_SECTION_SPLIT || initial_root->split == nullptr) {
+		bz_error(BZ_LOG_WINDOW_MGMT, "Attempted to convert a non-split root into a child of a new split.");
+		return nullptr;
+	}
+
+	struct bz_section *new_root = calloc(1, sizeof(*new_root));
+	struct bz_split *new_split = calloc(1, sizeof(*new_split));
+	new_root->bounds = initial_root->bounds;
+	new_root->type = BZ_SECTION_SPLIT;
+	new_root->split = new_split;
+	new_split->section = new_root;
+	new_split->direction = initial_root->split->direction == BZ_SPLIT_DIR_COLUMN ? BZ_SPLIT_DIR_ROW : BZ_SPLIT_DIR_COLUMN;
+	new_split->sections = bz_list_create();
+	bz_mgmt_link_to_parent_split(new_split, initial_root, nullptr);
+
+	mgmt->root_tile = new_root;
+	return new_root; // TODO-dl13: return status integer..?
+}
+
+/**
  * Converts the given section from a window into a split. If it's not a window, this is a no-op.
  */
-void bz_mgmt_convert_window_to_split(struct bz_section *section)
+void bz_mgmt_convert_window_to_split(struct bz_user_config *config, struct bz_section *section)
 {
 	// No-op if it's not a window.
 	if (section->type != BZ_SECTION_WINDOW) {
@@ -698,9 +764,15 @@ void bz_mgmt_convert_window_to_split(struct bz_section *section)
 	section->type = BZ_SECTION_SPLIT;
 	section->split = calloc(1, sizeof(*section->split));
 	if (section->parent != nullptr) {
+		// If this is a non-root split, we split in the opposite direction of the parent split.
 		section->split->direction = section->parent->direction == BZ_SPLIT_DIR_ROW ? BZ_SPLIT_DIR_COLUMN : BZ_SPLIT_DIR_ROW;
 	} else {
+		// If this is the root split, we split based on dimensions, and also shrink the bounds and x/y by the gap size.
 		section->split->direction = section->bounds.w > section->bounds.h ? BZ_SPLIT_DIR_ROW : BZ_SPLIT_DIR_COLUMN;
+		section->bounds.x += config->tile_gap;
+		section->bounds.y += config->tile_gap;
+		section->bounds.w -= (config->tile_gap + config->tile_gap);
+		section->bounds.h -= (config->tile_gap + config->tile_gap);
 	}
 	section->split->sections = bz_list_create();
 	section->split->section = section;
@@ -732,6 +804,32 @@ void bz_mgmt_free_section(
 	free(section);
 }
 
+void bz_mgmt_drag_divider(
+	struct bz_user_config *config,
+	struct bz_divider *divider,
+	double distance
+) {
+	struct bz_section *before = divider->section_before;
+	struct bz_section *after = divider->section_after;
+	if (divider->direction == BZ_DIVIDER_HORIZONTAL) {
+		if (before->bounds.h + distance < 200 || after->bounds.h - distance < 200) {
+			return; // Enforces a minimum size.
+		}
+		before->bounds.h += distance;
+		after->bounds.y += distance;
+		after->bounds.h -= distance;
+	} else {
+		if (before->bounds.w + distance < 200 || after->bounds.w - distance < 200) {
+			return; // Enforces a minimum size.
+		}
+		before->bounds.w += distance;
+		after->bounds.x += distance;
+		after->bounds.w -= distance;
+	}
+	bz_mgmt_redistribute_section(config, before, before->bounds);
+	bz_mgmt_redistribute_section(config, after, after->bounds);
+}
+
 /**
  * Grows or shrinks the given section to fit into the new bounds. Works recursively for split
  * sections, and reconfigures any toplevels as appropriate.
@@ -756,6 +854,7 @@ void bz_mgmt_redistribute_section(
 			? inner->bounds.h
 			: inner->bounds.w;
 	}
+	total_size += (config->tile_gap * (section->split->sections->length-1));
 
 	// Step 2: Adjust the bounds of each section to be their percentage of the total, making sure we
 	//   don't go over. Also update the position and the "other dimension" as we go.
@@ -837,6 +936,7 @@ void bz_mgmt_unlink_from_parent_split(
  * is turned into the remaining child section. If the split has many sections, this is a no-op.
  */
 void bz_mgmt_collapse_split(
+	struct bz_user_config *config,
 	struct bz_split *split
 ) {
 	if (split == nullptr || split->sections->length > 1) {
@@ -862,6 +962,16 @@ void bz_mgmt_collapse_split(
 			remaining_sect->split->section = root_sect;
 		}
 		free(remaining_sect);
+
+		// Remove the outer margin (if there's just one window left)
+		if (root_sect->type == BZ_SECTION_WINDOW) {
+			root_sect->bounds.x -= config->tile_gap;
+			root_sect->bounds.y -= config->tile_gap;
+			root_sect->bounds.w += config->tile_gap + config->tile_gap;
+			root_sect->bounds.h += config->tile_gap + config->tile_gap;
+			bz_mgmt_redistribute_section(config, root_sect, root_sect->bounds);
+		}
+
 		return;
 	}
 
@@ -941,7 +1051,7 @@ void bz_mgmt_add_section_to_section(
 	struct bz_section *new_section,
 	struct bz_section *after_section
 ) {
-	bz_mgmt_convert_window_to_split(target_section); // no-op if target is already a split.
+	bz_mgmt_convert_window_to_split(config, target_section); // no-op if target is already a split.
 	// If we just created a split from a window, then we need to make sure to update the original
 	//   after_section pointer to be the new, inner window section.
 	if (after_section == target_section) {
@@ -968,7 +1078,44 @@ void bz_mgmt_remove_section_from_split(
 	struct bz_split *parent_split = to_remove->parent;
 	bz_mgmt_unlink_from_parent_split(to_remove);
 	bz_mgmt_redistribute_section(config, parent_split->section, parent_split->section->bounds);
-	bz_mgmt_collapse_split(parent_split); // no-op if not needed
+	bz_mgmt_collapse_split(config, parent_split); // no-op if not needed
+}
+
+/**
+ * Moves a section from its parent to a different section, properly collapsing everything and
+ * redistributing it as needed. It's a similar process to calling "remove_section_from_split"
+ * followed by "add_section_to_section", but the redistribute / collapse step is saved until
+ * the end.
+*
+ * If the given section doesn't have a parent split, this is a no-op.
+ */
+void bz_mgmt_move_section(
+	struct bz_user_config *config,
+	struct bz_section *destination_parent,
+	struct bz_section *section,
+	struct bz_section *after_section
+) {
+	if (section->parent == nullptr) {
+		return;
+	}
+
+	// Prepare the destination
+	bz_mgmt_convert_window_to_split(config, destination_parent); // no-op if target is already a split.
+	// If we just created a split from a window, then we need to make sure to update the original
+	//   after_section pointer to be the new, inner window section.
+	if (after_section == destination_parent) {
+		after_section = destination_parent->split->sections->head->data;
+	}
+
+	// Move from source to destination
+	struct bz_section *source_parent = section->parent->section;
+	bz_mgmt_unlink_from_parent_split(section);
+	bz_mgmt_link_to_parent_split(destination_parent->split, section, after_section);
+
+	// Clean up
+	bz_mgmt_redistribute_section(config, destination_parent, destination_parent->bounds);
+	bz_mgmt_redistribute_section(config, source_parent, source_parent->bounds);
+	bz_mgmt_collapse_split(config, source_parent->split); // no-op if not needed
 }
 
 /** No-op when section is not a window. */

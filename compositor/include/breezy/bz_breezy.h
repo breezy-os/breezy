@@ -101,6 +101,7 @@ struct bz_window_mgmt {
 
 	struct bz_surface *pointer_focus;  // nullptr if cursor isn't above a surface
 	struct bz_position last_cursor_loc;
+	struct bz_section *resize_divider; // nullptr if not actively resizing
 
 	struct bz_section *root_tile;
 };

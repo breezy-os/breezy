@@ -40,6 +40,10 @@ void *bz_list_find(struct bz_list *list, void *match_data, bool (*item_matches)(
 bool bz_list_contains(struct bz_list *list, void *match_data);
 int bz_list_get_index(struct bz_list *list, void *item);
 void *bz_list_get_neighbor(struct bz_list *list, void *item);
+// TODO-dl13: test
+void *bz_list_get_item_before(struct bz_list *list, void *item);
+// TODO-dl13: test
+void *bz_list_get_item_after(struct bz_list *list, void *item);
 int bz_list_move_to_end(struct bz_list *list_src, struct bz_list *list_dest);
 int bz_list_move_item_to_end(struct bz_list *list, void *data);
 struct bz_list *bz_list_clone(struct bz_list *list, void *(*clone_data)(void *));

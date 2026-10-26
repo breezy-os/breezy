@@ -603,6 +603,10 @@ void *bz_list_get_neighbor(struct bz_list *list, void *item)
 		return nullptr;
 	}
 
+	if (list->head == nullptr) {
+		return nullptr;
+	}
+
 	// "item" is first in the list
 	if (list->head->data == item) {
 		return (list->head->next == nullptr)
@@ -620,6 +624,71 @@ void *bz_list_get_neighbor(struct bz_list *list, void *item)
 
 		// Advance the loop
 		prev = curr;
+		curr = curr->next;
+	}
+
+	// Match not found.
+	return nullptr;
+}
+
+/**
+ * Returns the item that comes before "item" in list. If "item" is the first item in the list, or
+ * "item" is not found, returns nullptr.
+ */
+void *bz_list_get_item_before(struct bz_list *list, void *item)
+{
+	if (list == nullptr) {
+		bz_warn(BZ_LOG_LIST, "Get item before failed: list was not initialized.");
+		return nullptr;
+	}
+
+	if (list->head == nullptr) {
+		return nullptr;
+	}
+
+	// "item" is first in the list
+	if (list->head->data == item) {
+		return nullptr;
+	}
+
+	// Search for "item", keeping track of the previous node to return.
+	struct bz_node *prev = list->head;
+	struct bz_node *curr = prev->next;
+	while (curr != nullptr) {
+		if (curr->data == item) {
+			return prev->data;
+		}
+
+		// Advance the loop
+		prev = curr;
+		curr = curr->next;
+	}
+
+	// Match not found.
+	return nullptr;
+}
+
+/**
+ * Returns the item that comes after "item" in list. If "item" is the last item in the list, or
+ * "item" is not found, returns nullptr.
+ */
+void *bz_list_get_item_after(struct bz_list *list, void *item)
+{
+	if (list == nullptr) {
+		bz_warn(BZ_LOG_LIST, "Get item after failed: list was not initialized.");
+		return nullptr;
+	}
+
+	if (list->head == nullptr) {
+		return nullptr;
+	}
+
+	// Search for "item"
+	struct bz_node *curr = list->head;
+	while (curr != nullptr) {
+		if (curr->data == item) {
+			return curr->next != nullptr ? curr->next->data : nullptr;
+		}
 		curr = curr->next;
 	}
 

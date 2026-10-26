@@ -76,20 +76,24 @@ struct bz_divider {
 // Core Operations
 struct bz_position bz_mgmt_get_coords_relative_to_active_window(struct bz_breezy *breezy, enum bz_direction direction);
 struct bz_section *bz_mgmt_get_leaf_at_coordinates(struct bz_section *root, struct bz_position coords);
-struct bz_section *bz_mgmt_get_nearest_window(struct bz_section *section);
+struct bz_section *bz_mgmt_get_nearest_window(struct bz_section *section, struct bz_position coords);
+struct bz_section *bz_mgmt_get_prior_section_in_split(struct bz_split *split, struct bz_position coords);
 struct bz_section *bz_mgmt_create_new_window_section(struct bz_rect bounds, struct bz_surface *surface);
-void bz_mgmt_convert_window_to_split(struct bz_section *section);
+struct bz_section *bz_mgmt_convert_root_into_child_of_new_split(struct bz_window_mgmt *mgmt);
+void bz_mgmt_convert_window_to_split(struct bz_user_config *config, struct bz_section *section);
 void bz_mgmt_free_section(struct bz_section *section, bool free_recursively);
+void bz_mgmt_drag_divider(struct bz_user_config *config, struct bz_divider *divider, double distance);
 void bz_mgmt_redistribute_section(struct bz_user_config *config, struct bz_section *section, struct bz_rect bounds);
 void bz_mgmt_link_to_parent_split(struct bz_split *parent_split, struct bz_section *child_section, struct bz_section *after_section);
 void bz_mgmt_unlink_from_parent_split(struct bz_section *child_section);
-void bz_mgmt_collapse_split(struct bz_split *split);
+void bz_mgmt_collapse_split(struct bz_user_config *config, struct bz_split *split);
 void bz_mgmt_flatten_similar_nested_splits(struct bz_split *parent);
 
 // Compound Operations
 struct bz_section *bz_mgmt_create_window_after_section(struct bz_user_config *config, struct bz_section *target_section, struct bz_surface *surface, struct bz_section *after_section);
 void bz_mgmt_add_section_to_section(struct bz_user_config *config, struct bz_section *target_section, struct bz_section *new_section, struct bz_section *after_section);
 void bz_mgmt_remove_section_from_split(struct bz_user_config *config, struct bz_section *to_remove);
+void bz_mgmt_move_section(struct bz_user_config *config, struct bz_section *destination_parent, struct bz_section *section, struct bz_section *after_section);
 void bz_mgmt_delete_section(struct bz_user_config *config, struct bz_section *section);
 
 // #################################################################################################

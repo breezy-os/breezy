@@ -38,6 +38,8 @@ static void bz_input_process_pointer_button_event(struct bz_breezy *breezy, stru
 static void bz_input_process_pointer_scroll_wheel_event(struct bz_breezy *breezy, struct libinput_event_pointer *pt_event);
 static bool bz_input_process_wheel_for_axis(struct libinput_event_pointer *pt_event, enum libinput_pointer_axis axis, struct bz_client *client_data);
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
+static void bz_input_move_active_window(struct bz_breezy *breezy, enum bz_direction direction);
+static void bz_input_focus_relative_window(struct bz_breezy *breezy, enum bz_direction direction);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
 
@@ -161,22 +163,32 @@ static void bz_input_process_pointer_motion_event(
 		}
 	}
 
-	// Check for surface enter/leave events
-	bz_mgmt_update_pointer_position(&breezy->window_mgmt, &breezy->gl.cursor);
+	// Check if we're resizing.
+	if (breezy->window_mgmt.resize_divider != nullptr) {
+		bz_mgmt_drag_divider(
+			&breezy->user_config,
+			breezy->window_mgmt.resize_divider->divider,
+			(breezy->window_mgmt.resize_divider->divider->direction == BZ_DIVIDER_HORIZONTAL) ? delta_y : delta_x
+		);
 
-	// Send motion events to all the focused surface's wl_pointers.
-	struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
-	if (focused_surf != nullptr) {
-		uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
-		wl_fixed_t x_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.render_bounds.x);
-		wl_fixed_t y_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.render_bounds.y);
-		struct wl_client *client = wl_resource_get_client(focused_surf->resource);
-		struct bz_client *client_data = wl_client_get_user_data(client);
-		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
-			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
-				wl_pointer_send_motion(pointer, timestamp, x_pos, y_pos);
-				if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
-					wl_pointer_send_frame(pointer);
+	} else {
+		// Check for surface enter/leave events
+		bz_mgmt_update_pointer_position(&breezy->window_mgmt, &breezy->gl.cursor);
+
+		// Send motion events to all the focused surface's wl_pointers.
+		struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
+		if (focused_surf != nullptr) {
+			uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
+			wl_fixed_t x_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.x - focused_surf->renderable.render_bounds.x);
+			wl_fixed_t y_pos = wl_fixed_from_int(breezy->window_mgmt.last_cursor_loc.y - focused_surf->renderable.render_bounds.y);
+			struct wl_client *client = wl_resource_get_client(focused_surf->resource);
+			struct bz_client *client_data = wl_client_get_user_data(client);
+			struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
+				struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
+					wl_pointer_send_motion(pointer, timestamp, x_pos, y_pos);
+					if (wl_resource_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION) {
+						wl_pointer_send_frame(pointer);
+					}
 				}
 			}
 		}
@@ -189,18 +201,17 @@ static void bz_input_process_pointer_button_event(
 	struct bz_breezy *breezy,
 	struct libinput_event_pointer *pt_event
 ) {
-	// Send button events to all the focused surface's wl_pointers.
+	bool is_pressed = libinput_event_pointer_get_button_state(pt_event) == LIBINPUT_BUTTON_STATE_PRESSED;
 	struct bz_surface *focused_surf = breezy->window_mgmt.pointer_focus;
 	if (focused_surf != nullptr) {
+		// Send button events to all the focused surface's wl_pointers.
 		struct wl_client *client = wl_resource_get_client(focused_surf->resource);
 		struct bz_client *client_data = wl_client_get_user_data(client);
 
 		uint32_t serial = wl_display_next_serial(client_data->breezy->wayland.display);
 		uint32_t timestamp = libinput_event_pointer_get_time(pt_event);
 		uint32_t button = libinput_event_pointer_get_button(pt_event);
-		uint32_t state = libinput_event_pointer_get_button_state(pt_event) == LIBINPUT_BUTTON_STATE_PRESSED
-			? WL_POINTER_BUTTON_STATE_PRESSED
-			: WL_POINTER_BUTTON_STATE_RELEASED;
+		uint32_t state = is_pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED;
 
 		struct bz_wl_seat *seat; bz_list_foreach(seat, client_data->seats) {
 			struct wl_resource *pointer; bz_list_foreach(pointer, seat->pointers) {
@@ -209,6 +220,19 @@ static void bz_input_process_pointer_button_event(
 					wl_pointer_send_frame(pointer);
 				}
 			}
+		}
+	} else {
+		if (is_pressed && breezy->window_mgmt.resize_divider == nullptr) {
+			// Since the pointer-focused surface is null, check if we're clicking on a divider
+			struct bz_section *sect = bz_mgmt_get_leaf_at_coordinates(
+				breezy->window_mgmt.root_tile,
+				breezy->window_mgmt.last_cursor_loc);
+			if (sect != nullptr && sect->type == BZ_SECTION_DIVIDER) {
+				breezy->window_mgmt.resize_divider = sect;
+			}
+		} else if (breezy->window_mgmt.resize_divider != nullptr) {
+			bz_mgmt_free_section(breezy->window_mgmt.resize_divider, false);
+			breezy->window_mgmt.resize_divider = nullptr;
 		}
 	}
 }
@@ -282,9 +306,10 @@ static void bz_input_process_kb_event(
 	const uint32_t xkb_keysym = xkb_state_key_get_one_sym(breezy->input.xkb_state, xkb_keycode);
 
 	// Figure out our modifier keys
-	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE);
-	const bool ctrl_held  = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE);
-	const bool alt_held   = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_ALT,  XKB_STATE_MODS_EFFECTIVE);
+	const bool super_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_LOGO,  XKB_STATE_MODS_EFFECTIVE);
+	const bool shift_held = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE);
+	const bool ctrl_held  = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_CTRL,  XKB_STATE_MODS_EFFECTIVE);
+	const bool alt_held   = xkb_state_mod_name_is_active(breezy->input.xkb_state, XKB_MOD_NAME_ALT,   XKB_STATE_MODS_EFFECTIVE);
 
 	// First, check for a VT switch. (The only hotkey that doesn't use "super".)
 	const int target_vt = bz_input_check_vt_change(ctrl_held, alt_held, xkb_keysym);
@@ -292,9 +317,6 @@ static void bz_input_process_kb_event(
 		bz_seat_change_vt(breezy, target_vt);
 		return;
 	}
-
-	struct bz_position ping_coord;
-	struct bz_section *pinged_section;
 
 	// Now handle all Breezy keycombos (ie, those with "super")
 	if (super_held && press_state == XKB_KEY_DOWN) {
@@ -315,36 +337,32 @@ static void bz_input_process_kb_event(
 			return;
 
 		// Move application and focus
-		case XKB_KEY_Up: case XKB_KEY_k:
-			ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, BZ_UP);
-			pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
-			if (pinged_section != nullptr) {
-				pinged_section = bz_mgmt_get_nearest_window(pinged_section);
-				bz_mgmt_focus_window(breezy, pinged_section->window);
+		case XKB_KEY_Up: case XKB_KEY_k: case XKB_KEY_K:
+			if (shift_held) {
+				bz_input_move_active_window(breezy, BZ_UP);
+			} else {
+				bz_input_focus_relative_window(breezy, BZ_UP);
 			}
 			return;
-		case XKB_KEY_Down: case XKB_KEY_j:
-			ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, BZ_DOWN);
-			pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
-			if (pinged_section != nullptr) {
-				pinged_section = bz_mgmt_get_nearest_window(pinged_section);
-				bz_mgmt_focus_window(breezy, pinged_section->window);
+		case XKB_KEY_Down: case XKB_KEY_j: case XKB_KEY_J:
+			if (shift_held) {
+				bz_input_move_active_window(breezy, BZ_DOWN);
+			} else {
+				bz_input_focus_relative_window(breezy, BZ_DOWN);
 			}
 			return;
-		case XKB_KEY_Left: case XKB_KEY_h:
-			ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, BZ_LEFT);
-			pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
-			if (pinged_section != nullptr) {
-				pinged_section = bz_mgmt_get_nearest_window(pinged_section);
-				bz_mgmt_focus_window(breezy, pinged_section->window);
+		case XKB_KEY_Left: case XKB_KEY_h: case XKB_KEY_H:
+			if (shift_held) {
+				bz_input_move_active_window(breezy, BZ_LEFT);
+			} else {
+				bz_input_focus_relative_window(breezy, BZ_LEFT);
 			}
 			return;
-		case XKB_KEY_Right: case XKB_KEY_l:
-			ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, BZ_RIGHT);
-			pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
-			if (pinged_section != nullptr) {
-				pinged_section = bz_mgmt_get_nearest_window(pinged_section);
-				bz_mgmt_focus_window(breezy, pinged_section->window);
+		case XKB_KEY_Right: case XKB_KEY_l: case XKB_KEY_L:
+			if (shift_held) {
+				bz_input_move_active_window(breezy, BZ_RIGHT);
+			} else {
+				bz_input_focus_relative_window(breezy, BZ_RIGHT);
 			}
 			return;
 
@@ -381,6 +399,103 @@ static void bz_input_process_kb_event(
 				}
 			}
 		}
+	}
+}
+
+static void bz_input_move_active_window(struct bz_breezy *breezy, enum bz_direction direction)
+{
+	// If there's just one (or zero) windows open, nothing to move.
+	if (breezy->window_mgmt.root_tile->type != BZ_SECTION_SPLIT) {
+		return;
+	}
+
+	// Figure out the current toplevel
+	struct bz_surface *active_surface = bz_mgmt_get_active_surface(&breezy->window_mgmt);
+	struct bz_surface *active_toplevel = bz_get_root_surface(active_surface);
+	if (active_toplevel == nullptr || active_toplevel->section == nullptr) {
+		return;
+	}
+
+	// Figure out some relevant sections
+	struct bz_section *active_section = active_toplevel->section;
+	struct bz_split *parent_split = active_section->parent;
+	bool is_parallel =
+		((direction == BZ_UP   || direction == BZ_DOWN)  && active_section->parent->direction == BZ_SPLIT_DIR_COLUMN) ||
+		((direction == BZ_LEFT || direction == BZ_RIGHT) && active_section->parent->direction == BZ_SPLIT_DIR_ROW);
+	struct bz_section *sibling_moving_into = nullptr;
+	if (is_parallel) {
+		sibling_moving_into = (direction == BZ_UP || direction == BZ_LEFT)
+			? bz_list_get_item_before(parent_split->sections, active_section)
+			: bz_list_get_item_after(parent_split->sections, active_section);
+	}
+
+	// If moving into a SIBLING WINDOW, and there are only two windows, swap the two.
+	if (parent_split->sections->length == 2 && sibling_moving_into != nullptr && sibling_moving_into->type == BZ_SECTION_WINDOW) {
+		struct bz_section *first_item = bz_list_shift(active_section->parent->sections);
+		bz_list_append(active_section->parent->sections, first_item);
+		bz_mgmt_redistribute_section(&breezy->user_config, active_section->parent->section, active_section->parent->section->bounds);
+		return;
+	}
+
+	// If moving into a SIBLING WINDOW, and there are many windows, convert the target into a split and join that split.
+	if (parent_split->sections->length > 2 && sibling_moving_into != nullptr && sibling_moving_into->type == BZ_SECTION_WINDOW) {
+		bz_mgmt_move_section(&breezy->user_config, sibling_moving_into, active_section, sibling_moving_into);
+		return;
+	}
+
+	// If moving into a SIBLING SPLIT, join the split, leaving the parent.
+	if (sibling_moving_into != nullptr && sibling_moving_into->type == BZ_SECTION_SPLIT) {
+		struct bz_position ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, direction);
+		struct bz_section *insert_after = bz_mgmt_get_prior_section_in_split(sibling_moving_into->split, ping_coord);
+		bz_mgmt_move_section(&breezy->user_config, sibling_moving_into, active_section, insert_after);
+		return;
+	}
+
+	// If moving perpendicular to the current split, join the grandparent split either before (when up/left)
+	//   or after (when down/right) the current parent.
+	if (!is_parallel) {
+		// Prep the grandparent. If the grandparent is null, then we must be at the root.
+		if (parent_split->section->parent == nullptr) {
+			bz_mgmt_convert_root_into_child_of_new_split(&breezy->window_mgmt);
+		}
+		struct bz_section *grandparent = parent_split->section->parent->section;
+		struct bz_section *insert_after = parent_split->section;
+		if (direction == BZ_UP || direction == BZ_LEFT) {
+			insert_after = bz_list_get_item_before(grandparent->split->sections, parent_split->section);
+		}
+		bz_mgmt_move_section(&breezy->user_config, grandparent, active_section, insert_after);
+		return;
+	}
+
+	// If moving parallel and OUT OF to the current split, join the great-grandparent split either
+	//   before (when up/left) or after (when down/right) the current grandparent.
+	if (is_parallel && sibling_moving_into == nullptr) {
+		// If the grandparent doesn't exist, we don't move.
+		if (parent_split->section->parent == nullptr) {
+			return;
+		}
+		struct bz_section *grandparent = parent_split->section->parent->section;
+		// If the GREAT-grandparent doesn't exist, we create it.
+		if (grandparent->parent == nullptr) {
+			bz_mgmt_convert_root_into_child_of_new_split(&breezy->window_mgmt);
+		}
+		struct bz_section *great_grandparent = grandparent->parent->section;
+		struct bz_section *insert_after = grandparent;
+		if (direction == BZ_UP || direction == BZ_LEFT) {
+			insert_after = bz_list_get_item_before(great_grandparent->split->sections, grandparent);
+		}
+		bz_mgmt_move_section(&breezy->user_config, great_grandparent, active_section, insert_after);
+		return;
+	}
+}
+
+static void bz_input_focus_relative_window(struct bz_breezy *breezy, enum bz_direction direction)
+{
+	struct bz_position ping_coord = bz_mgmt_get_coords_relative_to_active_window(breezy, direction);
+	struct bz_section *pinged_section = bz_mgmt_get_leaf_at_coordinates(breezy->window_mgmt.root_tile, ping_coord);
+	if (pinged_section != nullptr) {
+		pinged_section = bz_mgmt_get_nearest_window(pinged_section, ping_coord);
+		bz_mgmt_focus_window(breezy, pinged_section->window);
 	}
 }
 
