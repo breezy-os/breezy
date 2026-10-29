@@ -22,8 +22,6 @@
 
 static void bz_mgmt_free_section_recursively(struct bz_section *section);
 
-static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, void *resource);
-
 static void bz_mgmt_change_keyboard_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
 static void bz_mgmt_change_pointer_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
 static void bz_mgmt_update_focus_for_full_tree(struct bz_surface *surface, bool is_focused);
@@ -146,12 +144,6 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 
 	// Make sure it's a supported surface role
 	if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
-		struct wl_resource *toplevel_res = surface->xdgtoplevel->resource;
-
-		// Remove it when the surface is destroyed.
-		surface->disable_on_destroy.notify = bz_mgmt_untrack_surface_on_destroy;
-		wl_resource_add_destroy_listener(toplevel_res, &surface->disable_on_destroy);
-
 		// Focus the new window
 		struct bz_surface *orig_surf = bz_mgmt_get_active_surface(mgmt);
 		bz_mgmt_change_keyboard_focus(mgmt, orig_surf, surface);
@@ -165,12 +157,6 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 		bz_mgmt_update_pointer_position(mgmt, cursor);
 
 	} else if (surface->role == BZ_SURF_ROLE_XDG_POPUP) {
-		struct wl_resource *popup_res = surface->xdgpopup->resource;
-
-		// Remove it when the surface is destroyed.
-		surface->disable_on_destroy.notify = bz_mgmt_untrack_surface_on_destroy;
-		wl_resource_add_destroy_listener(popup_res, &surface->disable_on_destroy);
-
 		// Add it as the focused surface, clearing the previously focused surface
 		if (bz_mgmt_get_active_surface(mgmt) != nullptr) {
 			bz_mgmt_update_focus_for_full_tree(bz_mgmt_get_active_surface(mgmt), false);
@@ -206,13 +192,19 @@ int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt)
 }
 
 /** Handles surfaces closing by removing the surface from our global tracking list. */
-static void bz_mgmt_untrack_surface_on_destroy(struct wl_listener *listener, void *resource)
+void bz_mgmt_untrack_surface_on_destroy(struct bz_surface *surface_data)
 {
+	if (
+		surface_data->role != BZ_SURF_ROLE_XDG_TOPLEVEL &&
+		surface_data->role != BZ_SURF_ROLE_XDG_POPUP
+	) {
+		return; // We only track toplevels and popups.
+	}
+
 	bz_debug(BZ_LOG_WINDOW_MGMT, "Handling surface destroy.");
 
 	// Collect some useful references
-	struct bz_surface *surface_data = wl_container_of(listener, surface_data, disable_on_destroy);
-	struct wl_client *client = wl_resource_get_client(resource);
+	struct wl_client *client = wl_resource_get_client(surface_data->resource);
 	struct bz_client *client_data = wl_client_get_user_data(client);
 	struct bz_breezy *breezy = client_data->breezy;
 

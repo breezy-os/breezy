@@ -606,6 +606,9 @@ void bz_surface_dtor(struct wl_resource *data)
 {
 	struct bz_surface *bzsurf = wl_resource_get_user_data(data);
 
+	// Remove it from our window management functionality
+	bz_mgmt_untrack_surface_on_destroy(bzsurf);
+
 	// If this is destroying a child, remove it from its parent.
 	bz_sever_child_from_parent(bzsurf); // No-op if not a child.
 
@@ -1024,7 +1027,9 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 				"XDG surface object does not exist on the wl_surface.");
 			return;
 		}
-		bz_mgmt_place_window(client_data->breezy, bzsurf);
+		if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+			bz_mgmt_place_window(client_data->breezy, bzsurf);
+		}
 		bz_xdg_surface_initial_configure(bzsurf);
 	}
 

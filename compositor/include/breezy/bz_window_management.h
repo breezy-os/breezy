@@ -19,6 +19,7 @@ void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt);
 void bz_mgmt_place_window(struct bz_breezy *breezy, struct bz_surface *surface);
 void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface);
 int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt);
+void bz_mgmt_untrack_surface_on_destroy(struct bz_surface *surface_data);
 void bz_mgmt_notify_kb_enter(uint32_t enter_serial, uint32_t modifiers_serial, struct xkb_state *xkbstate, struct wl_resource *keyboard, struct wl_resource *surface);
 
 

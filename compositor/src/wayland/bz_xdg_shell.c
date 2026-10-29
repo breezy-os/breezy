@@ -691,7 +691,7 @@ void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf)
 {
 	// Safety checks
 	if (bzsurf->role != BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->xdgtoplevel == nullptr) {
-		bz_warn(BZ_LOG_WL_XDG_SHELL, "XDG toplevel object does not exist on the surface.");
+		bz_error(BZ_LOG_WL_XDG_SHELL, "XDG toplevel object does not exist on the surface.");
 		wl_resource_post_error(bzsurf->xdgsurface->resource, XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
 			"XDG toplevel object does not exist on the surface.");
 		return;
