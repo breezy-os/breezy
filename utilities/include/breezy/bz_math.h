@@ -13,7 +13,7 @@ enum bz_direction { BZ_UP, BZ_DOWN, BZ_LEFT, BZ_RIGHT };
 
 struct bz_position { int32_t x; int32_t y; };
 struct bz_size { int32_t w; int32_t h; };
-struct bz_rect { int32_t x; int32_t y; int32_t w; int32_t h; }; // TODO-dl13: make w/h uint32_t?
+struct bz_rect { int32_t x; int32_t y; uint32_t w; uint32_t h; };
 struct bz_rect_dbl { double x; double y; double w; double h; };
 
 bool bz_sizes_are_equal(struct bz_size *s1, struct bz_size *s2);
@@ -24,7 +24,6 @@ struct bz_rect *bz_clone_rect(struct bz_rect *source);
 struct bz_rect_dbl *bz_clone_rect_dbl(struct bz_rect_dbl *source);
 struct bz_rect *bz_split_rect(struct bz_rect *source, float h_split, float v_split, int32_t cut_size);
 bool bz_contains_point(struct bz_rect *rect, struct bz_position *point);
-// TODO-dl13: test this
 struct bz_rect bz_get_bounding_rect(struct bz_rect *r1, struct bz_rect *r2);
 
 struct bz_size *bz_clone_size(struct bz_size *source);

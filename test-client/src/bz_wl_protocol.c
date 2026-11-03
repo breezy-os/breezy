@@ -13,6 +13,9 @@
 #include "breezy/bz_client_utils.h"
 #include "breezy/bz_logger.h"
 
+#ifndef WL_KEYBOARD_KEY_STATE_REPEATED
+#define WL_KEYBOARD_KEY_STATE_REPEATED 2
+#endif
 
 // =================================================================================================
 //  File Variables / Declarations

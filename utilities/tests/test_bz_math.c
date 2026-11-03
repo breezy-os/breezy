@@ -108,10 +108,6 @@ void test_rects_are_equal__equal_cases(void)
 		&(struct bz_rect){ .x = -1, .y = -2, .w = 3, .h = 4 }
 	));
 	TEST_ASSERT_TRUE(bz_rects_are_equal(
-		&(struct bz_rect){ .x = 1, .y = 2, .w = -3, .h = -4 },
-		&(struct bz_rect){ .x = 1, .y = 2, .w = -3, .h = -4 }
-	));
-	TEST_ASSERT_TRUE(bz_rects_are_equal(
 		&(struct bz_rect){ .x = 0, .y = 0, .w = 0, .h = 0 },
 		&(struct bz_rect){ .x = 0, .y = 0, .w = 0, .h = 0 }
 	));
@@ -125,10 +121,6 @@ void test_rects_are_equal__unequal_cases(void)
 	));
 	TEST_ASSERT_FALSE(bz_rects_are_equal(
 		&(struct bz_rect){ .x = -1, .y = -2, .w = 3, .h = 4 },
-		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
-	));
-	TEST_ASSERT_FALSE(bz_rects_are_equal(
-		&(struct bz_rect){ .x = 1, .y = 2, .w = -3, .h = -4 },
 		&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
 	));
 }
@@ -319,7 +311,7 @@ void test_split_rect__both_splits_no_gap(void)
 //  Test bz_contains_point()
 // -------------------------------------------------------------------------------------------------
 
-static bool bz_test_contains_point_wrapper(int x, int y, int w, int h, int px, int py)
+static bool bz_test_contains_point_wrapper(int x, int y, uint32_t w, uint32_t h, int px, int py)
 {
 	return bz_contains_point(
 		&(struct bz_rect){ .x = x, .y = y, .w = w, .h = h },
@@ -343,16 +335,6 @@ void test_contains_point__true_cases(void)
 	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -5, -5));
 	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -4, -4));
 	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -3, -3));
-	// Test negative dimensions
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 8, 8));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 9, 9));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(10, 10, -2, -2, 10, 10));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, -2, -2));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, -1, -1));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(0, 0, -2, -2, 0, 0));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -3, -3));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -2, -2));
-	TEST_ASSERT_TRUE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -1, -1));
 }
 
 void test_contains_point__false_cases(void)
@@ -366,13 +348,70 @@ void test_contains_point__false_cases(void)
 	// Test fully negative bounds
 	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -6, -6));
 	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-5, -5, 2, 2, -2, -2));
-	// Test negative dimensions
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, -2, -2, 7, 7));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(10, 10, -2, -2, 11, 11));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(0, 0, -2, -2, -3, -3));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(0, 0, -2, -2, 1, 1));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-1, -1, -2, -2, -4, -4));
-	TEST_ASSERT_FALSE(bz_test_contains_point_wrapper(-1, -1, -2, -2, 0, 0));
+}
+
+
+// =================================================================================================
+//  Test bz_get_bounding_rect()
+// -------------------------------------------------------------------------------------------------
+
+static void assert_rect_equality(struct bz_rect r1, struct bz_rect r2)
+{
+	TEST_ASSERT_EQUAL(r1.x, r2.x);
+	TEST_ASSERT_EQUAL(r1.y, r2.y);
+	TEST_ASSERT_EQUAL(r1.w, r2.w);
+	TEST_ASSERT_EQUAL(r1.h, r2.h);
+}
+
+void test_get_bounding_rect__all_cases(void)
+{
+	// Equal rectangles
+	assert_rect_equality(
+		(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 },
+		bz_get_bounding_rect(
+			&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 },
+			&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+		));
+
+	// "Zero'd" rectangles
+	assert_rect_equality(
+		(struct bz_rect){ .x = 0, .y = 0, .w = 0, .h = 0 },
+		bz_get_bounding_rect(
+			&(struct bz_rect){ .x = 0, .y = 0, .w = 0, .h = 0 },
+			&(struct bz_rect){ .x = 0, .y = 0, .w = 0, .h = 0 }
+		));
+
+	// First is upper-left of second
+	assert_rect_equality(
+		(struct bz_rect){ .x = -1, .y = -2, .w = 5, .h = 8 },
+		bz_get_bounding_rect(
+			&(struct bz_rect){ .x = -1, .y = -2, .w = 3, .h = 4 },
+			&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+		));
+
+	// First is upper-right of second
+	assert_rect_equality(
+		(struct bz_rect){ .x = 1, .y = -2, .w = 7, .h = 8 },
+		bz_get_bounding_rect(
+			&(struct bz_rect){ .x = 5, .y = -2, .w = 3, .h = 4 },
+			&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+		));
+
+	// First is lower-right of second
+	assert_rect_equality(
+		(struct bz_rect){ .x = 1, .y = 2, .w = 7, .h = 8 },
+		bz_get_bounding_rect(
+			&(struct bz_rect){ .x = 5, .y = 6, .w = 3, .h = 4 },
+			&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+		));
+
+	// First is lower-left of second
+	assert_rect_equality(
+		(struct bz_rect){ .x = -1, .y = 2, .w = 5, .h = 8 },
+		bz_get_bounding_rect(
+			&(struct bz_rect){ .x = -1, .y = 6, .w = 3, .h = 4 },
+			&(struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 }
+		));
 }
 
 
@@ -559,6 +598,9 @@ int main(void) {
 	// -- bz_contains_point() --
 	RUN_TEST(test_contains_point__true_cases);
 	RUN_TEST(test_contains_point__false_cases);
+
+	// -- bz_get_bounding_rect() --
+	RUN_TEST(test_get_bounding_rect__all_cases);
 
 	// -- bz_clone_size() --
 	RUN_TEST(test_clone_size__deep_copies_data);

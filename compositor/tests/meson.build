@@ -75,6 +75,7 @@ foreach t : [
             bz_utils_dep,
             unity_dep,
             fff_dep,
+            math_dep,
             dependency('libdrm'),
             dependency('libseat'),
             dependency('wayland-server'),

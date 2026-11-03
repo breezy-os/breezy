@@ -25,6 +25,24 @@
 #include "breezy/bz_xdg_shell.h"
 
 
+// These definitions require version 1.12.0 of libxkbcommon, which Ubuntu 24.04 does not provide.
+//   These can be deleted in the near-ish future.
+#ifndef XKB_KEY_XF86Fn_F1
+#define XKB_KEY_XF86Fn_F1                    0x100811d2      /*         KEY_FN_F1 */
+#define XKB_KEY_XF86Fn_F2                    0x100811d3      /*         KEY_FN_F2 */
+#define XKB_KEY_XF86Fn_F3                    0x100811d4      /*         KEY_FN_F3 */
+#define XKB_KEY_XF86Fn_F4                    0x100811d5      /*         KEY_FN_F4 */
+#define XKB_KEY_XF86Fn_F5                    0x100811d6      /*         KEY_FN_F5 */
+#define XKB_KEY_XF86Fn_F6                    0x100811d7      /*         KEY_FN_F6 */
+#define XKB_KEY_XF86Fn_F7                    0x100811d8      /*         KEY_FN_F7 */
+#define XKB_KEY_XF86Fn_F8                    0x100811d9      /*         KEY_FN_F8 */
+#define XKB_KEY_XF86Fn_F9                    0x100811da      /*         KEY_FN_F9 */
+#define XKB_KEY_XF86Fn_F10                   0x100811db      /*         KEY_FN_F10 */
+#define XKB_KEY_XF86Fn_F11                   0x100811dc      /*         KEY_FN_F11 */
+#define XKB_KEY_XF86Fn_F12                   0x100811dd      /*         KEY_FN_F12 */
+#endif
+
+
 // =================================================================================================
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
