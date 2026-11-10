@@ -20,6 +20,7 @@ void bz_mgmt_place_window(struct bz_breezy *breezy, struct bz_surface *surface);
 void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface);
 int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt);
 void bz_mgmt_untrack_surface_on_destroy(struct bz_surface *surface_data);
+void bz_mgmt_update_window_focus(struct bz_breezy *breezy);
 void bz_mgmt_notify_kb_enter(uint32_t enter_serial, uint32_t modifiers_serial, struct xkb_state *xkbstate, struct wl_resource *keyboard, struct wl_resource *surface);
 
 
@@ -95,7 +96,7 @@ struct bz_section *bz_mgmt_create_window_after_section(struct bz_user_config *co
 void bz_mgmt_add_section_to_section(struct bz_user_config *config, struct bz_section *target_section, struct bz_section *new_section, struct bz_section *after_section);
 void bz_mgmt_remove_section_from_split(struct bz_user_config *config, struct bz_section *to_remove);
 void bz_mgmt_move_section(struct bz_user_config *config, struct bz_section *destination_parent, struct bz_section *section, struct bz_section *after_section);
-void bz_mgmt_delete_section(struct bz_user_config *config, struct bz_section *section);
+void bz_mgmt_delete_section(struct bz_breezy *breezy, struct bz_section *section);
 
 // #################################################################################################
 #endif

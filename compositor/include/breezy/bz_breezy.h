@@ -91,19 +91,30 @@ struct bz_wayland {
 	struct bz_list *clients; // Each item is of type "struct wl_client *"
 };
 
+enum bz_in_out { BZ_IN, BZ_OUT };
+
 struct bz_window_mgmt {
+
+	struct bz_surface *pointer_focus;  // nullptr if cursor isn't above a surface
+	struct bz_position last_cursor_loc;
+	struct bz_section *resize_divider; // nullptr if not actively resizing
+
+	struct bz_list *workspaces; // List of "struct bz_workspace *".
+	struct bz_workspace *current_space;
+	/* TODO-dl14
+	 * The "specialty" workspace has its own, unrelated reference.
+	 */
+};
+
+struct bz_workspace {
+	struct bz_section *root;
+
 	/**
 	 * These are keyboard-focusable surfaces, and include xdg_toplevel, xdg_popup, and sometimes
 	 * wlr_layer_surfaces. The final item in the list has "keyboard focus". Mostly intended for
 	 * returning focus to the previously-focused window on request or when the current one closes.
 	 */
 	struct bz_list *activable_surfaces; // Each item is of type "struct bz_surface *"
-
-	struct bz_surface *pointer_focus;  // nullptr if cursor isn't above a surface
-	struct bz_position last_cursor_loc;
-	struct bz_section *resize_divider; // nullptr if not actively resizing
-
-	struct bz_section *root_tile;
 };
 
 struct bz_user_config {

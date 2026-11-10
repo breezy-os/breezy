@@ -20,6 +20,7 @@
 #include "breezy/bz_math.h"
 #include "breezy/bz_seat.h"
 #include "breezy/bz_wayland.h"
+#include "breezy/bz_window_management.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_xdg_shell.h"
@@ -65,6 +66,7 @@ static void bz_gles_print_egl_error(char *function_name, EGLint error);
 static void bz_gles_render_and_commit(void *data);
 static void bz_gles_render_background(struct bz_breezy *breezy);
 static void bz_gles_render_applications(struct bz_breezy *breezy);
+static void bz_gles_render_section(GLuint client_program, struct bz_section *section);
 static void bz_gles_render_surface(GLuint client_program, struct bz_surface *surface);
 static void bz_gles_draw_surface(GLuint client_program, struct bz_surface *surface);
 static void bz_gles_render_cursor(struct bz_breezy *breezy);
@@ -484,7 +486,8 @@ void bz_drm_handle_pageflip(
 
 	// Emit the Wayland "done" event for all active frame callbacks.
 	uint32_t timestamp = (uint32_t)((uint64_t)tv_sec * 1000 + tv_usec / 1000);
-	struct bz_surface *surface; bz_list_foreach(surface, breezy->window_mgmt.activable_surfaces) {
+	struct bz_surface *surface;
+	bz_list_foreach(surface, breezy->window_mgmt.current_space->activable_surfaces) {
 		if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
 			bz_graphics_process_frame_callbacks(surface, timestamp);
 		}
@@ -1005,7 +1008,7 @@ static void bz_gles_render_applications(struct bz_breezy *breezy)
 
 	// ...then render each activable surface
 	struct bz_surface *main_surface;
-	bz_list_foreach(main_surface, breezy->window_mgmt.activable_surfaces) {
+	bz_list_foreach(main_surface, breezy->window_mgmt.current_space->activable_surfaces) {
 		if (main_surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
 			bz_recompute_physical_position(main_surface); // TODO-dl13: Cache to optimize..? and/or put after commit?
 			bz_gles_render_surface(client_program, main_surface);

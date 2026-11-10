@@ -18,6 +18,10 @@
 struct bz_breezy *bz_create_breezy_data(void);
 void bz_free_breezy_data(struct bz_breezy *data);
 
+// -- bz_workspace --
+struct bz_workspace *bz_create_workspace_data(void);
+void bz_free_workspace_data(struct bz_workspace *data);
+
 // -- bz_client --
 struct bz_client *bz_create_client_data(void);
 void bz_free_client_data(struct bz_client *data);
@@ -83,7 +87,8 @@ struct bz_breezy *bz_create_breezy_data(void)
 {
 	struct bz_breezy *data = calloc(1, sizeof(*data));
 
-	data->window_mgmt.activable_surfaces = bz_list_create();
+	data->window_mgmt.workspaces = bz_list_create();
+	bz_list_append(data->window_mgmt.workspaces, bz_create_workspace_data());
 	data->wayland.clients = bz_list_create();
 
 	data->drm.current_output = calloc(1, sizeof(*data->drm.current_output));
@@ -96,8 +101,11 @@ struct bz_breezy *bz_create_breezy_data(void)
 void bz_free_breezy_data(struct bz_breezy *data)
 {
 	if (data) {
-		if (data->window_mgmt.activable_surfaces != nullptr) {
-			bz_list_free(data->window_mgmt.activable_surfaces, nullptr);
+		if (data->window_mgmt.workspaces != nullptr) {
+			struct bz_workspace *space; bz_list_foreach(space, data->window_mgmt.workspaces) {
+				bz_free_workspace_data(space);
+			}
+			bz_list_free(data->window_mgmt.workspaces, nullptr);
 		}
 		if (data->wayland.clients != nullptr) {
 			bz_list_free(data->wayland.clients, nullptr);
@@ -106,6 +114,27 @@ void bz_free_breezy_data(struct bz_breezy *data)
 			free(data->drm.current_output);
 		}
 		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_workspace
+// -------------------------------------------------------------------------------------------------
+
+struct bz_workspace *bz_create_workspace_data(void)
+{
+	struct bz_workspace *space = calloc(1, sizeof(*space));
+
+	space->activable_surfaces = bz_list_create();
+
+	return space;
+}
+
+void bz_free_workspace_data(struct bz_workspace *data)
+{
+	if (data->activable_surfaces != nullptr) {
+		bz_list_free(data->activable_surfaces, nullptr);
 	}
 }
 

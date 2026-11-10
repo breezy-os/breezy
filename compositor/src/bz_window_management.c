@@ -20,6 +20,11 @@
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
 
+static int bz_mgmt_normalize_workspaces(struct bz_breezy *breezy);
+static struct bz_workspace *bz_mgmt_create_workspace(struct bz_breezy *breezy);
+
+
+static void bz_free_workspace(void *space);
 static void bz_mgmt_free_section_recursively(struct bz_section *section);
 
 static void bz_mgmt_change_keyboard_focus(struct bz_window_mgmt *mgmt, struct bz_surface *orig_surface, struct bz_surface *new_surface);
@@ -38,31 +43,142 @@ int bz_mgmt_initialize(struct bz_breezy *breezy)
 {
 	struct bz_window_mgmt *mgmt = &breezy->window_mgmt;
 
-	mgmt->activable_surfaces = bz_list_create();
-	if (mgmt->activable_surfaces == nullptr) {
-		bz_error(BZ_LOG_WINDOW_MGMT, "Failed to allocate space for activable surfaces.");
-		return 1;
-	}
 
-	mgmt->root_tile = calloc(1, sizeof(*mgmt->root_tile));
-	if (mgmt->root_tile == nullptr) {
-		bz_error(BZ_LOG_WINDOW_MGMT, "Failed to allocate space for root tile.");
+	mgmt->workspaces = bz_list_create();
+	if (mgmt->workspaces == nullptr) {
+		bz_error(BZ_LOG_WINDOW_MGMT, "Failed to allocate memory for workspaces.");
 		return 2;
 	}
-	mgmt->root_tile->bounds = breezy->drm.current_output->compositor_bounds;
-	mgmt->root_tile->type = BZ_SECTION_UNINITIALIZED;
+
+	int status = bz_mgmt_normalize_workspaces(breezy);
+	if (status < 0) {
+		bz_error(BZ_LOG_WINDOW_MGMT, "Failed to initialize workspaces on startup: %d", status);
+		return 3;
+	}
+	mgmt->current_space = mgmt->workspaces->head->data;
 
 	return 0;
 }
 
 void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt)
 {
-	if (mgmt->root_tile != nullptr) {
-		bz_mgmt_free_section_recursively(mgmt->root_tile);
+	if (mgmt->workspaces != nullptr) {
+		bz_list_free(mgmt->workspaces, bz_free_workspace);
+		mgmt->current_space = nullptr;
 	}
-	if (mgmt->activable_surfaces != nullptr) {
-		bz_list_free(mgmt->activable_surfaces, nullptr);
+}
+
+static int bz_mgmt_normalize_workspaces(struct bz_breezy *breezy)
+{
+	struct bz_list *workspaces = breezy->window_mgmt.workspaces;
+
+	// If our workspaces are uninitialized, add one and exit.
+	if (workspaces->length == 0) {
+		goto append_new_workspace;
 	}
+
+	// If there's just a single, uninitialized workspace, we're good to exit early.
+	if (workspaces->length == 1 && ((struct bz_workspace *)workspaces->head->data)->root->type == BZ_SECTION_UNINITIALIZED) {
+		return 0;
+	}
+
+	// Make sure we have at least one initialized workspace.
+	bool has_one_initialized = false;
+	struct bz_workspace *ws; bz_list_foreach(ws, workspaces) {
+		if (ws->root->type != BZ_SECTION_UNINITIALIZED) {
+			has_one_initialized = true;
+			break;
+		}
+	}
+	if (!has_one_initialized) {
+		// We want to reduce the list of uninitialized workspaces down to just one; it doesn't matter which.
+		struct bz_workspace *sole_ws = bz_list_shift(workspaces);
+		bz_list_clear(workspaces, bz_free_workspace);
+		bz_list_append(workspaces, sole_ws);
+		breezy->window_mgmt.current_space = sole_ws;
+		return 0;
+	}
+
+	// Shift all empty workspaces from the front of the list to the end.
+	struct bz_workspace *curr = workspaces->head->data;
+	while (curr->root->type == BZ_SECTION_UNINITIALIZED) {
+		bz_list_shift(workspaces); // Ignoring retval because it's already stored in "curr".
+		bz_list_append(workspaces, curr);
+		curr = workspaces->head->data;
+	}
+
+	// If the final workspace isn't empty, add a new one.
+	if (((struct bz_workspace *)workspaces->tail->data)->root->type != BZ_SECTION_UNINITIALIZED) {
+		goto append_new_workspace;
+	}
+
+	// Collapse multiple empty workspaces at the end into one.
+	struct bz_workspace *final = bz_list_pop(workspaces);
+	bool focus_last = false;
+	while (((struct bz_workspace *)workspaces->tail->data)->root->type == BZ_SECTION_UNINITIALIZED) {
+		// If we're about to delete the currently-focused space, we'll need to update our currently
+		//   focused space after the while-loop.
+		if (breezy->window_mgmt.current_space == final) {
+			focus_last = true;
+		}
+		bz_free_workspace(final);
+		final = bz_list_pop(workspaces);
+	}
+	bz_list_append(workspaces, final);
+	if (focus_last) {
+		breezy->window_mgmt.current_space = final;
+	}
+
+	return 0;
+
+	append_new_workspace:
+		struct bz_workspace *new_ws = bz_mgmt_create_workspace(breezy);
+		if (new_ws == nullptr) {
+			bz_error(BZ_LOG_WINDOW_MGMT, "Failed to create new workspace during normalization.");
+			return -1;
+		}
+		bz_list_append(workspaces, new_ws);
+		return 0;
+}
+
+static struct bz_workspace *bz_mgmt_create_workspace(struct bz_breezy *breezy)
+{
+	// Allocations
+	struct bz_workspace *space = calloc(1, sizeof(*space));
+	if (space == nullptr) {
+		bz_error(BZ_LOG_WINDOW_MGMT, "Failed to allocate space for new workspace.");
+		return nullptr;
+	}
+	struct bz_section *root = calloc(1, sizeof(*root));
+	if (root == nullptr) {
+		bz_error(BZ_LOG_WINDOW_MGMT, "Failed to allocate space for root tile.");
+		return nullptr;
+	}
+	struct bz_list *activable_surfaces = bz_list_create();
+	if (activable_surfaces == nullptr) {
+		bz_error(BZ_LOG_WINDOW_MGMT, "Failed to allocate space for activable surfaces.");
+		return nullptr;
+	}
+
+	// Data Assignment
+	root->bounds = breezy->drm.current_output->compositor_bounds;
+	root->type = BZ_SECTION_UNINITIALIZED;
+	space->root = root;
+	space->activable_surfaces = activable_surfaces;
+
+	return space;
+}
+
+static void bz_free_workspace(void *workspace)
+{
+	struct bz_workspace *space = workspace;
+	if (space->root != nullptr) {
+		bz_mgmt_free_section_recursively(space->root);
+	}
+	if (space->activable_surfaces != nullptr) {
+		bz_list_free(space->activable_surfaces, nullptr);
+	}
+	free(space);
 }
 
 static void bz_mgmt_free_section_recursively(struct bz_section *section)
@@ -109,17 +225,20 @@ void bz_mgmt_place_window(struct bz_breezy *breezy, struct bz_surface *surface)
 	// }
 
 	// If it's the first tile, return the full bounds
-	if (mgmt->root_tile->type == BZ_SECTION_UNINITIALIZED) {
-		mgmt->root_tile->type = BZ_SECTION_WINDOW;
-		mgmt->root_tile->window = surface;
-		surface->section = mgmt->root_tile;
+	if (mgmt->current_space->root->type == BZ_SECTION_UNINITIALIZED) {
+		mgmt->current_space->root->type = BZ_SECTION_WINDOW;
+		mgmt->current_space->root->window = surface;
+		surface->section = mgmt->current_space->root;
+		bz_mgmt_normalize_workspaces(breezy);
 		return;
 	}
 
 	// Otherwise, split the active window
 	struct bz_surface *active_surf = bz_mgmt_get_active_surface(mgmt);
 	// Active_surf should always be non-null, but just in case, fall back to root tile.
-	struct bz_section *target_section = active_surf != nullptr ? active_surf->section : mgmt->root_tile;
+	struct bz_section *target_section = active_surf != nullptr
+		? active_surf->section
+		: mgmt->current_space->root;
 	enum bz_split_direction should_split_in = target_section->bounds.w > target_section->bounds.h
 		? BZ_SPLIT_DIR_ROW : BZ_SPLIT_DIR_COLUMN;
 	if (target_section->parent != nullptr && target_section->parent->direction == should_split_in) {
@@ -134,8 +253,10 @@ void bz_mgmt_place_window(struct bz_breezy *breezy, struct bz_surface *surface)
 void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface)
 {
 	// Make sure it wasn't already mapped / is being displayed.
-	if (bz_list_contains(mgmt->activable_surfaces, surface)) {
-		return;
+	struct bz_workspace *space; bz_list_foreach(space, mgmt->workspaces) {
+		if (bz_list_contains(space->activable_surfaces, surface)) {
+			return;
+		}
 	}
 
 	// Make sure it's a supported surface role
@@ -157,7 +278,7 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 		if (bz_mgmt_get_active_surface(mgmt) != nullptr) {
 			bz_mgmt_update_focus_for_full_tree(bz_mgmt_get_active_surface(mgmt), false);
 		}
-		bz_list_append(mgmt->activable_surfaces, surface);
+		bz_list_append(mgmt->current_space->activable_surfaces, surface);
 		bz_mgmt_update_focus_for_full_tree(surface, true);
 	} else {
 		bz_warn(BZ_LOG_WINDOW_MGMT, "Non-toplevel surface provided in window manager: %d", surface->role);
@@ -167,11 +288,11 @@ void bz_mgmt_open_window(struct bz_window_mgmt *mgmt, struct bz_surface *surface
 
 int bz_mgmt_close_active_window(struct bz_window_mgmt *mgmt)
 {
-	if (mgmt->activable_surfaces->length == 0) {
+	if (mgmt->current_space->activable_surfaces->length == 0) {
 		bz_info(BZ_LOG_WINDOW_MGMT, "No surfaces to terminate.");
 		return 0;
 	}
-	struct bz_surface *surf_data = mgmt->activable_surfaces->tail->data;
+	struct bz_surface *surf_data = mgmt->current_space->activable_surfaces->tail->data;
 	if (surf_data->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
 		xdg_toplevel_send_close(surf_data->xdgtoplevel->resource);
 	} else if (surf_data->role == BZ_SURF_ROLE_XDG_POPUP) {
@@ -203,54 +324,67 @@ void bz_mgmt_untrack_surface_on_destroy(struct bz_surface *surface_data)
 	struct wl_client *client = wl_resource_get_client(surface_data->resource);
 	struct bz_client *client_data = wl_client_get_user_data(client);
 	struct bz_breezy *breezy = client_data->breezy;
+	struct bz_workspace *curr_space = breezy->window_mgmt.current_space;
 
 	// Remove the bz_surface from our globally-tracked list of activable surfaces
-	bool was_last_item = breezy->window_mgmt.activable_surfaces->tail->data == surface_data;
-	bz_list_remove(breezy->window_mgmt.activable_surfaces, surface_data, nullptr);
+	bool was_last_item = curr_space->activable_surfaces->tail->data == surface_data;
+	bz_list_remove(curr_space->activable_surfaces, surface_data, nullptr);
 	breezy->window_mgmt.pointer_focus = nullptr;
 
 	// Remove the bz_section from our tile manager.
 	if (surface_data->section != nullptr) {
-		bz_mgmt_delete_section(&breezy->user_config, surface_data->section);
+		bz_mgmt_delete_section(breezy, surface_data->section);
 	}
 
 	// If we removed the surface that had keyboard focus, then look for a new surface to focus.
-	if (was_last_item && breezy->window_mgmt.activable_surfaces->length > 0) {
-		// First, try the window where our mouse cursor is (if applicable)
-		struct bz_surface *new_focus = bz_mgmt_update_pointer_position(
-			&breezy->window_mgmt,
-			&breezy->gl.cursor
-		);
-		// Found a surface! Also update our keyboard's focus, then early exit. The code inside
-		//   bz_mgmt_update_pointer_position isn't sufficient if the window gaining focus is
-		//   already the new "last item" in the list.
-		if (new_focus != nullptr) {
-			bz_mgmt_change_keyboard_focus(&breezy->window_mgmt, nullptr, new_focus);
-			return;
-		}
-
-		// If that fails, then let's just grab the last window in our list. No need to set pointer
-		//   focus because we don't want to move the user's mouse on them in this situation.
-		struct bz_surface *new_surf_data = breezy->window_mgmt.activable_surfaces->tail->data;
-		struct wl_client *new_client = wl_resource_get_client(new_surf_data->resource);
-		struct bz_client *new_client_data = wl_client_get_user_data(new_client);
-		struct wl_display *display = new_client_data->breezy->wayland.display;
-		struct xkb_state *xkbstate = new_client_data->breezy->input.xkb_state;
-		uint32_t enter_serial = wl_display_next_serial(display);
-		uint32_t modifiers_serial = wl_display_next_serial(display);
-		struct bz_wl_seat *seat; bz_list_foreach(seat, new_client_data->seats) {
-			struct wl_resource *keyboard; bz_list_foreach(keyboard, seat->keyboards) {
-				bz_mgmt_notify_kb_enter(
-					enter_serial,
-					modifiers_serial,
-					xkbstate,
-					keyboard,
-					new_surf_data->resource
-				);
-			}
-		}
-		bz_mgmt_update_focus_for_full_tree(new_surf_data, true);
+	if (was_last_item && breezy->window_mgmt.current_space->activable_surfaces->length > 0) {
+		bz_mgmt_update_window_focus(breezy);
 	}
+}
+
+/**
+ * Something caused the currently-focused window to no longer be visible - maybe it's on a different workspace, or maybe
+ * it was just recently closed. This function will focus a new window that makes sense.
+ */
+void bz_mgmt_update_window_focus(struct bz_breezy *breezy) {
+	if (breezy->window_mgmt.current_space->activable_surfaces->length == 0) {
+		return;
+	}
+
+	// First, try the window where our mouse cursor is (if applicable)
+	struct bz_surface *new_focus = bz_mgmt_update_pointer_position(
+		&breezy->window_mgmt,
+		&breezy->gl.cursor
+	);
+	// Found a surface! Also update our keyboard's focus, then early exit. The code inside
+	//   bz_mgmt_update_pointer_position isn't sufficient if the window gaining focus is
+	//   already the new "last item" in the list.
+	if (new_focus != nullptr) {
+		bz_mgmt_change_keyboard_focus(&breezy->window_mgmt, nullptr, new_focus);
+		return;
+	}
+
+	// If that fails, then let's just grab the last window in our list. No need to set pointer
+	//   focus because we don't want to move the user's mouse on them in this situation.
+	struct bz_surface *new_surf_data = breezy->window_mgmt.current_space->activable_surfaces->tail->data;
+	struct wl_client *new_client = wl_resource_get_client(new_surf_data->resource);
+	struct bz_client *new_client_data = wl_client_get_user_data(new_client);
+	struct wl_display *display = new_client_data->breezy->wayland.display;
+	struct xkb_state *xkbstate = new_client_data->breezy->input.xkb_state;
+	uint32_t enter_serial = wl_display_next_serial(display);
+	uint32_t modifiers_serial = wl_display_next_serial(display);
+	struct bz_wl_seat *seat; bz_list_foreach(seat, new_client_data->seats) {
+		struct wl_resource *keyboard; bz_list_foreach(keyboard, seat->keyboards) {
+			bz_mgmt_notify_kb_enter(
+				enter_serial,
+				modifiers_serial,
+				xkbstate,
+				keyboard,
+				new_surf_data->resource
+			);
+		}
+	}
+	bz_mgmt_update_focus_for_full_tree(new_surf_data, true);
 }
 
 void bz_mgmt_notify_kb_enter(
@@ -281,8 +415,8 @@ void bz_mgmt_notify_kb_enter(
 
 struct bz_surface *bz_mgmt_get_active_surface(struct bz_window_mgmt *mgmt)
 {
-	return mgmt->activable_surfaces->length > 0
-		? mgmt->activable_surfaces->tail->data
+	return mgmt->current_space->activable_surfaces->length > 0
+		? mgmt->current_space->activable_surfaces->tail->data
 		: nullptr;
 }
 
@@ -299,10 +433,10 @@ static void bz_mgmt_change_keyboard_focus(
 	}
 
 	// Move the new surface to the end of our active surface list
-	const int move_result = bz_list_move_item_to_end(mgmt->activable_surfaces, new_surface);
+	const int move_result = bz_list_move_item_to_end(mgmt->current_space->activable_surfaces, new_surface);
 	if (move_result == -2) {
 		// Surface wasn't in the list -- must've just been created. Append it to the list.
-		const int append_status = bz_list_append(mgmt->activable_surfaces, new_surface);
+		const int append_status = bz_list_append(mgmt->current_space->activable_surfaces, new_surface);
 		if (append_status < 0) {
 			bz_error(BZ_LOG_WINDOW_MGMT,
 				"Failed appending the surface to our surface list. %d", append_status);
@@ -426,7 +560,7 @@ struct bz_surface *bz_mgmt_update_pointer_position(
 	mgmt->last_cursor_loc.y = cursor->compositor_bounds.y;
 
 	// Iterate over our list in reverse render order until we either overlap with a window or run out of items.
-	struct bz_surface *surf; bz_list_foreach_rev(surf, mgmt->activable_surfaces) {
+	struct bz_surface *surf; bz_list_foreach_rev(surf, mgmt->current_space->activable_surfaces) {
 		// We treat toplevels as "the root of all windows". Popups and subsurfaces are checked through them.
 		if (surf->role != BZ_SURF_ROLE_XDG_TOPLEVEL) { continue; }
 
@@ -477,7 +611,7 @@ static struct bz_surface *bz_mgmt_check_surface_overlap(
 	// First, check each popup. Popups are considered valid "root_surfs" for keyboard focus.
 	struct bz_xdg_popup *popup; bz_list_foreach_rev(popup, surface->popups) {
 		// If the popup was *just* removed, we don't want to accidentally reconsider it here.
-		if (!bz_list_contains(mgmt->activable_surfaces, popup->wlsurface)) {
+		if (!bz_list_contains(mgmt->current_space->activable_surfaces, popup->wlsurface)) {
 			continue;
 		}
 
@@ -715,7 +849,7 @@ struct bz_section *bz_mgmt_create_new_window_section(
 int bz_mgmt_convert_root_into_child_of_new_split(
 	struct bz_window_mgmt *mgmt
 ) {
-	struct bz_section *initial_root = mgmt->root_tile;
+	struct bz_section *initial_root = mgmt->current_space->root;
 	if (initial_root->type != BZ_SECTION_SPLIT || initial_root->split == nullptr) {
 		bz_error(BZ_LOG_WINDOW_MGMT, "Attempted to convert a non-split root into a child of a new split.");
 		return -1;
@@ -731,7 +865,7 @@ int bz_mgmt_convert_root_into_child_of_new_split(
 	new_split->sections = bz_list_create();
 	bz_mgmt_link_to_parent_split(new_split, initial_root, nullptr);
 
-	mgmt->root_tile = new_root;
+	mgmt->current_space->root = new_root;
 	return 0;
 }
 
@@ -1108,7 +1242,7 @@ void bz_mgmt_move_section(
 
 /** No-op when section is not a window. */
 void bz_mgmt_delete_section(
-	struct bz_user_config *config,
+	struct bz_breezy *breezy,
 	struct bz_section *section
 ) {
 	if (section->type != BZ_SECTION_WINDOW) {
@@ -1123,8 +1257,9 @@ void bz_mgmt_delete_section(
 	if (section->parent == nullptr) {
 		section->type = BZ_SECTION_UNINITIALIZED;
 		section->window = nullptr;
+		bz_mgmt_normalize_workspaces(breezy);
 	} else {
-		bz_mgmt_remove_section_from_split(config, section);
+		bz_mgmt_remove_section_from_split(&breezy->user_config, section);
 		bz_mgmt_free_section(section, false);
 	}
 }

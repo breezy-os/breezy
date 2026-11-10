@@ -18,7 +18,7 @@ DEFINE_FFF_GLOBALS
 /* wl_resource_destroy              */ FAKE_VOID_FUNC(wl_resource_destroy, struct wl_resource *)
 /* wl_resource_get_client           */ FAKE_VALUE_FUNC(struct wl_client *, wl_resource_get_client, struct wl_resource *)
 /* wl_resource_get_user_data        */ FAKE_VALUE_FUNC(void *, wl_resource_get_user_data, struct wl_resource *)
-/* wl_resource_get_version          */ FAKE_VALUE_FUNC(int, wl_resource_get_version, struct wl_resource *)
+/* wl_resource_get_version          */ FAKE_VALUE_FUNC(int, wl_resource_get_version, const struct wl_resource *)
 /* wl_resource_post_error           */ FAKE_VOID_FUNC_VARARG(wl_resource_post_error, struct wl_resource *, uint32_t, const char *, ...)
 /* wl_resource_post_event           */ FAKE_VOID_FUNC_VARARG(wl_resource_post_event, struct wl_resource *, uint32_t, ...)
 /* wl_resource_set_implementation   */ FAKE_VOID_FUNC(wl_resource_set_implementation, struct wl_resource *, const void *, void *, wl_resource_destroy_func_t)
