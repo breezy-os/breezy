@@ -153,8 +153,8 @@ int bz_list_insert(struct bz_list *list, void *data, void *after_data)
  *
  * Return values:
  *   0: Insertion was successful!
- *   -1: Provided list was not initialized
- *   -2: Failed to find "after_data" in the list
+ *   -1: Destination list was not initialized
+ *   -2: Source list was not initialized
  *   -3: Failed to find "after_data" in the list
  */
 int bz_list_insert_list(struct bz_list *list, struct bz_list *data_list, void *after_data)
@@ -174,8 +174,8 @@ int bz_list_insert_list(struct bz_list *list, struct bz_list *data_list, void *a
 		goto clear_and_clean_exit;
 	}
 
-	// Target list was empty; just replace it.
-	if (list->length == 0) {
+	// Target list was empty; just replace it (assuming after_data is not set)
+	if (list->length == 0 && after_data == nullptr) {
 		list->head = data_list->head;
 		list->tail = data_list->tail;
 		list->length = data_list->length;

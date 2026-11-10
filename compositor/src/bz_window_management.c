@@ -118,12 +118,8 @@ void bz_mgmt_place_window(struct bz_breezy *breezy, struct bz_surface *surface)
 
 	// Otherwise, split the active window
 	struct bz_surface *active_surf = bz_mgmt_get_active_surface(mgmt);
-	// TODO-dl13 - if trying to split when no active window, add to root tile as a fallback.
-	// if (active_surf == nullptr) {
-	// 	// This really shouldn't come up, but just in case, it's a fallback.
-	// 	bz_mgmt_add_to_section_after(mgmt->root_tile, )
-	// }
-	struct bz_section *target_section = active_surf->section;
+	// Active_surf should always be non-null, but just in case, fall back to root tile.
+	struct bz_section *target_section = active_surf != nullptr ? active_surf->section : mgmt->root_tile;
 	enum bz_split_direction should_split_in = target_section->bounds.w > target_section->bounds.h
 		? BZ_SPLIT_DIR_ROW : BZ_SPLIT_DIR_COLUMN;
 	if (target_section->parent != nullptr && target_section->parent->direction == should_split_in) {
@@ -716,13 +712,13 @@ struct bz_section *bz_mgmt_create_new_window_section(
  * current root must be a split or else this method returns a nullptr and is considered an error.
  * The new split will be created in the opposite direction, and have only a single section in it.
  */
-struct bz_section *bz_mgmt_convert_root_into_child_of_new_split(
+int bz_mgmt_convert_root_into_child_of_new_split(
 	struct bz_window_mgmt *mgmt
 ) {
 	struct bz_section *initial_root = mgmt->root_tile;
 	if (initial_root->type != BZ_SECTION_SPLIT || initial_root->split == nullptr) {
 		bz_error(BZ_LOG_WINDOW_MGMT, "Attempted to convert a non-split root into a child of a new split.");
-		return nullptr;
+		return -1;
 	}
 
 	struct bz_section *new_root = calloc(1, sizeof(*new_root));
@@ -736,7 +732,7 @@ struct bz_section *bz_mgmt_convert_root_into_child_of_new_split(
 	bz_mgmt_link_to_parent_split(new_split, initial_root, nullptr);
 
 	mgmt->root_tile = new_root;
-	return new_root; // TODO-dl13: return status integer..?
+	return 0;
 }
 
 /**

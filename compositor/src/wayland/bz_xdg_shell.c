@@ -597,7 +597,6 @@ static void bz_xdg_surface_get_popup(
 	xdgsurf->wlsurface->xdgpopup = popup;
 
 	// Tell the parent about this popup
-	// TODO-dl13-pu: Test this!
 	if (parent_data != nullptr && parent_data->popups != nullptr) {
 		bz_list_append(parent_data->popups, popup);
 	}

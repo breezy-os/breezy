@@ -80,7 +80,7 @@ struct bz_section *bz_mgmt_get_leaf_at_coordinates(struct bz_section *root, stru
 struct bz_section *bz_mgmt_get_nearest_window(struct bz_section *section, struct bz_position coords);
 struct bz_section *bz_mgmt_get_prior_section_in_split(struct bz_split *split, struct bz_position coords);
 struct bz_section *bz_mgmt_create_new_window_section(struct bz_rect bounds, struct bz_surface *surface);
-struct bz_section *bz_mgmt_convert_root_into_child_of_new_split(struct bz_window_mgmt *mgmt);
+int bz_mgmt_convert_root_into_child_of_new_split(struct bz_window_mgmt *mgmt);
 void bz_mgmt_convert_window_to_split(struct bz_user_config *config, struct bz_section *section);
 void bz_mgmt_free_section(struct bz_section *section, bool free_recursively);
 void bz_mgmt_drag_divider(struct bz_user_config *config, struct bz_divider *divider, double distance);

@@ -474,7 +474,10 @@ static void bz_input_move_active_window(struct bz_breezy *breezy, enum bz_direct
 	if (!is_parallel) {
 		// Prep the grandparent. If the grandparent is null, then we must be at the root.
 		if (parent_split->section->parent == nullptr) {
-			bz_mgmt_convert_root_into_child_of_new_split(&breezy->window_mgmt);
+			if (bz_mgmt_convert_root_into_child_of_new_split(&breezy->window_mgmt) != 0) {
+				bz_error(BZ_LOG_INPUT, "Failed to convert root into child when moving window.");
+				return;
+			}
 		}
 		struct bz_section *grandparent = parent_split->section->parent->section;
 		struct bz_section *insert_after = parent_split->section;
@@ -495,7 +498,10 @@ static void bz_input_move_active_window(struct bz_breezy *breezy, enum bz_direct
 		struct bz_section *grandparent = parent_split->section->parent->section;
 		// If the GREAT-grandparent doesn't exist, we create it.
 		if (grandparent->parent == nullptr) {
-			bz_mgmt_convert_root_into_child_of_new_split(&breezy->window_mgmt);
+			if (bz_mgmt_convert_root_into_child_of_new_split(&breezy->window_mgmt) != 0) {
+				bz_error(BZ_LOG_INPUT, "Failed to convert root into child when moving window.");
+				return;
+			}
 		}
 		struct bz_section *great_grandparent = grandparent->parent->section;
 		struct bz_section *insert_after = grandparent;

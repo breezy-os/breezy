@@ -246,7 +246,7 @@ void test_xdg_surface_get_popup__initializes_properly(void)
 {
 	// Set up our test data
 	struct bz_client *client_data = bz_create_client_data();
-	struct bz_surface *parent_data = bz_create_surface_data();
+	struct bz_xdg_surface *parent_xdgsurf = bz_create_xdg_surface_data();
 	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
 	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
 	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
@@ -259,7 +259,7 @@ void test_xdg_surface_get_popup__initializes_properly(void)
 	// ...and our mocks
 	wl_client_get_user_data_fake.return_val = client_data;
 	wl_resource_create_fake.return_val = xdgpopup_res;
-	void *ret_vals[3] = { xdgsurf_data, positioner, parent_data };
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_xdgsurf };
 	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
 
 	// Run our test!
@@ -285,7 +285,47 @@ void test_xdg_surface_get_popup__initializes_properly(void)
 	bz_free_xdg_popup_data(xdgpopup_data);
 	free(xdgpopup_res);
 	free(parent_res);
-	bz_free_surface_data(parent_data);
+	bz_free_xdg_surface_data(parent_xdgsurf);
+	bz_free_client_data(client_data);
+}
+
+void test_xdg_surface_get_popup__adds_popup_to_parent(void)
+{
+	// Set up our test data
+	struct bz_client *client_data = bz_create_client_data();
+	// -- Parent data --
+	struct bz_xdg_surface *parent_xdgsurf = bz_create_xdg_surface_data();
+	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
+	// -- Popup data --
+	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
+	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
+	struct bz_xdg_positioner *positioner = bz_create_xdg_positioner_data();
+	positioner->size = calloc(1, sizeof(*positioner->size));
+	*positioner->size = (struct bz_size){ .w = 2, .h = 3 };
+	positioner->anchor_rect = calloc(1, sizeof(*positioner->anchor_rect));
+	*positioner->anchor_rect = (struct bz_rect){ .x = 1, .y = 2, .w = 3, .h = 4 };
+
+	// ...and our mocks
+	wl_client_get_user_data_fake.return_val = client_data;
+	wl_resource_create_fake.return_val = xdgpopup_res;
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_xdgsurf };
+	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
+
+	// Run our test!
+	TEST_ASSERT_EQUAL_INT(0, parent_xdgsurf->wlsurface->popups->length);
+	bz_xdg_surface_implementation.get_popup(nullptr, nullptr, 0, parent_res, nullptr);
+	TEST_ASSERT_EQUAL_INT(1, parent_xdgsurf->wlsurface->popups->length);
+	struct bz_xdg_popup *xdgpopup_data = wl_resource_set_implementation_fake.arg2_val;
+	TEST_ASSERT_EQUAL_PTR(parent_xdgsurf->wlsurface, xdgpopup_data->parent);
+	TEST_ASSERT_EQUAL_PTR(xdgpopup_data, parent_xdgsurf->wlsurface->popups->head->data);
+
+	// Cleanup
+	bz_free_xdg_positioner_data(positioner);
+	bz_free_xdg_surface_data(xdgsurf_data);
+	bz_free_xdg_popup_data(xdgpopup_data);
+	free(xdgpopup_res);
+	free(parent_res);
+	bz_free_xdg_surface_data(parent_xdgsurf);
 	bz_free_client_data(client_data);
 }
 
@@ -294,7 +334,7 @@ void test_xdg_surface_get_popup__assigns_popup_role(void)
 {
 	// Set up our test data
 	struct bz_client *client_data = bz_create_client_data();
-	struct bz_surface *parent_data = bz_create_surface_data();
+	struct bz_xdg_surface *parent_xdgsurf = bz_create_xdg_surface_data();
 	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
 	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
 	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
@@ -307,7 +347,7 @@ void test_xdg_surface_get_popup__assigns_popup_role(void)
 	// ...and our mocks
 	wl_client_get_user_data_fake.return_val = client_data;
 	wl_resource_create_fake.return_val = xdgpopup_res;
-	void *ret_vals[3] = { xdgsurf_data, positioner, parent_data };
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_xdgsurf };
 	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
 
 	// Run our test!
@@ -321,7 +361,7 @@ void test_xdg_surface_get_popup__assigns_popup_role(void)
 	bz_free_xdg_popup_data(wl_resource_set_implementation_fake.arg2_val);
 	free(xdgpopup_res);
 	free(parent_res);
-	bz_free_surface_data(parent_data);
+	bz_free_xdg_surface_data(parent_xdgsurf);
 	bz_free_client_data(client_data);
 }
 
@@ -385,7 +425,7 @@ void test_xdg_surface_get_popup__can_reassign_same_role(void)
 {
 	// Set up our test data
 	struct bz_client *client_data = bz_create_client_data();
-	struct bz_surface *parent_data = bz_create_surface_data();
+	struct bz_xdg_surface *parent_xdgsurf = bz_create_xdg_surface_data();
 	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
 	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
 	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
@@ -398,7 +438,7 @@ void test_xdg_surface_get_popup__can_reassign_same_role(void)
 	// ...and our mocks
 	wl_client_get_user_data_fake.return_val = client_data;
 	wl_resource_create_fake.return_val = xdgpopup_res;
-	void *ret_vals[3] = { xdgsurf_data, positioner, parent_data };
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_xdgsurf };
 	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
 
 	// Run our test!
@@ -419,7 +459,7 @@ void test_xdg_surface_get_popup__can_reassign_same_role(void)
 	bz_free_xdg_popup_data(wl_resource_set_implementation_fake.arg2_val);
 	free(xdgpopup_res);
 	free(parent_res);
-	bz_free_surface_data(parent_data);
+	bz_free_xdg_surface_data(parent_xdgsurf);
 	bz_free_client_data(client_data);
 }
 
@@ -456,7 +496,7 @@ void test_xdg_surface_get_popup__positioner_data_is_cloned(void)
 {
 	// Set up our test data
 	struct bz_client *client_data = bz_create_client_data();
-	struct bz_surface *parent_data = bz_create_surface_data();
+	struct bz_xdg_surface *parent_xdgsurf = bz_create_xdg_surface_data();
 	struct wl_resource *parent_res = calloc(1, sizeof(*parent_res));
 	struct bz_xdg_surface *xdgsurf_data = bz_create_xdg_surface_data();
 	struct wl_resource *xdgpopup_res = calloc(1, sizeof(*xdgpopup_res));
@@ -471,7 +511,7 @@ void test_xdg_surface_get_popup__positioner_data_is_cloned(void)
 	// ...and our mocks
 	wl_client_get_user_data_fake.return_val = client_data;
 	wl_resource_create_fake.return_val = xdgpopup_res;
-	void *ret_vals[3] = { xdgsurf_data, positioner, parent_data };
+	void *ret_vals[3] = { xdgsurf_data, positioner, parent_xdgsurf };
 	SET_RETURN_SEQ(wl_resource_get_user_data, ret_vals, 3);
 
 	// Run our test!
@@ -497,7 +537,7 @@ void test_xdg_surface_get_popup__positioner_data_is_cloned(void)
 	bz_free_xdg_popup_data(xdgpopup_data);
 	free(xdgpopup_res);
 	free(parent_res);
-	bz_free_surface_data(parent_data);
+	bz_free_xdg_surface_data(parent_xdgsurf);
 	bz_free_client_data(client_data);
 }
 
@@ -701,6 +741,7 @@ int main(void) {
 
 	// Test bz_xdg_surface_get_popup()
 	RUN_TEST(test_xdg_surface_get_popup__initializes_properly);
+	RUN_TEST(test_xdg_surface_get_popup__adds_popup_to_parent);
 	RUN_TEST(test_xdg_surface_get_popup__assigns_popup_role);
 	RUN_TEST(test_xdg_surface_get_popup__cannot_change_existing_role);
 	RUN_TEST(test_xdg_surface_get_popup__positioner_must_be_complete);
