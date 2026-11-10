@@ -9,7 +9,7 @@
 #include "breezy/bz_breezy.h"
 
 // -- wl_seat --
-#define BZ_SEAT_VERSION 10
+#define BZ_SEAT_VERSION 9
 void bz_seat_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 void bz_seat_dtor(struct wl_resource *data);
 struct bz_wl_seat {
@@ -20,11 +20,15 @@ struct bz_wl_seat {
 };
 
 // -- wl_pointer --
-#define BZ_POINTER_VERSION 10 // TODO: version 11 exists - upgrade?
+#define BZ_POINTER_VERSION 9 // TODO: version 11 exists - upgrade?
 void bz_pointer_dtor(struct wl_resource *data);
+struct bz_cursor {
+	struct bz_surface *surface;
+	struct bz_position hotspot;
+};
 
 // -- wl_keyboard --
-#define BZ_KEYBOARD_VERSION 10
+#define BZ_KEYBOARD_VERSION 9
 void bz_keyboard_dtor(struct wl_resource *data);
 
 // -- wl_output --
@@ -32,16 +36,21 @@ void bz_keyboard_dtor(struct wl_resource *data);
 void bz_output_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
 struct bz_output {
-	struct bz_position position;
-	struct bz_dimension size; // Resolution in pixels
+	/** Numerator over 120 (see fractional scaling protocol) */
+	uint32_t scale;
+	enum wl_output_transform transform;
+	/** Monitor resolution (from mode) and placement. */
+	struct bz_rect output_bounds;
+	/** Compositor's "resolution" for the purposes of surface placement. */
+	struct bz_rect compositor_bounds;
 	int32_t refresh_rate;
-	struct bz_dimension physical_size; // Size in millimeters
+	struct bz_size size_in_mms; // Size in millimeters
 	char *make;
 	char *model;
 	char *name;
 	char *description;
 	enum wl_output_subpixel subpixel;
-	enum wl_output_transform transform;
+	bz_mat3 projection;
 };
 
 // -- wl_data_device_manager --

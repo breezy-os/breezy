@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <wayland-server.h>
+#include <xdg-shell-server-protocol.h>
 
 #include "breezy/bz_breezy.h"
 #include "breezy/bz_math.h"
@@ -17,6 +18,21 @@
 void bz_xdg_wm_base_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
 
+// -- xdg_positioner --
+
+#define BZ_XDG_POSITIONER_VERSION 7
+
+struct bz_xdg_positioner {
+	struct wl_resource *resource;
+
+	struct bz_size *size;        // Null until set
+	struct bz_rect *anchor_rect; // Null until set
+	enum xdg_positioner_anchor anchor;
+	enum xdg_positioner_gravity gravity;
+	struct bz_position *offset; // Optional; Null until set
+};
+
+
 // -- xdg_surface --
 
 #define BZ_XDG_SURFACE_VERSION 7
@@ -27,12 +43,11 @@ enum bz_xdg_surface_type {
 };
 struct bz_toplevel_configure {
 	struct wl_array states;
-	struct bz_dimension max_size;
-	struct bz_dimension recommended_size;
+	struct bz_size max_size;
+	struct bz_size recommended_size;
 };
 struct bz_popup_configure {
-	struct bz_position position;
-	struct bz_dimension size;
+	struct bz_rect *bounds; // X/Y is relative to the parent surface
 };
 struct bz_xdg_surface_configure {
 	uint32_t serial;
@@ -53,7 +68,9 @@ struct bz_xdg_surface {
 };
 
 void bz_xdg_surface_dtor(struct wl_resource *data);
-void bz_xdg_surface_initial_configure(struct wl_client *client, struct bz_surface *bzsurf);
+void bz_xdg_surface_initial_configure(struct bz_surface *bzsurf);
+void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf);
+void bz_xdg_surface_configure_popup(struct bz_surface *bzsurf);
 
 
 // -- xdg_toplevel --
@@ -64,6 +81,9 @@ struct bz_xdg_toplevel {
 	struct wl_resource *resource;
 	struct bz_xdg_surface *xdgsurface;
 	struct bz_surface *wlsurface;
+
+	char *title;
+	char *app_id;
 };
 
 void bz_xdg_toplevel_dtor(struct wl_resource *data);
@@ -77,9 +97,13 @@ struct bz_xdg_popup {
 	struct wl_resource *resource;
 	struct bz_xdg_surface *xdgsurface;
 	struct bz_surface *wlsurface;
+
+	struct bz_surface *parent;
+	struct bz_xdg_positioner *positioner;
 };
 
-// void bz_xdg_popup_dtor(struct wl_resource *data);
+void bz_xdg_popup_dtor(struct wl_resource *data);
+struct bz_surface *bz_popup_get_associated_toplevel(struct bz_surface *surface);
 
 
 

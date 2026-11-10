@@ -3,10 +3,10 @@
 
 #include <stdlib.h>
 #include <wayland-server-core.h>
+#include <viewporter-server-protocol.h>
 
 #include "unity.h"
 #include "fff.h"
-#include "../../build/compositor/src/viewporter-server-protocol.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wayland.h"
 
@@ -59,7 +59,7 @@ void test_wp_viewporter_constructor__initializes_resource(void)
 	free(viewporter);
 }
 
-/** bz_seat_constructor() posts a no memory error for failed Wayland resource creation. */
+/** bz_wp_viewporter_constructor() posts a no memory error for failed Wayland resource creation. */
 void test_wp_viewporter_constructor__posts_no_mem_for_failed_resource(void)
 {
 	// Set up our mocks

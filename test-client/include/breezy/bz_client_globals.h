@@ -10,8 +10,8 @@
 
 struct bz_configure_sequence {
 	uint32_t serial;
-	struct bz_dimension max_size;
-	struct bz_dimension recommended_size;
+	struct bz_size max_size;
+	struct bz_size recommended_size;
 	struct wl_array *states;
 };
 
@@ -19,7 +19,7 @@ struct bz_buffer {
 	bool is_released;
 	struct wl_buffer *buffer;
 	uint32_t *pixel_data;
-	struct bz_dimension size;
+	struct bz_size size;
 };
 
 struct bz_application_window {
@@ -36,7 +36,7 @@ struct bz_application_window {
 	struct bz_configure_sequence *pending;
 	struct bz_configure_sequence *finalized;
 
-	struct bz_dimension size;
+	struct bz_size size;
 	uint32_t radius;
 	uint32_t bg_color;
 	uint32_t fg_color;

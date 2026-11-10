@@ -18,7 +18,7 @@ void bz_wp_viewporter_constructor(struct wl_client *client, void *data, uint32_t
 #define BZ_WP_VIEWPORT_VERSION 1
 
 struct bz_wp_viewport {
-	struct wl_resource *resource; // wl_viewport
+	struct wl_resource *resource; // wp_viewport
 	struct bz_surface *surface;
 };
 

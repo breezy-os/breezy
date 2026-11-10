@@ -19,6 +19,15 @@ viewporter_code = wl_mod.scan_xml(
     public: false,
     include_core_only: false)
 
+# Import the WP Fractional Scale protocol extension
+fractional_scale_xml = wl_mod.find_protocol('fractional-scale', state: 'staging', version: 1)
+fractional_scale_code = wl_mod.scan_xml(
+    fractional_scale_xml,
+    client: false,
+    server: true,
+    public: false,
+    include_core_only: false)
+
 
 # (This isn't actually used anywhere, but is needed so our test helpers don't show up as
 #   a file of nothing but red squiggles inside IntelliJ.)
@@ -45,23 +54,28 @@ foreach t : [
     'bz_wl_subcompositor',
     'bz_wl_subsurface',
     'bz_wl_surface',
+    'bz_wp_fractional_scale_manager',
     'bz_wp_viewport',
     'bz_wp_viewporter',
-    'bz_xdg_wm_base',
+    'bz_xdg_popup',
+    'bz_xdg_positioner',
     'bz_xdg_surface',
     'bz_xdg_toplevel',
+    'bz_xdg_wm_base',
 ]
     exe = executable('test_' + t,
         'test_' + t + '.c',
         sources: [
             xdg_shell_code,
             viewporter_code,
+            fractional_scale_code,
         ],
         dependencies: [
             bz_main_dep,
             bz_utils_dep,
             unity_dep,
             fff_dep,
+            math_dep,
             dependency('libdrm'),
             dependency('libseat'),
             dependency('wayland-server'),

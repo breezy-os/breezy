@@ -13,6 +13,9 @@
 #include "breezy/bz_client_utils.h"
 #include "breezy/bz_logger.h"
 
+#ifndef WL_KEYBOARD_KEY_STATE_REPEATED
+#define WL_KEYBOARD_KEY_STATE_REPEATED 2
+#endif
 
 // =================================================================================================
 //  File Variables / Declarations
@@ -497,6 +500,12 @@ static void bz_pointer_button(
 	case BTN_RIGHT:
 		window->bg_color = bz_random_color();
 		break;
+	case BTN_MIDDLE:
+		// Move the cursor:
+		// wl_surface_offset(seat_data->globals->cursor->wlsurface, -2, -2);
+		// Move the window:
+		wl_surface_offset(seat_data->globals->window->wlsurface, -5, -5);
+		break;
 	}
 }
 
@@ -622,6 +631,13 @@ static void bz_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface
 	bz_initialize_surface_buffers(client_globals, window);
 	bz_draw_frame(window);
 	bz_submit_frame(window);
+
+	// // Splits the area into 5 vertical sections of differing input reception.
+	// struct wl_region *region = wl_compositor_create_region(client_globals->compositor);
+	// wl_region_add(region, 100, 0, window->size.w - 200, window->size.h);
+	// wl_region_subtract(region, window->size.w/2 - 50, 0, 100, window->size.h);
+	// wl_surface_set_input_region(window->wlsurface, region);
+	// wl_region_destroy(region);
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------
@@ -727,8 +743,9 @@ static void bz_draw_frame(struct bz_application_window *window)
 		bz_draw_area(window, 0, 0, buffer->size.w, buffer->size.h, circle_x, circle_y);
 		window->has_been_drawn = true;
 	} else {
-		bz_draw_area(window, window->last_circle_center.x - window->radius, window->last_circle_center.y - window->radius, window->last_circle_center.x + window->radius, window->last_circle_center.y + window->radius, circle_x, circle_y);
-		bz_draw_area(window, circle_x - window->radius, circle_y - window->radius, circle_x + window->radius, circle_y + window->radius, circle_x, circle_y);
+		bz_draw_area(window, 0, 0, buffer->size.w, buffer->size.h, circle_x, circle_y);
+		// bz_draw_area(window, window->last_circle_center.x - window->radius, window->last_circle_center.y - window->radius, window->last_circle_center.x + window->radius, window->last_circle_center.y + window->radius, circle_x, circle_y);
+		// bz_draw_area(window, circle_x - window->radius, circle_y - window->radius, circle_x + window->radius, circle_y + window->radius, circle_x, circle_y);
 	}
 }
 

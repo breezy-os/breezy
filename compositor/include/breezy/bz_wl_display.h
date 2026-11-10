@@ -13,7 +13,7 @@
 
 // -- wl_compositor --
 
-#define BZ_COMPOSITOR_VERSION 6
+#define BZ_COMPOSITOR_VERSION 6 // TODO: Latest is 7
 
 void bz_compositor_constructor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
 
@@ -27,7 +27,7 @@ void bz_subcompositor_constructor(struct wl_client *client, void *data, uint32_t
 
 // -- wl_region --
 
-#define BZ_REGION_VERSION 7
+#define BZ_REGION_VERSION 6
 
 struct bz_region {
 	struct wl_resource *resource;
@@ -44,6 +44,7 @@ struct bz_region_mutation {
 };
 
 void bz_region_dtor(struct wl_resource *data);
+bool bz_region_contain_point(struct bz_rect *bounds, struct bz_list *mutations, struct bz_position *point);
 
 
 // -- wl_surface --
@@ -72,17 +73,22 @@ struct bz_surface_state {
 	struct bz_list *surface_damage;  // List of "struct bz_rect *"
 	struct bz_list *buffer_damage;   // List of "struct bz_rect *"
 
-	// TODO: Make use of opaque regions
+	// TODO-dl??: Make use of opaque regions
 	bool dirty_opaque_region;
 	struct bz_list *opaque_region;   // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
-	// TODO-dl12: Make use of input regions
 	bool dirty_input_region;
 	struct bz_list *input_region;    // List of "struct bz_region_mutation *". Nullable. Surface-level coordinates.
 
 	// Viewport state
 	struct bz_rect_dbl *vp_source;
-	struct bz_dimension *vp_dest;
+	struct bz_size *vp_dest;
 
+	// XDG state
+	struct bz_rect *window_geometry; // Nullable
+	struct bz_size *min_size;   // Nullable
+	struct bz_size *max_size;   // Nullable
+
+	struct bz_position offset;
 	enum wl_output_transform transform;
 	int32_t scale;
 };
@@ -97,8 +103,6 @@ struct bz_surface {
 	struct wl_resource *resource;
 	struct bz_xdg_surface *xdgsurface; // nullptr for non-xdg surfaces.
 
-	struct wl_listener disable_on_destroy; // Removes surface from breezy.wayland.activable_surfaces
-
 	// Role tracking
 	enum bz_surface_role role;
 	union {
@@ -106,7 +110,7 @@ struct bz_surface {
 		struct bz_xdg_toplevel *xdgtoplevel;
 		struct bz_xdg_popup *xdgpopup;
 		struct bz_subsurface *subsurface;
-		// (No role object for cursors)
+		struct bz_cursor *cursor;
 		// ...etc...
 	};
 
@@ -118,6 +122,11 @@ struct bz_surface {
 	// Display data
 	struct bz_renderable renderable;
 	struct bz_wp_viewport *viewport; // Nullable
+	struct bz_wp_fractional_scale *fractional_scale; // Nullable
+	bool appears_focused;
+	struct bz_section *section; // Location in the tiled layout
+
+	struct bz_list *popups; // List of "struct bz_xdg_popup *"
 };
 
 struct bz_content_update {
@@ -132,6 +141,8 @@ struct bz_content_update {
 };
 
 void bz_surface_dtor(struct wl_resource *data);
+void bz_recompute_physical_position(struct bz_surface *surface);
+struct bz_surface *bz_get_root_surface(struct bz_surface *surface);
 
 
 // -- wl_subsurface --
@@ -143,6 +154,7 @@ struct bz_subsurface {
 	struct bz_surface *surface;
 	struct bz_surface *parent;
 
+	struct bz_position position;
 	bool is_sync;
 };
 

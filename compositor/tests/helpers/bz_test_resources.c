@@ -5,6 +5,7 @@
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
 #include "breezy/bz_wp_viewporter.h"
+#include "breezy/bz_wp_fractional_scale.h"
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_list.h"
 
@@ -49,6 +50,10 @@ void bz_free_data_device_data(struct bz_data_device *data);
 struct bz_wp_viewport *bz_create_wp_viewport_data(void);
 void bz_free_wp_viewport_data(struct bz_wp_viewport *data);
 
+// -- bz_wp_fractional_scale --
+struct bz_wp_fractional_scale *bz_create_wp_fractional_scale_data(void);
+void bz_free_wp_fractional_scale_data(struct bz_wp_fractional_scale *data);
+
 // -- bz_xdg_surface --
 struct bz_xdg_surface *bz_create_xdg_surface_data();
 void bz_free_xdg_surface_data(struct bz_xdg_surface *data);
@@ -56,6 +61,14 @@ void bz_free_xdg_surface_data(struct bz_xdg_surface *data);
 // -- bz_xdg_toplevel --
 struct bz_xdg_toplevel *bz_create_xdg_toplevel_data();
 void bz_free_xdg_toplevel_data(struct bz_xdg_toplevel *data);
+
+// -- bz_xdg_popup --
+struct bz_xdg_popup *bz_create_xdg_popup_data();
+void bz_free_xdg_popup_data(struct bz_xdg_popup *data);
+
+// -- bz_xdg_positioner --
+struct bz_xdg_positioner *bz_create_xdg_positioner_data();
+void bz_free_xdg_positioner_data(struct bz_xdg_positioner *data);
 
 // -- bz_xdg_surface_configure --
 struct bz_xdg_surface_configure *bz_create_xdg_surface_configure(uint32_t serial);
@@ -70,10 +83,12 @@ struct bz_breezy *bz_create_breezy_data(void)
 {
 	struct bz_breezy *data = calloc(1, sizeof(*data));
 
-	data->drm.mode_info.hdisplay = 1920;
-	data->drm.mode_info.vdisplay = 1080;
 	data->window_mgmt.activable_surfaces = bz_list_create();
 	data->wayland.clients = bz_list_create();
+
+	data->drm.current_output = calloc(1, sizeof(*data->drm.current_output));
+	data->drm.current_output->output_bounds.w = 1920;
+	data->drm.current_output->output_bounds.h = 1080;
 
 	return data;
 }
@@ -86,6 +101,9 @@ void bz_free_breezy_data(struct bz_breezy *data)
 		}
 		if (data->wayland.clients != nullptr) {
 			bz_list_free(data->wayland.clients, nullptr);
+		}
+		if (data->drm.current_output != nullptr) {
+			free(data->drm.current_output);
 		}
 		free(data);
 	}
@@ -171,6 +189,8 @@ struct bz_surface *bz_create_surface_data(void)
 	bz_list_insert(data->pending_state->surface_stack, data, nullptr);
 	bz_list_insert(data->active_state->surface_stack, data, nullptr);
 
+	data->popups = bz_list_create();
+
 	return data;
 }
 
@@ -187,6 +207,9 @@ void bz_free_surface_data(struct bz_surface *data)
 			bz_list_free(data->pending_state->subsurface_states, free);
 			if (data->pending_state->vp_source) { free(data->pending_state->vp_source); }
 			if (data->pending_state->vp_dest)   { free(data->pending_state->vp_dest); }
+			if (data->pending_state->max_size)        { free(data->pending_state->max_size); }
+			if (data->pending_state->min_size)        { free(data->pending_state->min_size); }
+			if (data->pending_state->window_geometry) { free(data->pending_state->window_geometry); }
 			free(data->pending_state);
 		}
 		if (data->active_state) {
@@ -199,10 +222,16 @@ void bz_free_surface_data(struct bz_surface *data)
 			bz_list_free(data->active_state->subsurface_states, free);
 			if (data->active_state->vp_source) { free(data->active_state->vp_source); }
 			if (data->active_state->vp_dest)   { free(data->active_state->vp_dest); }
+			if (data->active_state->max_size)        { free(data->active_state->max_size); }
+			if (data->active_state->min_size)        { free(data->active_state->min_size); }
+			if (data->active_state->window_geometry) { free(data->active_state->window_geometry); }
 			free(data->active_state);
 		}
 		if (data->content_updates) {
 			bz_list_free(data->content_updates, nullptr);
+		}
+		if (data->popups) {
+			bz_list_free(data->popups, nullptr);
 		}
 		free(data);
 	}
@@ -324,6 +353,24 @@ void bz_free_wp_viewport_data(struct bz_wp_viewport *data)
 
 
 // =================================================================================================
+//  bz_wp_fractional_scale
+// -------------------------------------------------------------------------------------------------
+
+struct bz_wp_fractional_scale *bz_create_wp_fractional_scale_data(void)
+{
+	struct bz_wp_fractional_scale *data = calloc(1, sizeof(*data));
+	return data;
+}
+
+void bz_free_wp_fractional_scale_data(struct bz_wp_fractional_scale *data)
+{
+	if (data) {
+		free(data);
+	}
+}
+
+
+// =================================================================================================
 //  bz_xdg_surface
 // -------------------------------------------------------------------------------------------------
 
@@ -369,6 +416,48 @@ struct bz_xdg_toplevel *bz_create_xdg_toplevel_data()
 void bz_free_xdg_toplevel_data(struct bz_xdg_toplevel *data)
 {
 	if (data) {
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_xdg_popup
+// -------------------------------------------------------------------------------------------------
+
+struct bz_xdg_popup *bz_create_xdg_popup_data()
+{
+	struct bz_xdg_popup *data = calloc(1, sizeof(*data));
+
+	return data;
+}
+
+void bz_free_xdg_popup_data(struct bz_xdg_popup *data)
+{
+	if (data) {
+		if (data->positioner) { bz_free_xdg_positioner_data(data->positioner); }
+		free(data);
+	}
+}
+
+
+// =================================================================================================
+//  bz_xdg_positioner
+// -------------------------------------------------------------------------------------------------
+
+struct bz_xdg_positioner *bz_create_xdg_positioner_data()
+{
+	struct bz_xdg_positioner *data = calloc(1, sizeof(*data));
+
+	return data;
+}
+
+void bz_free_xdg_positioner_data(struct bz_xdg_positioner *data)
+{
+	if (data) {
+		if (data->size)        { free(data->size); }
+		if (data->anchor_rect) { free(data->anchor_rect); }
+		if (data->offset)      { free(data->offset); }
 		free(data);
 	}
 }

@@ -9,6 +9,7 @@ executable('test-client',
            dependencies: [
                dependency('wayland-client'),
                dependency('xkbcommon'),
+               math_dep,
                bz_utils_dep,
                bz_testclient_dep,
            ],

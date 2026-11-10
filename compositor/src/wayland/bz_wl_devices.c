@@ -374,11 +374,22 @@ static void bz_pointer_set_cursor(
 		goto initial_checks_failed;
 	}
 
+	// Try creating our role data object
+	if (surface_data->cursor == nullptr) {
+		surface_data->cursor = calloc(1, sizeof(*surface_data->cursor));
+		if (surface_data->cursor == nullptr) {
+			wl_resource_post_no_memory(resource);
+			bz_error(BZ_LOG_WL_DEVICES, "Failed to allocate cursor data.");
+			return;
+		}
+	}
+
 	// Ok, all checks out. Let's make the change!
-	surface_data->renderable.offset.x = -hotspot_x;
-	surface_data->renderable.offset.y = -hotspot_y;
-	surface_data->renderable.position.x = client_data->breezy->window_mgmt.last_cursor_loc.x;
-	surface_data->renderable.position.y = client_data->breezy->window_mgmt.last_cursor_loc.y;
+	surface_data->cursor->surface = surface_data;
+	surface_data->cursor->hotspot.x = hotspot_x;
+	surface_data->cursor->hotspot.y = hotspot_y;
+	surface_data->renderable.compositor_bounds.x = client_data->breezy->window_mgmt.last_cursor_loc.x;
+	surface_data->renderable.compositor_bounds.y = client_data->breezy->window_mgmt.last_cursor_loc.y;
 	surface_data->role = BZ_SURF_ROLE_WL_CURSOR;
 	client_data->cursor_surface = surface_data;
 
@@ -442,21 +453,26 @@ void bz_output_constructor(struct wl_client *client, void *data, uint32_t versio
 
 	// Emit events describing the output.
 	wl_output_send_geometry(res,
-		output->position.x,
-		output->position.y,
-		output->physical_size.w,
-		output->physical_size.h,
+		output->compositor_bounds.x,
+		output->compositor_bounds.y,
+		output->size_in_mms.w,
+		output->size_in_mms.h,
 		output->subpixel,
 		output->make,
 		output->model,
 		output->transform
 	);
-	wl_output_send_mode(res, WL_OUTPUT_MODE_CURRENT, output->size.w, output->size.h, output->refresh_rate);
+	wl_output_send_mode(res,
+		WL_OUTPUT_MODE_CURRENT,
+		output->output_bounds.w,
+		output->output_bounds.h,
+		output->refresh_rate
+	);
 	if (wl_resource_get_version(res) >= WL_OUTPUT_SCALE_SINCE_VERSION) {
-		wl_output_send_scale(res, 1);
+		wl_output_send_scale(res, ceil(output->scale/120.0));
 	}
 	if (wl_resource_get_version(res) >= WL_OUTPUT_NAME_SINCE_VERSION) {
-		wl_output_send_name(res, output->name); // TODO: This isn't a good name..
+		wl_output_send_name(res, output->name);
 	}
 	if (wl_resource_get_version(res) >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION) {
 		wl_output_send_description(res, output->description);

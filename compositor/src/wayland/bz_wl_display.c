@@ -1,11 +1,14 @@
 
 #include "breezy/bz_wl_display.h"
 
+#include <fractional-scale-v1-server-protocol.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <wayland-server.h>
+#include <xdg-shell-server-protocol.h>
+#include <viewporter-server-protocol.h>
 
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
@@ -13,8 +16,10 @@
 #include "breezy/bz_math.h"
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_window_management.h"
+#include "breezy/bz_wl_devices.h"
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_wp_viewporter.h"
+#include "breezy/bz_wp_fractional_scale.h"
 
 
 // =================================================================================================
@@ -47,6 +52,7 @@ static void bz_region_add(struct wl_client *client, struct wl_resource *resource
 static void bz_region_subtract(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
 // Helpers
 static void bz_region_append_mutation(struct wl_client *client, struct bz_region *region_data, enum bz_region_op operation, int32_t x, int32_t y, int32_t width, int32_t height);
+bool bz_region_contain_point(struct bz_rect *bounds, struct bz_list *mutations, struct bz_position *point);
 
 // -- wl_surface --
 
@@ -64,13 +70,16 @@ static void bz_surface_set_buffer_scale(struct wl_client *client, struct wl_reso
 static void bz_surface_damage_buffer(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y, int32_t width, int32_t height);
 static void bz_surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y);
 // Helpers
-static void bz_write_surface_texture(struct bz_surface *surface_data);
+void bz_recompute_physical_position(struct bz_surface *surface);
+struct bz_surface *bz_get_root_surface(struct bz_surface *surface);
+static void bz_write_surface_texture(struct bz_surface *surface_data, bool full_redraw);
 static void bz_apply_buffer_damage(uint32_t *shm_data, int32_t buff_w, int32_t buff_h, struct bz_list *damage);
 static bool bz_is_effectively_sync(struct bz_surface *surface_data);
+static struct bz_surface_state *bz_promote_pending_to_content_update(struct bz_surface_state *pending_state);
 static void bz_walk_content_update_queue(struct bz_content_update *cu);
 static bool bz_is_content_update_satisfied(struct bz_content_update *cu);
 static struct bz_list *bz_apply_content_update(struct bz_content_update *cu);
-static void bz_apply_subsurface_cu_state(struct bz_list *subsurface_states, struct bz_surface *surface);
+static void bz_apply_subsurface_cu_state(struct bz_list *subsurface_states);
 static void bz_free_content_update(struct bz_content_update *content_update);
 static void *bz_clone_region_mutation(void *input);
 static void bz_sever_child_from_parent(struct bz_surface *child);
@@ -139,6 +148,11 @@ static void bz_compositor_create_surface(
 		wl_client_post_no_memory(client);
 		goto content_updates_alloc_failed;
 	}
+	struct bz_list *popups = bz_list_create();
+	if (popups == nullptr) {
+		wl_client_post_no_memory(client);
+		goto popups_alloc_failed;
+	}
 
 	// Create the resource, bound to the data
 	struct wl_resource *res = wl_resource_create(
@@ -159,14 +173,14 @@ static void bz_compositor_create_surface(
 	);
 
 	// Populate the surface's user data
-	// const struct bz_client *client_data = wl_client_get_user_data(client);
 	surface->resource = res;
 	surface->role = BZ_SURF_ROLE_NONE;
 	surface->pending_state = pending;
 	surface->active_state = active;
 	surface->content_updates = content_updates;
-	surface->renderable.position.x = 0;
-	surface->renderable.position.y = 0;
+	surface->renderable.compositor_bounds.x = 0;
+	surface->renderable.compositor_bounds.y = 0;
+	surface->popups = popups;
 
 	// Starts with only itself in its stack of surfaces.
 	bz_list_append(surface->pending_state->surface_stack, surface);
@@ -177,6 +191,8 @@ static void bz_compositor_create_surface(
 
 	// Error cleanups
 	resource_failed:
+		bz_list_free(popups, nullptr);
+	popups_alloc_failed:
 		bz_list_free(content_updates, nullptr);
 	content_updates_alloc_failed:
 		bz_free_surface_state(active);
@@ -277,6 +293,13 @@ static struct bz_surface_state *bz_init_surface_state(void)
 	state->dirty_input_region = false;
 	state->input_region = nullptr;
 
+	state->vp_source = nullptr;
+	state->vp_dest = nullptr;
+
+	state->window_geometry = nullptr;
+	state->min_size = nullptr;
+	state->max_size = nullptr;
+
 	state->transform = WL_OUTPUT_TRANSFORM_NORMAL;
 	state->scale = 1;
 
@@ -306,7 +329,7 @@ static void bz_free_surface_state(struct bz_surface_state *state)
 	if (state->frame_callbacks != nullptr) {
 		bz_list_free(state->frame_callbacks, nullptr);
 	}
-	if (state->frame_callbacks != nullptr) {
+	if (state->surface_stack != nullptr) {
 		bz_list_free(state->surface_stack, nullptr);
 	}
 	if (state->surface_damage != nullptr) {
@@ -324,8 +347,14 @@ static void bz_free_surface_state(struct bz_surface_state *state)
 	if (state->subsurface_states != nullptr) {
 		bz_list_free(state->subsurface_states, free);
 	}
+
 	if (state->vp_source != nullptr) { free(state->vp_source); }
 	if (state->vp_dest != nullptr)   { free(state->vp_dest);   }
+
+	if (state->window_geometry != nullptr) { free(state->window_geometry); }
+	if (state->min_size != nullptr)        { free(state->min_size);        }
+	if (state->max_size != nullptr)        { free(state->max_size);        }
+
 	free(state);
 }
 
@@ -426,6 +455,9 @@ static void bz_subcompositor_get_subsurface(
 	surface_data->role = BZ_SURF_ROLE_WL_SUBSURFACE;
 	surface_data->subsurface = subsurface_data;
 	bz_list_append(parent_data->pending_state->surface_stack, surface_data);
+	// Zero the renderable position -- subsurfaces are relative to their parent surface.
+	surface_data->renderable.compositor_bounds.x = 0;
+	surface_data->renderable.compositor_bounds.y = 0;
 
 	// Everything succeeded!
 	return;
@@ -498,6 +530,8 @@ static void bz_region_subtract(
 	bz_region_append_mutation(client, region_data, OP_SUBTRACT, x, y, width, height);
 }
 
+// ---  Helpers  -----------------------------------------------------------------------------------
+
 static void bz_region_append_mutation(
 	struct wl_client *client,
 	struct bz_region *region_data,
@@ -535,6 +569,34 @@ static void bz_region_append_mutation(
 		bz_error(BZ_LOG_WL_DISPLAY, "Failed to add or subtract rectangle to wl_region.");
 }
 
+bool bz_region_contain_point(struct bz_rect *bounds, struct bz_list *mutations, struct bz_position *point)
+{
+	// If the overall bounds don't contain the point, we can early exit.
+	if (!bz_contains_point(bounds, point)) {
+		return false;
+	}
+
+	// Null mutations indicates "infinite region".
+	if (mutations == nullptr) {
+		return true;
+	}
+
+	// Iterating backwards because only the final intersecting region impacts the result.
+	struct bz_region_mutation *mut; bz_list_foreach_rev(mut, mutations) {
+		struct bz_rect area = {
+			.x = mut->x + bounds->x,
+			.y = mut->y + bounds->y,
+			.w = mut->w,
+			.h = mut->h
+		};
+		if (!bz_contains_point(&area, point)) {
+			continue;
+		}
+		return (mut->op == OP_ADD) ? true : false;
+	}
+	return false;
+}
+
 
 // =================================================================================================
 //  wl_surface
@@ -543,6 +605,9 @@ static void bz_region_append_mutation(
 void bz_surface_dtor(struct wl_resource *data)
 {
 	struct bz_surface *bzsurf = wl_resource_get_user_data(data);
+
+	// Remove it from our window management functionality
+	bz_mgmt_untrack_surface_on_destroy(bzsurf);
 
 	// If this is destroying a child, remove it from its parent.
 	bz_sever_child_from_parent(bzsurf); // No-op if not a child.
@@ -582,6 +647,17 @@ void bz_surface_dtor(struct wl_resource *data)
 		bzsurf->xdgpopup->wlsurface = nullptr;
 	}
 
+	// If it's a cursor surface, free the role data
+	if (bzsurf->role == BZ_SURF_ROLE_WL_CURSOR && bzsurf->cursor != nullptr) {
+		free(bzsurf->cursor);
+		bzsurf->cursor = nullptr; // Shouldn't matter since surf is about to be freed, but eh.
+	}
+
+	// If this surface had popups, sever the links
+	struct bz_xdg_popup *popup; bz_list_foreach(popup, bzsurf->popups) { popup->parent = nullptr; }
+	bz_list_free(bzsurf->popups, nullptr);
+	bzsurf->popups = nullptr;
+
 	// Free our allocated state
 	bz_free_surface_state(bzsurf->pending_state);
 	bz_free_surface_state(bzsurf->active_state);
@@ -596,7 +672,14 @@ void bz_surface_dtor(struct wl_resource *data)
 		bzsurf->viewport->surface = nullptr;
 		bzsurf->viewport = nullptr;
 	}
+	// Remove the association with the fractional scale (if present)
+	if (bzsurf->fractional_scale != nullptr) {
+		bzsurf->fractional_scale->surface = nullptr;
+		bzsurf->fractional_scale = nullptr;
+	}
 
+	// Other/misc stuff
+	if (bzsurf->renderable.buffer_size != nullptr) { free(bzsurf->renderable.buffer_size); }
 	glDeleteTextures(1, &bzsurf->renderable.texture);
 
 	free(bzsurf);
@@ -652,7 +735,13 @@ static void bz_surface_attach(
 
 	if (wl_resource_get_version(resource) < 5) {
 		// x and y can only be used if the version is less than 5
-		// TODO: accommodate x and y. Consider how this would apply for both XDG surfaces and cursors.
+		if (surf_data->role == BZ_SURF_ROLE_WL_CURSOR && surf_data->cursor != nullptr) {
+			surf_data->cursor->hotspot.x -= x;
+			surf_data->cursor->hotspot.y -= y;
+		} else {
+			surf_data->pending_state->offset.x = x;
+			surf_data->pending_state->offset.y = y;
+		}
 	} else if (x != 0 || y != 0) {
 		// If a non-zero x or y value is given for >= version 5, then it's a protocol error
 		wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_OFFSET,
@@ -782,53 +871,98 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 {
 	struct bz_surface *bzsurf = wl_resource_get_user_data(resource);
 
-	// After creating an XDG role, the client must perform an initial commit w/o a buffer. The
-	//   compositor will reply with initial wl_surface state, followed by xdg_surface.configure.
-	//   The client must acknowledge it, and can then proceed to attach a buffer / map the surface.
-	if ((bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->role == BZ_SURF_ROLE_XDG_POPUP)
-			&& bzsurf->pending_state->buffer == nullptr
-			// Also checking active because user might commit a NULL buffer to clear the surface.
-			&& bzsurf->active_state->buffer == nullptr
+	// Verify state that spanned across multiple requests
+
+	// >> Min/Max sizes must be compatible
+	if (
+		bzsurf->pending_state->min_size != nullptr &&
+		bzsurf->pending_state->max_size != nullptr && (
+			(bzsurf->pending_state->min_size->h > bzsurf->pending_state->max_size->h && bzsurf->pending_state->max_size->h != 0) ||
+			(bzsurf->pending_state->min_size->w > bzsurf->pending_state->max_size->w && bzsurf->pending_state->max_size->w != 0)
+		)
 	) {
-		if (bzsurf->xdgsurface == nullptr) {
-			bz_error(BZ_LOG_WL_DISPLAY,
-				"XDG surface object was null on wl_surface after being assigned. "
-				"THIS SHOULD NEVER HAPPEN.");
-			wl_client_post_implementation_error(client,
-				"XDG surface object does not exist on the wl_surface.");
-			return;
-		}
-		bz_xdg_surface_initial_configure(client, bzsurf);
+		wl_resource_post_error(resource, XDG_TOPLEVEL_ERROR_INVALID_SIZE,
+			"Max size cannot be smaller than min size.");
+		bz_warn(BZ_LOG_WL_DISPLAY, "Configured max size (%dx%d) smaller than min size (%dx%d)",
+			bzsurf->pending_state->max_size->w,
+			bzsurf->pending_state->max_size->h,
+			bzsurf->pending_state->min_size->w,
+			bzsurf->pending_state->min_size->h);
 		return;
 	}
 
+	// >> Buffer size must be an even multiple of the scale.
+	if (bzsurf->pending_state->buffer != nullptr) {
+		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->pending_state->buffer);
+		if (
+			bzsurf->role != BZ_SURF_ROLE_WL_CURSOR && // Cursors don't always obey this requirement.
+			bzsurf->pending_state->scale != 1 &&
+			(wl_shm_buffer_get_width(shmbuf) % bzsurf->pending_state->scale != 0 ||
+			wl_shm_buffer_get_height(shmbuf) % bzsurf->pending_state->scale != 0)
+		) {
+			wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SIZE,
+				"Buffer size must be an even multiple of the buffer scale.");
+			bz_error(BZ_LOG_WL_DISPLAY,
+				"Configured buffer size (%dx%d) not a multiple of scale (%d)",
+				wl_shm_buffer_get_width(shmbuf),
+				wl_shm_buffer_get_height(shmbuf),
+				bzsurf->pending_state->scale);
+			return;
+		}
+	}
+
+	// >> Viewport
+	// "If src_width or src_height are not integers and destination size is not set, the bad_size
+	//   protocol error is raised when the surface state is applied."
+	if (bzsurf->pending_state->vp_source != nullptr && bzsurf->pending_state->vp_dest == nullptr) {
+		struct bz_rect_dbl *src = bzsurf->pending_state->vp_source;
+		if (!bz_dbl_is_int(src->w) || !bz_dbl_is_int(src->h)) {
+			wl_resource_post_error(resource, WP_VIEWPORT_ERROR_BAD_SIZE,
+				"No destination, and provided source w/h not integers.");
+			bz_error(BZ_LOG_WL_DISPLAY,
+				"No vp_dest set, and provided vp_source.w/h not integers (%f, %f).",
+				src->w, src->h);
+			return;
+		}
+	}
+	// "If the source rectangle is partially or completely outside of the non-NULL wl_buffer, then
+	//   the out_of_buffer protocol error is raised when the surface state is applied."
+	if (bzsurf->pending_state->buffer != nullptr && bzsurf->pending_state->vp_source != nullptr) {
+		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(bzsurf->pending_state->buffer);
+		int32_t width = wl_shm_buffer_get_width(shmbuf);
+		int32_t height = wl_shm_buffer_get_height(shmbuf);
+		struct bz_rect_dbl *src = bzsurf->pending_state->vp_source;
+		if (src->x + src->w > width || src->y + src->h > height) {
+			wl_resource_post_error(resource, WP_VIEWPORT_ERROR_OUT_OF_BUFFER,
+				"Viewport source extends beyond the provided buffer.");
+			bz_error(BZ_LOG_WL_DISPLAY,
+				"Viewport source (%f, %f, %f, %f) extends beyond the provided buffer (%d, %d).",
+				src->x, src->y, src->w, src->h, width, height);
+			return;
+		}
+	}
+
+	// Send initial state values
+	struct bz_client *client_data = wl_client_get_user_data(client);
+	struct bz_output *current_output = client_data->breezy->drm.current_output;
+	if (wl_resource_get_version(resource) >= WL_SURFACE_PREFERRED_BUFFER_SCALE_SINCE_VERSION) {
+		wl_surface_send_preferred_buffer_scale(resource, ceil(current_output->scale/120.0));
+	}
+	if (wl_resource_get_version(resource) >= WL_SURFACE_PREFERRED_BUFFER_TRANSFORM_SINCE_VERSION) {
+		wl_surface_send_preferred_buffer_transform(resource, current_output->transform);
+	}
+	if (bzsurf->fractional_scale != nullptr) {
+		wp_fractional_scale_v1_send_preferred_scale(
+			bzsurf->fractional_scale->resource,
+			current_output->scale);
+	}
+
 	// Copy over our pending state into a content update
-	struct bz_surface_state *cu_state = bz_init_surface_state();
+	struct bz_surface_state *cu_state = bz_promote_pending_to_content_update(bzsurf->pending_state);
 	if (cu_state == nullptr) {
 		wl_client_post_no_memory(client);
 		goto cu_state_alloc_failed;
 	}
-	cu_state->buffer = bzsurf->pending_state->buffer;
-	bz_list_move_to_end(bzsurf->pending_state->frame_callbacks, cu_state->frame_callbacks);
-	free(cu_state->surface_stack);
-	cu_state->surface_stack = bz_list_clone(bzsurf->pending_state->surface_stack, nullptr);
-	bz_list_move_to_end(bzsurf->pending_state->subsurface_states, cu_state->subsurface_states);
-	bz_list_move_to_end(bzsurf->pending_state->surface_damage, cu_state->surface_damage);
-	bz_list_move_to_end(bzsurf->pending_state->buffer_damage, cu_state->buffer_damage);
-	if (bzsurf->pending_state->dirty_opaque_region) {
-		bzsurf->pending_state->dirty_opaque_region = false; // Clear the dirty flag.
-		cu_state->dirty_opaque_region = true;
-		cu_state->opaque_region = bz_list_clone(bzsurf->pending_state->opaque_region, bz_clone_region_mutation);
-	}
-	if (bzsurf->pending_state->dirty_input_region) {
-		bzsurf->pending_state->dirty_input_region = false; // Clear the dirty flag.
-		cu_state->dirty_input_region = true;
-		cu_state->input_region = bz_list_clone(bzsurf->pending_state->input_region, bz_clone_region_mutation);
-	}
-	cu_state->vp_source = bz_clone_rect_dbl(bzsurf->pending_state->vp_source);
-	cu_state->vp_dest = bz_clone_dimension(bzsurf->pending_state->vp_dest);
-	cu_state->transform = bzsurf->pending_state->transform;
-	cu_state->scale = bzsurf->pending_state->scale;
 
 	// Create that content update
 	struct bz_content_update *cu = calloc(1, sizeof(*cu));
@@ -872,6 +1006,31 @@ static void bz_surface_commit(struct wl_client *client, struct wl_resource *reso
 	//   created an SCU, then there's no reason to walk because it didn't create a candidate.
 	if (bzsurf->role != BZ_SURF_ROLE_WL_SUBSURFACE || (bzsurf->subsurface && !bzsurf->subsurface->is_sync)) {
 		bz_walk_content_update_queue(cu);
+	}
+
+	// After creating an XDG role, the client must perform an initial commit w/o a buffer. The
+	//   compositor will reply with initial wl_surface state, followed by xdg_surface.configure.
+	//   The client must acknowledge it, and can then proceed to attach a buffer / map the surface.
+	if ((bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL || bzsurf->role == BZ_SURF_ROLE_XDG_POPUP)
+			&& (bzsurf->xdgtoplevel != nullptr || bzsurf->xdgpopup != nullptr)
+			&& bzsurf->pending_state->buffer == nullptr
+			// Also checking active because user might commit a NULL buffer to clear the surface.
+			&& bzsurf->active_state->buffer == nullptr
+			// Make sure it's not already reserving space
+			&& bzsurf->section == nullptr
+	) {
+		if (bzsurf->xdgsurface == nullptr) {
+			bz_error(BZ_LOG_WL_DISPLAY,
+				"XDG surface object was null on wl_surface after being assigned. "
+				"THIS SHOULD NEVER HAPPEN.");
+			wl_client_post_implementation_error(client,
+				"XDG surface object does not exist on the wl_surface.");
+			return;
+		}
+		if (bzsurf->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+			bz_mgmt_place_window(client_data->breezy, bzsurf);
+		}
+		bz_xdg_surface_initial_configure(bzsurf);
 	}
 
 	return;
@@ -951,15 +1110,84 @@ static void bz_surface_offset(
 	int32_t x,
 	int32_t y
 ) {
-	bz_error(BZ_LOG_WL_DISPLAY, "wl_surface.offset not implemented");
-	// TODO
-	// TODO: (since version 5)
-	// TODO: Make sure to ignore this request for subsurfaces.
+	struct bz_surface *surface = wl_resource_get_user_data(resource);
+	if (surface->role == BZ_SURF_ROLE_WL_CURSOR && surface->cursor != nullptr) {
+		surface->cursor->hotspot.x -= x;
+		surface->cursor->hotspot.y -= y;
+	} else if (surface->role != BZ_SURF_ROLE_WL_SUBSURFACE) {
+		surface->pending_state->offset.x = x;
+		surface->pending_state->offset.y = y;
+	}
 }
 
 // ---  Helpers  -----------------------------------------------------------------------------------
 
-static void bz_write_surface_texture(struct bz_surface *surface_data)
+void bz_recompute_physical_position(struct bz_surface *surface)
+{
+	// Start with the logical/compositor bounds
+	surface->renderable.render_bounds.x = surface->renderable.compositor_bounds.x;
+	surface->renderable.render_bounds.y = surface->renderable.compositor_bounds.y;
+
+	// Shift by the window geometry (when set)
+	if (surface->active_state->window_geometry) {
+		surface->renderable.render_bounds.x -= surface->active_state->window_geometry->x;
+		surface->renderable.render_bounds.y -= surface->active_state->window_geometry->y;
+	}
+
+	// Shift by the accumulated offset.
+	surface->renderable.render_bounds.x += surface->active_state->offset.x;
+	surface->renderable.render_bounds.y += surface->active_state->offset.y;
+
+	if (surface->role == BZ_SURF_ROLE_WL_SUBSURFACE && surface->subsurface) {
+		// Shift by the parent location
+		struct bz_surface *parent = surface->subsurface->parent;
+		surface->renderable.render_bounds.x += parent->renderable.render_bounds.x;
+		surface->renderable.render_bounds.y += parent->renderable.render_bounds.y;
+		// And also by the subsurface's relative location
+		surface->renderable.render_bounds.x += surface->subsurface->position.x;
+		surface->renderable.render_bounds.y += surface->subsurface->position.y;
+	}
+
+	if (surface->role == BZ_SURF_ROLE_XDG_POPUP && surface->xdgpopup) {
+		// Shift by the parent's WINDOW GEOMETRY location
+		struct bz_surface *parent = surface->xdgpopup->parent;
+		surface->renderable.render_bounds.x += parent->renderable.compositor_bounds.x;
+		surface->renderable.render_bounds.y += parent->renderable.compositor_bounds.y;
+	}
+
+	// Update all child surfaces, recursively.
+	struct bz_surface *child; bz_list_foreach(child, surface->active_state->surface_stack) {
+		if (child == surface) continue;
+		bz_recompute_physical_position(child);
+	}
+
+	// Update all popups, recursively.
+	struct bz_xdg_popup *popup; bz_list_foreach(popup, surface->popups) {
+		if (popup->wlsurface == surface) continue;
+		bz_recompute_physical_position(popup->wlsurface);
+	}
+}
+
+struct bz_surface *bz_get_root_surface(struct bz_surface *surface)
+{
+	if (surface == nullptr) return nullptr;
+
+	struct bz_surface *root = surface;
+	while (
+		(root->role == BZ_SURF_ROLE_WL_SUBSURFACE && root->subsurface != nullptr) ||
+		(root->role == BZ_SURF_ROLE_XDG_POPUP && root->xdgpopup != nullptr)
+	) {
+		if (root->role == BZ_SURF_ROLE_WL_SUBSURFACE && root->subsurface != nullptr) {
+			root = root->subsurface->parent;
+		} else if (root->role == BZ_SURF_ROLE_XDG_POPUP && root->xdgpopup != nullptr) {
+			root = root->xdgpopup->parent;
+		}
+	}
+	return (root->role != BZ_SURF_ROLE_WL_SUBSURFACE && root->role != BZ_SURF_ROLE_XDG_POPUP)
+		? root : nullptr;
+}
+
+static void bz_write_surface_texture(struct bz_surface *surface_data, bool full_redraw)
 {
 	// Initialize the texture
 	bool init_needed = surface_data->renderable.texture == 0;
@@ -980,17 +1208,17 @@ static void bz_write_surface_texture(struct bz_surface *surface_data)
 
 	// Copy in the surface
 	struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(surface_data->active_state->buffer);
+	uint32_t *data = wl_shm_buffer_get_data(shmbuf);
+	int32_t width = wl_shm_buffer_get_width(shmbuf); // Pixels per row
+	int32_t stride = wl_shm_buffer_get_stride(shmbuf); // Bytes per row
+	int32_t height = wl_shm_buffer_get_height(shmbuf);
+	glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4); // 4 bytes per pixel. MUST use stride.
+
 	wl_shm_buffer_begin_access(shmbuf);
 	// --- Buffer Access Begin ---------------------------------------------------------------------
 
-	uint32_t *data = wl_shm_buffer_get_data(shmbuf);
-	int32_t width = wl_shm_buffer_get_width(shmbuf); // Pixels per row, not bytes
-	int32_t height = wl_shm_buffer_get_height(shmbuf);
-	glBindTexture(GL_TEXTURE_2D, surface_data->renderable.texture);
-	glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
-
-	if (init_needed) {
-		// TODO-dl12: This needs to be rerun whenever the buffer size changes
+	if (init_needed || full_redraw) {
 		glTexImage2D(
 			GL_TEXTURE_2D,
 			0,                // mipmap level
@@ -1009,12 +1237,65 @@ static void bz_write_surface_texture(struct bz_surface *surface_data)
 		// Then, apply surface damage, first transforming the damage into buffer coords.
 		struct bz_list *transformed_damage = bz_list_create();
 		struct bz_rect *rect; bz_list_foreach(rect, surface_data->active_state->surface_damage) {
-			struct bz_rect transformed = *rect;
-			// TODO-dl12: Modify the rectangle as needed (scale + transform)
-			bz_list_append(transformed_damage, &transformed);
+			struct bz_rect *transformed = calloc(1, sizeof(*transformed));
+			*transformed = *rect;
+
+			// 1. Apply viewport
+			struct bz_rect_dbl *vp_source = surface_data->active_state->vp_source != nullptr
+				? surface_data->active_state->vp_source
+				: &(struct bz_rect_dbl){ .x = 0, .y = 0, .w = width, .h = height };
+			struct bz_size *vp_dest = surface_data->active_state->vp_dest != nullptr
+				? surface_data->active_state->vp_dest
+				: &(struct bz_size){ .w = vp_source->w, .h = vp_source->h };
+			transformed->x *= (vp_source->w / vp_dest->w);
+			transformed->y *= (vp_source->h / vp_dest->h);
+			transformed->w *= (vp_source->w / vp_dest->w);
+			transformed->h *= (vp_source->h / vp_dest->h);
+			transformed->x += vp_source->x;
+			transformed->y += vp_source->y;
+
+			// 2. Apply buffer scale
+			transformed->x *= surface_data->active_state->scale;
+			transformed->y *= surface_data->active_state->scale;
+			transformed->w *= surface_data->active_state->scale;
+			transformed->h *= surface_data->active_state->scale;
+
+			// 3. Apply buffer transform
+			if (surface_data->active_state->transform >= 4) { // "if flipped vertically"
+				transformed->x = width - transformed->x - transformed->w;
+			}
+			int32_t tx = transformed->x; // Swap var
+			int32_t tw = transformed->w; // Swap var
+			switch (surface_data->active_state->transform & 3) { // Flip already addressed.
+			case 0: break;
+			case 1: // 90 CCW
+				transformed->x = transformed->y;
+				transformed->y = height - tx - transformed->w;
+				transformed->w = transformed->h;
+				transformed->h = tw;
+				break;
+			case 2: // 180 CCW
+				transformed->x = width - transformed->x - transformed->w;
+				transformed->y = height - transformed->y - transformed->h;
+				break;
+			case 3: // 270 CCW
+				transformed->x = width - transformed->y - transformed->h;
+				transformed->y = tx;
+				transformed->w = transformed->h;
+				transformed->h = tw;
+				break;
+			}
+
+			// Pad by 1 to cover potential rounding issues
+			transformed->x -= 1;
+			transformed->y -= 1;
+			transformed->w += 2;
+			transformed->h += 2;
+
+			bz_list_append(transformed_damage, transformed);
 		}
 		bz_apply_buffer_damage(data, width, height, transformed_damage);
-		bz_list_free(transformed_damage, nullptr);
+		bz_list_free(transformed_damage, free);
 	}
 
 	// --- Buffer Access End -----------------------------------------------------------------------
@@ -1056,11 +1337,72 @@ static bool bz_is_effectively_sync(struct bz_surface *surface_data)
 		return false;
 	}
 	// If it's sync ... then it's sync.
-	if (surface_data->subsurface->is_sync) { // TODO-dl12: CLion gave "points to zero page" here.
+	if (surface_data->subsurface->is_sync) {
 		return true;
 	}
 	// If any of its parents are sync, then it's sync.
 	return bz_is_effectively_sync(surface_data->subsurface->parent);
+}
+
+static struct bz_surface_state *bz_promote_pending_to_content_update(
+	struct bz_surface_state *pending_state
+) {
+	// Allocation
+	struct bz_surface_state *cu_state = bz_init_surface_state();
+	if (cu_state == nullptr) {
+		return nullptr;
+	}
+
+	// Buffer-related
+	cu_state->buffer = pending_state->buffer;
+	bz_list_move_to_end(pending_state->frame_callbacks, cu_state->frame_callbacks);
+
+	// Subsurface-related
+	free(cu_state->surface_stack);
+	cu_state->surface_stack = bz_list_clone(pending_state->surface_stack, nullptr);
+	bz_list_move_to_end(pending_state->subsurface_states, cu_state->subsurface_states);
+
+	// Damage
+	bz_list_move_to_end(pending_state->surface_damage, cu_state->surface_damage);
+	bz_list_move_to_end(pending_state->buffer_damage, cu_state->buffer_damage);
+
+	// Regions
+	if (pending_state->dirty_opaque_region) {
+		pending_state->dirty_opaque_region = false; // Clear the dirty flag.
+		cu_state->dirty_opaque_region = true;
+		cu_state->opaque_region = bz_list_clone(pending_state->opaque_region, bz_clone_region_mutation);
+	}
+	if (pending_state->dirty_input_region) {
+		pending_state->dirty_input_region = false; // Clear the dirty flag.
+		cu_state->dirty_input_region = true;
+		cu_state->input_region = bz_list_clone(pending_state->input_region, bz_clone_region_mutation);
+	}
+
+	// Viewport State
+	cu_state->vp_source = bz_clone_rect_dbl(pending_state->vp_source);
+	cu_state->vp_dest = bz_clone_size(pending_state->vp_dest);
+
+	// XDG State
+	if (pending_state->window_geometry != nullptr) {
+		cu_state->window_geometry = calloc(1, sizeof(*cu_state->window_geometry));
+		*cu_state->window_geometry = *pending_state->window_geometry;
+	}
+	if (pending_state->max_size != nullptr) {
+		cu_state->max_size = calloc(1, sizeof(*cu_state->max_size));
+		*cu_state->max_size = *pending_state->max_size;
+	}
+	if (pending_state->min_size != nullptr) {
+		cu_state->min_size = calloc(1, sizeof(*cu_state->min_size));
+		*cu_state->min_size = *pending_state->min_size;
+	}
+
+	// Buffer transform/scale
+	cu_state->offset = pending_state->offset;
+	pending_state->offset = (struct bz_position){ .x = 0, .y = 0 };
+	cu_state->transform = pending_state->transform;
+	cu_state->scale = pending_state->scale;
+
+	return cu_state;
 }
 
 static void bz_walk_content_update_queue(struct bz_content_update *cu)
@@ -1140,63 +1482,133 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 		bz_list_free(dep_CUs, nullptr);
 	}
 
-	// Then, apply the current CU. (This is also the base case.)
+	// Then, apply the current CU. (This is the base case.)
 	struct bz_surface *surface = cu->surface;
-	surface->active_state->buffer = cu->state->buffer;
-	bz_list_move_to_end(cu->state->frame_callbacks, surface->active_state->frame_callbacks);
-	// Surface stack
-	if (surface->active_state->surface_stack != nullptr) {
-		bz_list_free(surface->active_state->surface_stack, nullptr);
-	}
-	surface->active_state->surface_stack = bz_list_clone(cu->state->surface_stack, nullptr);
-	bz_apply_subsurface_cu_state(cu->state->subsurface_states, surface);
-	// Move damage
-	bz_list_clear(surface->active_state->surface_damage, free);
-	bz_list_move_to_end(cu->state->surface_damage, surface->active_state->surface_damage);
-	bz_list_clear(surface->active_state->buffer_damage, free);
-	bz_list_move_to_end(cu->state->buffer_damage, surface->active_state->buffer_damage);
-	// Move opaque/input regions
-	if (cu->state->dirty_opaque_region) {
-		surface->active_state->dirty_opaque_region = true;
-		if (surface->active_state->opaque_region != nullptr) {
-			bz_list_free(surface->active_state->opaque_region, free);
+	struct bz_surface_state *active_state = surface->active_state;
+
+	// "When the buffer size, scale, transform, or viewport changes in a commit, treat the whole
+	//   surface as damaged regardless of what the client sent."
+	bool full_redraw = false;
+
+	// >> Buffer-related
+	if (cu->state->buffer != nullptr) { // If new commit includes a buffer
+		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(cu->state->buffer);
+		if (surface->renderable.buffer_size == nullptr) { // If old commit didn't have a buffer
+			surface->renderable.buffer_size = calloc(1, sizeof(*surface->renderable.buffer_size));
+			full_redraw = true;
+		} else { // If both new and old commits had buffers
+			full_redraw |= full_redraw || (surface->renderable.buffer_size->w != wl_shm_buffer_get_width(shmbuf));
+			full_redraw |= full_redraw || (surface->renderable.buffer_size->h != wl_shm_buffer_get_height(shmbuf));
 		}
-		surface->active_state->opaque_region = bz_list_clone(cu->state->opaque_region, bz_clone_region_mutation);
+		surface->renderable.buffer_size->w = wl_shm_buffer_get_width(shmbuf);
+		surface->renderable.buffer_size->h = wl_shm_buffer_get_height(shmbuf);
+	} else if (surface->renderable.buffer_size != nullptr) { // If old commit had a buffer, but new didn't.
+		free(surface->renderable.buffer_size);
+		surface->renderable.buffer_size = nullptr;
+	}
+	active_state->buffer = cu->state->buffer;
+	bz_list_move_to_end(cu->state->frame_callbacks, active_state->frame_callbacks);
+
+	// >> Subsurface-related
+	if (active_state->surface_stack != nullptr) {
+		bz_list_free(active_state->surface_stack, nullptr);
+	}
+	active_state->surface_stack = bz_list_clone(cu->state->surface_stack, nullptr);
+	bz_apply_subsurface_cu_state(cu->state->subsurface_states);
+
+	// >> Damage
+	bz_list_clear(active_state->surface_damage, free);
+	bz_list_move_to_end(cu->state->surface_damage, active_state->surface_damage);
+	bz_list_clear(active_state->buffer_damage, free);
+	bz_list_move_to_end(cu->state->buffer_damage, active_state->buffer_damage);
+
+	// >> Opaque/input regions
+	if (cu->state->dirty_opaque_region) {
+		active_state->dirty_opaque_region = true;
+		if (active_state->opaque_region != nullptr) {
+			bz_list_free(active_state->opaque_region, free);
+		}
+		active_state->opaque_region = bz_list_clone(cu->state->opaque_region, bz_clone_region_mutation);
 	}
 	if (cu->state->dirty_input_region) {
-		surface->active_state->dirty_input_region = true;
-		if (surface->active_state->input_region != nullptr) {
-			bz_list_free(surface->active_state->input_region, free);
+		active_state->dirty_input_region = true;
+		if (active_state->input_region != nullptr) {
+			bz_list_free(active_state->input_region, free);
 		}
-		surface->active_state->input_region = bz_list_clone(cu->state->input_region, bz_clone_region_mutation);
+		active_state->input_region = bz_list_clone(cu->state->input_region, bz_clone_region_mutation);
 	}
-	// Viewporter stuff
-	if (surface->active_state->vp_source) { free(surface->active_state->vp_source); }
-	if (surface->active_state->vp_dest)   { free(surface->active_state->vp_dest); }
-	surface->active_state->vp_source = bz_clone_rect_dbl(cu->state->vp_source);
-	surface->active_state->vp_dest = bz_clone_dimension(cu->state->vp_dest);
-	// Buffer transform and scale
-	surface->active_state->transform = cu->state->transform;
-	surface->active_state->scale = cu->state->scale;
+
+	// >> Viewporter stuff
+	full_redraw |= !bz_dbl_rects_are_equal(active_state->vp_source, cu->state->vp_source);
+	full_redraw |= !bz_sizes_are_equal(active_state->vp_dest, cu->state->vp_dest);
+	if (active_state->vp_source) { free(active_state->vp_source); }
+	if (active_state->vp_dest)   { free(active_state->vp_dest); }
+	active_state->vp_source = bz_clone_rect_dbl(cu->state->vp_source);
+	active_state->vp_dest = bz_clone_size(cu->state->vp_dest);
+
+	// >> XDG State
+	if (cu->state->window_geometry != nullptr) {
+		if (active_state->window_geometry == nullptr) {
+			active_state->window_geometry = calloc(1, sizeof(*active_state->window_geometry));
+		}
+		*active_state->window_geometry = *cu->state->window_geometry;
+		surface->renderable.compositor_bounds.w = active_state->window_geometry->w;
+		surface->renderable.compositor_bounds.h = active_state->window_geometry->h;
+	}
+	if (cu->state->min_size != nullptr) {
+		if (active_state->min_size == nullptr) {
+			active_state->min_size = calloc(1, sizeof(*active_state->min_size));
+		}
+		*active_state->min_size = *cu->state->min_size;
+	}
+	if (cu->state->max_size != nullptr) {
+		if (active_state->max_size == nullptr) {
+			active_state->max_size = calloc(1, sizeof(*active_state->max_size));
+		}
+		*active_state->max_size = *cu->state->max_size;
+	}
+
+	// >> Buffer transform and scale
+	full_redraw |= full_redraw || (cu->state->offset.x != 0) || (cu->state->offset.y != 0);
+	full_redraw |= full_redraw || (active_state->transform != cu->state->transform);
+	full_redraw |= full_redraw || (active_state->scale != cu->state->scale);
+	active_state->offset.x += cu->state->offset.x;
+	active_state->offset.y += cu->state->offset.y;
+	active_state->transform = cu->state->transform;
+	active_state->scale = cu->state->scale;
 
 	// When a CU is applied, the buffer is applied first. This means all other coordinates are
 	//   relative to the new buffer. If there is no new buffer, the coordinates are relative to
 	//   the previous CU.
-	if (surface->active_state->buffer != nullptr) {
+	if (active_state->buffer != nullptr) {
 		// Update our OpenGL texture
-		bz_write_surface_texture(surface);
+		bz_write_surface_texture(surface, full_redraw);
 
 		// Update our displayed window size
-		struct wl_shm_buffer *shmbuf = wl_shm_buffer_get(surface->active_state->buffer);
-		surface->renderable.size.w = wl_shm_buffer_get_width(shmbuf);
-		surface->renderable.size.h = wl_shm_buffer_get_height(shmbuf);
+		if (active_state->vp_dest != nullptr) {
+			// If destination is set, it alone determines the surface size.
+			surface->renderable.render_bounds.w = active_state->vp_dest->w;
+			surface->renderable.render_bounds.h = active_state->vp_dest->h;
+		} else if (active_state->vp_source != nullptr) {
+			// If only set_source is set, the surface size is the source size, which must then be an integer.
+			surface->renderable.render_bounds.w = active_state->vp_source->w;
+			surface->renderable.render_bounds.h = active_state->vp_source->h;
+		} else {
+			// If neither is set, the surface size is the buffer size after transform and scale.
+			surface->renderable.render_bounds.w = surface->renderable.buffer_size->w / (surface->active_state->scale);
+			surface->renderable.render_bounds.h = surface->renderable.buffer_size->h / (surface->active_state->scale);
+			if (surface->active_state->transform & 1) { // "is an odd transform"
+				int32_t swap = surface->renderable.render_bounds.w;
+				surface->renderable.render_bounds.w = surface->renderable.render_bounds.h;
+				surface->renderable.render_bounds.h = swap;
+			}
+		}
 
 		// Since the buffer contents are saved on our OpenGL texture, release the buffer.
 		// TODO-dl??: This might need to be deferred for the DMA-BUF protocol..?
 		wl_buffer_send_release(surface->active_state->buffer);
 
 		// Since the surface was just mapped (and therefore displayed), let's focus the surface
-		// TODO-dl?? : Also consider wlr_layer_surfaces
 		if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL || surface->role == BZ_SURF_ROLE_XDG_POPUP) {
 			struct wl_client *client = wl_resource_get_client(surface->resource);
 			struct bz_client *client_data = wl_client_get_user_data(client);
@@ -1208,14 +1620,11 @@ static struct bz_list *bz_apply_content_update(struct bz_content_update *cu)
 	return applied_CUs;
 }
 
-static void bz_apply_subsurface_cu_state(
-	struct bz_list *subsurface_states,
-	struct bz_surface *surface
-) {
+static void bz_apply_subsurface_cu_state(struct bz_list *subsurface_states) {
 	struct bz_subsurface_state *subsurf_state; bz_list_foreach(subsurf_state, subsurface_states) {
 		// Update the relative render position
-		subsurf_state->subsurface->surface->renderable.position.x = subsurf_state->position.x;
-		subsurf_state->subsurface->surface->renderable.position.y = subsurf_state->position.y;
+		subsurf_state->subsurface->position.x = subsurf_state->position.x;
+		subsurf_state->subsurface->position.y = subsurf_state->position.y;
 	}
 }
 

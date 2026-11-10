@@ -6,22 +6,28 @@ static constexpr char CLIENT_VERT_SRC[] =
 "#version 320 es\n"
 "layout(location = 0) in highp vec2 a_vertCoord;\n"
 "layout(location = 1) in lowp vec2 a_texCoord;\n"
+
 "uniform mat3 u_outputProj;\n"
 "uniform mat3 u_surfaceProj;\n"
+"uniform mat3 u_surfaceUVProj;\n"
+
 "out lowp vec2 v_texCoord;\n"
 "void main() {\n"
 "    vec3 p = u_outputProj * u_surfaceProj * vec3(a_vertCoord, 1.0);\n"
 "	 gl_Position = vec4(p.xy, 0.0, 1.0);\n"
-"	 v_texCoord = a_texCoord;\n"
+"	 v_texCoord = (u_surfaceUVProj * vec3(a_texCoord, 1.0)).xy;\n"
 "}\n";
 
+// TODO-dl??: Define a separate shader for XRGB surfaces since the alpha channel should be
+//   hardcoded to 1 for those. ie: fragColor = vec4(texture(u_texture, v_texCoord).rgb, 1.0);
 static constexpr char CLIENT_FRAG_SRC[] =
 "#version 320 es\n"
 "in lowp vec2 v_texCoord;\n"
 "uniform sampler2D u_texture;\n"
+"uniform lowp float u_alpha;\n"
 "out lowp vec4 fragColor;\n"
 "void main() {\n"
-"	 fragColor = texture(u_texture, v_texCoord);\n"
+"	 fragColor = texture(u_texture, v_texCoord) * u_alpha;\n"
 "}\n";
 
 // #################################################################################################

@@ -22,6 +22,7 @@
 #include "breezy/bz_wayland.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
+#include "breezy/bz_xdg_shell.h"
 
 
 // =================================================================================================
@@ -34,7 +35,7 @@ static struct bz_drm_prop_ids prop_id_lookup = { 0 };
 // Init
 static int bz_drm_init(struct bz_breezy *breezy);
 // DRM resource
-static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct bz_connector_data *conn_data);
+static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct bz_connector_data *conn_data, drmModeModeInfo *mode);
 static struct bz_connector_data *bz_drm_get_first_valid_connector(int drm_fd, const drmModeRes *resources);
 static void bz_drm_print_modes(const drmModeConnector *connector);
 static uint32_t bz_drm_find_valid_crtc(int drm_fd, const drmModeRes *resources, const drmModeConnector *connector, int *crtc_index);
@@ -62,9 +63,12 @@ static int bz_gles_assert_extension(const char *extensionList, const char *exten
 static char *bz_get_egl_error_text(EGLint error);
 static void bz_gles_print_egl_error(char *function_name, EGLint error);
 static void bz_gles_render_and_commit(void *data);
+static void bz_gles_render_background(struct bz_breezy *breezy);
 static void bz_gles_render_applications(struct bz_breezy *breezy);
-static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surface *surface);
+static void bz_gles_render_surface(GLuint client_program, struct bz_surface *surface);
+static void bz_gles_draw_surface(GLuint client_program, struct bz_surface *surface);
 static void bz_gles_render_cursor(struct bz_breezy *breezy);
+static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians, struct bz_rect_dbl *viewport, struct bz_size *buff_size, int32_t buff_scale);
 // Shaders
 static GLuint bz_gles_create_client_shader_program(void);
 static GLuint compile_shader(GLenum type, const char *code);
@@ -126,11 +130,11 @@ static int bz_drm_init(struct bz_breezy *breezy)
 
 	// Set up our chosen mode
 	bz_drm_print_modes(connector);
-	breezy->drm.mode_info = connector->modes[0];
+	drmModeModeInfo mode_info = connector->modes[0];
 	const int result = drmModeCreatePropertyBlob(
 		drm_fd,
-		&breezy->drm.mode_info,
-		sizeof(breezy->drm.mode_info),
+		&mode_info,
+		sizeof(mode_info),
 		&breezy->drm.mode_blob_id
 	);
 	if (result != 0) {
@@ -138,15 +142,7 @@ static int bz_drm_init(struct bz_breezy *breezy)
 		retval = -6;
 		goto clean_connector;
 	}
-	bz_info(BZ_LOG_GRAPHICS, "Chosen Mode: %dx%d",
-		breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay);
-
-	// Set up our projection matrix based on the chosen mode
-	bz_fill_projection_matrix(
-		breezy->drm.output_projection,
-		0, 0, breezy->drm.mode_info.hdisplay, breezy->drm.mode_info.vdisplay,
-		-1, 1, 2, -2 // OpenGL's coordinate system
-	);
+	bz_info(BZ_LOG_GRAPHICS, "Chosen Mode: %dx%d", mode_info.hdisplay, mode_info.vdisplay);
 
 	// Get an encoder / CRTC from the connector
 	int crtc_index = -1;
@@ -186,7 +182,7 @@ static int bz_drm_init(struct bz_breezy *breezy)
 	prop_id_lookup.plane_crtc_h  = bz_drm_get_prop_id(drm_fd, DRM_MODE_OBJECT_PLANE, plane_id, "CRTC_H");
 
 	// Fill in our chosen output data.
-	breezy->drm.current_output = bz_drm_get_output_data(breezy, conn_data);
+	breezy->drm.current_output = bz_drm_get_output_data(breezy, conn_data, &mode_info);
 	if (breezy->drm.current_output == nullptr) {
 		retval = -9;
 		goto clean_connector;
@@ -210,16 +206,14 @@ exit:
 	return retval;
 }
 
-static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct bz_connector_data *conn_data) {
+static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct bz_connector_data *conn_data, drmModeModeInfo *mode)
+{
 	// Initialize our output/monitor data
 	struct bz_output *out = calloc(1, sizeof(*out));
 	if (out == nullptr) {
 		bz_error(BZ_LOG_GRAPHICS, "Failed to allocate memory for output data.");
 		return nullptr;
 	}
-
-	// Pull needed data out of DRM.
-	drmModeModeInfo *mode = &breezy->drm.mode_info;
 
 	// Figure out subpixel
 	enum wl_output_subpixel subpixel = WL_OUTPUT_SUBPIXEL_UNKNOWN;
@@ -242,10 +236,17 @@ static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct
 	snprintf(description, desc_len, "%s %s (%s)", conn_data->make, conn_data->model, name);
 
 	// Set all values
-	out->position = (struct bz_position){ .x = 0, .y = 0 };
-	out->size = (struct bz_dimension){ .w = mode->hdisplay, .h = mode->vdisplay };
-	out->refresh_rate = mode->vrefresh;
-	out->physical_size = (struct bz_dimension){
+	out->scale = breezy->user_config.output_scale; // Numerator over 120 (fractional scale protocol support)
+	out->transform = breezy->user_config.output_transform;
+	out->output_bounds = (struct bz_rect){ .x = 0, .y = 0, .w = mode->hdisplay, .h = mode->vdisplay };
+	out->compositor_bounds = (struct bz_rect){
+		.x = out->output_bounds.x / (out->scale/120.0),
+		.y = out->output_bounds.y / (out->scale/120.0),
+		.w = (out->transform & 1 ? out->output_bounds.h : out->output_bounds.w) / (out->scale/120.0),
+		.h = (out->transform & 1 ? out->output_bounds.w : out->output_bounds.h) / (out->scale/120.0)
+	};
+	out->refresh_rate = mode->vrefresh * 1000;
+	out->size_in_mms = (struct bz_size){
 		.w = conn_data->connector->mmWidth,
 		.h = conn_data->connector->mmHeight
 	};
@@ -254,7 +255,22 @@ static struct bz_output *bz_drm_get_output_data(struct bz_breezy *breezy, struct
 	out->name = name;
 	out->description = description;
 	out->subpixel = subpixel;
-	out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+
+	// Create the buffer transformation
+	enum wl_output_transform transform = out->transform;
+	// > Rotation and vertical flip
+	bz_mat3 vflip = {0};       bz_fill_projection_matrix(vflip, 0, 0, 1, 1, 0, 0, transform >= 4 ? -1 : 1, 1);
+	bz_mat3 rotate = {0};      bz_fill_rotation_matrix(rotate, (transform & 3) * BZ_PI_2);
+	bz_mat3 rotate_flip = {0}; bz_multiply_matrices(rotate_flip, vflip, rotate);
+	// > Scale and translation
+	bz_mat3 scale_translate = {0};
+	bz_fill_projection_matrix(
+		scale_translate,
+		out->compositor_bounds.x, out->compositor_bounds.y, out->compositor_bounds.w, out->compositor_bounds.h,
+		-1, 1, 2, -2 // OpenGL's coordinate system
+	);
+	// > Put 'em together for the final output projection
+	bz_multiply_matrices(out->projection, rotate_flip, scale_translate);
 
 	return out;
 }
@@ -468,7 +484,11 @@ void bz_drm_handle_pageflip(
 
 	// Emit the Wayland "done" event for all active frame callbacks.
 	uint32_t timestamp = (uint32_t)((uint64_t)tv_sec * 1000 + tv_usec / 1000);
-	bz_graphics_process_frame_callbacks(breezy->window_mgmt.activable_surfaces, timestamp);
+	struct bz_surface *surface; bz_list_foreach(surface, breezy->window_mgmt.activable_surfaces) {
+		if (surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+			bz_graphics_process_frame_callbacks(surface, timestamp);
+		}
+	}
 
 	// Occasionally, a render will fail due to both GBM buffers being unreleased. When that happens,
 	//   this flag gets set to true, prompting us to retry during this "release" step.
@@ -569,8 +589,8 @@ static int bz_drm_atomic_commit_initial(struct bz_breezy *breezy, const uint32_t
 	drmModeAtomicAddProperty(req, crtc_id, prop_id_lookup.crtc_mode_id, mode_blob_id);
 
 	// Set Plane properties
-	const uint32_t width = breezy->drm.mode_info.hdisplay;
-	const uint32_t height = breezy->drm.mode_info.vdisplay;
+	const uint32_t width = breezy->drm.current_output->output_bounds.w;
+	const uint32_t height = breezy->drm.current_output->output_bounds.h;
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_fb_id, fb_id);
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_crtc_id, crtc_id);
 	drmModeAtomicAddProperty(req, plane_id, prop_id_lookup.plane_src_x, 0 << 16);
@@ -677,8 +697,8 @@ static int bz_gles_init(struct bz_breezy *breezy)
 	// Create the GBM surface
 	breezy->gbm.surface = gbm_surface_create(
 		breezy->gbm.device,
-		breezy->drm.mode_info.hdisplay,
-		breezy->drm.mode_info.vdisplay,
+		breezy->drm.current_output->output_bounds.w,
+		breezy->drm.current_output->output_bounds.h,
 		GBM_FORMAT_XRGB8888,
 		GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING
 	);
@@ -714,7 +734,7 @@ static int bz_gles_init(struct bz_breezy *breezy)
 		GLAD_VERSION_MAJOR(glad_version), GLAD_VERSION_MINOR(glad_version));
 
 	// Define some GLES configs
-	glClearColor(0.16f, 0.164f, 0.196f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	bz_gles_create_unit_quad(breezy);
 	bz_gles_init_client_cursor(breezy);
 
@@ -727,20 +747,6 @@ static int bz_gles_init(struct bz_breezy *breezy)
 
 	bz_debug(BZ_LOG_GRAPHICS, "Successfully initialized GLES.");
 	return 0;
-}
-
-// TODO: Very temp - delete
-int color_i = 0;
-void bz_graphics_set_color_index(int i) {
-	color_i = i;
-}
-float color[3] = { 0.16f, 0.164f, 0.196f };
-void bz_graphics_change_color(struct bz_breezy *breezy, float amount) {
-	color[color_i] += amount;
-	if (amount > 0 && color[color_i] > 1.0f) color[color_i] = 1.0f;
-	if (amount < 0 && color[color_i] < 0.0f) color[color_i] = 0.0f;
-	glClearColor(color[0], color[1], color[2], 1.0f);
-	bz_graphics_schedule_render(breezy);
 }
 
 /**
@@ -801,17 +807,18 @@ static void bz_gles_create_unit_quad(struct bz_breezy *breezy)
 static void bz_gles_init_client_cursor(struct bz_breezy *breezy)
 {
 	struct bz_renderable *cursor = &breezy->gl.cursor;
-	cursor->position.x = 0;
-	cursor->position.y = 0;
-	cursor->size.w = 24;
-	cursor->size.h = 24;
-	cursor->offset.x = -cursor->size.w / 2;
-	cursor->offset.y = -cursor->size.h / 2;
+	cursor->compositor_bounds.x = breezy->drm.current_output->compositor_bounds.w/2;
+	cursor->compositor_bounds.y = breezy->drm.current_output->compositor_bounds.h/2;
+	cursor->render_bounds.w = 24;
+	cursor->render_bounds.h = 24;
+	struct bz_position *offset = &breezy->gl.cursor_offset;
+	offset->x = 12;
+	offset->y = 12;
 
-	uint32_t pixels[cursor->size.w * cursor->size.h];
-	for (int32_t row = 0; row < cursor->size.h; row++) {
-		for (int32_t col = 0; col < cursor->size.w; col++) {
-			pixels[row * cursor->size.w + col] = 0xffff0000; // red
+	uint32_t pixels[cursor->render_bounds.w * cursor->render_bounds.h];
+	for (int32_t row = 0; row < cursor->render_bounds.h; row++) {
+		for (int32_t col = 0; col < cursor->render_bounds.w; col++) {
+			pixels[row * cursor->render_bounds.w + col] = col < row ? 0xffff0000 : 0x00000000;
 		}
 	}
 
@@ -825,8 +832,8 @@ static void bz_gles_init_client_cursor(struct bz_breezy *breezy)
 		GL_TEXTURE_2D,
 		0,
 		GL_BGRA_EXT,
-		cursor->size.w,
-		cursor->size.h,
+		cursor->render_bounds.w,
+		cursor->render_bounds.h,
 		0,
 		GL_BGRA_EXT,
 		GL_UNSIGNED_BYTE,
@@ -898,8 +905,15 @@ static void bz_gles_render_and_commit(void *data) {
 	}
 
 	// -- Render time! --
-	// glViewport(0, 0, output->width, output->height);
+	glViewport(0, 0, breezy->drm.current_output->output_bounds.w, breezy->drm.current_output->output_bounds.h);
 	glClear(GL_COLOR_BUFFER_BIT);            // First, clear the screen
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+	glEnable(GL_BLEND); // TODO-dl??: Do this per-surface, and disable blend for fully opaque surfaces
+	// glDisable(GL_BLEND);
+
+	bz_gles_render_background(breezy);
+
 	if (breezy->gl.vbo != 0) {
 		bz_gles_render_applications(breezy); // Then render the applications.
 		bz_gles_render_cursor(breezy);       // Lastly, put the cursor on the top.
@@ -925,14 +939,63 @@ static void bz_gles_render_and_commit(void *data) {
 	}
 }
 
-static void bz_gles_render_applications(struct bz_breezy *breezy)
+static void bz_gles_render_background(struct bz_breezy *breezy)
 {
-	// ...then load our program
+	// Load our program
 	GLuint client_program = breezy->gl.client_shader_program;
 	glUseProgram(client_program);
 	// ...our projection matrix
 	GLint outputProj = glGetUniformLocation(client_program, "u_outputProj");
-	glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.output_projection);
+	glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.current_output->projection);
+	// ...and our unit quad vbo
+	glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	// ...then render the background image fullscreen
+	GLuint bg_tex = breezy->user_config.bg_texture;
+	if (bg_tex != 0) {
+		// Load our surface projection matrix
+		bz_mat3 projection = {0};
+		struct bz_rect *out_bounds = &breezy->drm.current_output->compositor_bounds;
+		bz_fill_projection_matrix(projection,
+			0, 0, 1, 1,
+			out_bounds->x, out_bounds->y, out_bounds->w, out_bounds->h
+		);
+		GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+
+		// Invert the buffer transformation
+		bz_mat3 uv_proj = {0};
+		bz_gles_build_uv_projection(uv_proj, false, 0, nullptr, nullptr, 1);
+		GLint uvProjId = glGetUniformLocation(client_program, "u_surfaceUVProj");
+		glUniformMatrix3fv(uvProjId, 1, GL_FALSE, uv_proj);
+
+		// Prep the texture
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, bg_tex);
+		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+		// Set our alpha to "fully opaque"
+		GLint alphaLocation = glGetUniformLocation(client_program, "u_alpha");
+		glUniform1f(alphaLocation, 1.0f);
+
+		// Render!
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	}
+}
+
+static void bz_gles_render_applications(struct bz_breezy *breezy)
+{
+	// Load our program
+	GLuint client_program = breezy->gl.client_shader_program;
+	glUseProgram(client_program);
+	// ...our projection matrix
+	GLint outputProj = glGetUniformLocation(client_program, "u_outputProj");
+	glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.current_output->projection);
 	// ...and our unit quad vbo
 	glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
@@ -943,68 +1006,102 @@ static void bz_gles_render_applications(struct bz_breezy *breezy)
 	// ...then render each activable surface
 	struct bz_surface *main_surface;
 	bz_list_foreach(main_surface, breezy->window_mgmt.activable_surfaces) {
-		bz_gles_render_surface_stack(client_program, main_surface);
+		if (main_surface->role == BZ_SURF_ROLE_XDG_TOPLEVEL) {
+			bz_recompute_physical_position(main_surface); // TODO-dl13: Cache to optimize..? and/or put after commit?
+			bz_gles_render_surface(client_program, main_surface);
+		}
 	}
 }
 
-static void bz_gles_render_surface_stack(GLuint client_program, struct bz_surface *surface)
+static void bz_gles_render_surface(GLuint client_program, struct bz_surface *surface)
 {
-	struct bz_surface *rendered_surface;
-	bz_list_foreach(rendered_surface, surface->active_state->surface_stack) {
-		if (rendered_surface != surface) {
-			bz_gles_render_surface_stack(client_program, rendered_surface);
+	// First, render each item in the surface stack.
+	struct bz_surface *stack_item; bz_list_foreach(stack_item, surface->active_state->surface_stack) {
+		if (stack_item == surface) {
+			bz_gles_draw_surface(client_program, stack_item);
 		} else {
-			struct bz_renderable renderable = rendered_surface->renderable;
-			// A subsurface's position is relative to its parent's
-			struct bz_position rel_pos = { .x = 0, .y = 0 };
-			if (rendered_surface->role == BZ_SURF_ROLE_WL_SUBSURFACE) {
-				rel_pos = rendered_surface->subsurface->parent->renderable.position;
-			}
-
-			if (renderable.texture != 0 && rendered_surface->active_state->buffer != nullptr) {
-				// Load our surface projection matrix
-				bz_mat3 projection = {0};
-				bz_fill_projection_matrix(projection,
-					0, 0, 1, 1,
-					rel_pos.x + renderable.position.x, rel_pos.y + renderable.position.y,
-					renderable.size.w, renderable.size.h
-				);
-				GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
-				glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
-
-				// Prep the texture
-				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, renderable.texture);
-				GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
-				glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
-
-				// Render!
-				glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-			}
+			bz_gles_render_surface(client_program, stack_item);
 		}
+	}
+
+	// Next, render each popup.
+	struct bz_xdg_popup *popup; bz_list_foreach(popup, surface->popups) {
+		bz_gles_render_surface(client_program, popup->wlsurface);
+	}
+}
+
+static void bz_gles_draw_surface(GLuint client_program, struct bz_surface *surface)
+{
+	struct bz_renderable renderable = surface->renderable;
+	if (renderable.texture != 0 && surface->active_state->buffer != nullptr) {
+		// Load our surface projection matrix
+		bz_mat3 projection = {0};
+		struct bz_rect *bounds = &renderable.render_bounds;
+		bz_fill_projection_matrix(projection,
+			0, 0, 1, 1,
+			bounds->x, bounds->y, bounds->w, bounds->h
+		);
+		GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
+		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+
+		// Invert the buffer transformation
+		enum wl_output_transform transform = surface->active_state->transform;
+		bz_mat3 uv_proj = {0};
+		bz_gles_build_uv_projection(uv_proj,
+			transform >= 4,
+			2*BZ_PI - (transform & 3) * BZ_PI_2,
+			surface->active_state->vp_source,
+			surface->renderable.buffer_size,
+			surface->active_state->scale
+		);
+		GLint uvProjId = glGetUniformLocation(client_program, "u_surfaceUVProj");
+		glUniformMatrix3fv(uvProjId, 1, GL_FALSE, uv_proj);
+
+		// Prep the texture
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, renderable.texture);
+		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
+		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
+
+		// Set our alpha
+		GLint alphaLocation = glGetUniformLocation(client_program, "u_alpha");
+		glUniform1f(alphaLocation, surface->appears_focused ? 1.0f : 0.8f);
+
+		// Render!
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	}
 }
 
 static void bz_gles_render_cursor(struct bz_breezy *breezy)
 {
 	struct bz_renderable *cursor = nullptr;
+	struct bz_rect_dbl *viewport = nullptr;
+	struct bz_size *buff_size = nullptr;
+	int32_t buff_scale = 1;
 	if (breezy->window_mgmt.pointer_focus == nullptr) {
 		cursor = &breezy->gl.cursor;
+		cursor->render_bounds.x = cursor->compositor_bounds.x - breezy->gl.cursor_offset.x;
+		cursor->render_bounds.y = cursor->compositor_bounds.y - breezy->gl.cursor_offset.x;
 	} else {
 		struct wl_resource *focused_surf = breezy->window_mgmt.pointer_focus->resource;
 		struct wl_client *client = wl_resource_get_client(focused_surf);
 		struct bz_client *client_data = wl_client_get_user_data(client);
-		if (client_data->cursor_surface) {
+		if (client_data->cursor_surface && client_data->cursor_surface->cursor) {
 			cursor = &client_data->cursor_surface->renderable;
+			cursor->render_bounds.x = cursor->compositor_bounds.x - client_data->cursor_surface->cursor->hotspot.x;
+			cursor->render_bounds.y = cursor->compositor_bounds.y - client_data->cursor_surface->cursor->hotspot.y;
+			viewport = client_data->cursor_surface->active_state->vp_source;
+			buff_size = client_data->cursor_surface->renderable.buffer_size;
+			buff_scale = client_data->cursor_surface->active_state->scale;
 		}
 	}
 	if (cursor != nullptr && cursor->texture != 0) {
 		// Load our program
 		GLuint client_program = breezy->gl.client_shader_program;
 		glUseProgram(client_program);
-		// ...our projection matrix
+		// ...our output projection matrix
 		GLint outputProj = glGetUniformLocation(client_program, "u_outputProj");
-		glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.output_projection);
+		glUniformMatrix3fv(outputProj, 1, GL_FALSE, breezy->drm.current_output->projection);
 		// ...and our unit quad vbo
 		glBindBuffer(GL_ARRAY_BUFFER, breezy->gl.vbo);
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
@@ -1014,12 +1111,18 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 
 		// Load our surface projection matrix
 		bz_mat3 projection = {0};
+		struct bz_rect *bounds = &cursor->render_bounds;
 		bz_fill_projection_matrix(projection,
 			0, 0, 1, 1,
-			cursor->position.x, cursor->position.y, cursor->size.w, cursor->size.h
+			bounds->x, bounds->y, bounds->w, bounds->h
 		);
 		GLint surfaceProj = glGetUniformLocation(client_program, "u_surfaceProj");
 		glUniformMatrix3fv(surfaceProj, 1, GL_FALSE, projection);
+
+		// Invert the buffer transformation
+		bz_mat3 transform = {0}; bz_gles_build_uv_projection(transform, false, 0, viewport, buff_size, buff_scale);
+		GLint uvProj = glGetUniformLocation(client_program, "u_surfaceUVProj");
+		glUniformMatrix3fv(uvProj, 1, GL_FALSE, transform);
 
 		// Prep the texture
 		glActiveTexture(GL_TEXTURE0);
@@ -1027,8 +1130,45 @@ static void bz_gles_render_cursor(struct bz_breezy *breezy)
 		GLint textureLocation = glGetUniformLocation(client_program, "u_texture");
 		glUniform1i(textureLocation, 0); // "0" corresponds to "GL_TEXTURE0" above
 
+		// Set our alpha to "fully opaque"
+		GLint alphaLocation = glGetUniformLocation(client_program, "u_alpha");
+		glUniform1f(alphaLocation, 1.0f);
+
 		// Render!
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	}
+}
+
+static void bz_gles_build_uv_projection(bz_mat3 result, bool flip, double radians, struct bz_rect_dbl *viewport, struct bz_size *buff_size, int32_t buff_scale)
+{
+	// First, our flip/rotation matrix
+	bz_mat3 vflip = {0};     bz_fill_projection_matrix(vflip, 0, 0, 1, 1, 0, 0, flip ? -1 : 1, 1);
+	bz_mat3 rotate = {0};    bz_fill_rotation_matrix(rotate, radians);
+	bz_mat3 transform = {0}; bz_multiply_matrices(transform, vflip, rotate);
+
+	// Need our result matrix to apply the transform around the origin, so multiply through
+	//   something that shifts it up/left by half size, then back down/right by half size.
+	bz_mat3 negshift = {0};  bz_fill_projection_matrix(negshift, 0, 0, 1, 1, -0.5, -0.5, 1, 1);
+	bz_mat3 posshift = {0};  bz_fill_projection_matrix(posshift, 0, 0, 1, 1, 0.5, 0.5, 1, 1);
+	// Multiply them out! ([vp *] pos * transform * neg)
+	bz_mat3 translated_neg = {0};
+	bz_mat3 translated_pos = {0};
+
+	if (viewport != nullptr && buff_size != nullptr) {
+		bz_mat3 vp = {0}; bz_fill_projection_matrix(vp,
+			0, 0, 1, 1,
+			(viewport->x) / (buff_size->w/buff_scale),
+			(viewport->y) / (buff_size->h/buff_scale),
+			(viewport->w) / (buff_size->w/buff_scale),
+			(viewport->h) / (buff_size->h/buff_scale)
+		);
+
+		bz_multiply_matrices(translated_neg, transform, negshift);
+		bz_multiply_matrices(translated_pos, posshift, translated_neg);
+		bz_multiply_matrices(result, vp, translated_pos);
+	} else {
+		bz_multiply_matrices(translated_neg, transform, negshift);
+		bz_multiply_matrices(result, posshift, translated_neg);
 	}
 }
 
@@ -1292,17 +1432,25 @@ int bz_graphics_deactivate(struct bz_breezy *breezy)
  *
  * (Exposed as "public" for testing purposes only.)
  */
-void bz_graphics_process_frame_callbacks(struct bz_list *surfaces, uint32_t timestamp)
+void bz_graphics_process_frame_callbacks(struct bz_surface *surface, uint32_t timestamp)
 {
-	// TODO-dl??: Only emit for surfaces that are visible.
-	struct bz_surface *parent_surf; bz_list_foreach(parent_surf, surfaces) {
-		struct bz_surface *child_surf; bz_list_foreach(child_surf, parent_surf->active_state->surface_stack) {
-			// TODO-dl12: Buffer overflow here:
-			struct wl_resource *curr_cb; bz_list_foreach(curr_cb, child_surf->active_state->frame_callbacks) {
+	// First, process the callbacks for each item in the surface stack.
+	struct bz_surface *stack_item; bz_list_foreach(stack_item, surface->active_state->surface_stack) {
+		if (stack_item == surface) {
+			// TODO-dl14: Only emit for surfaces that are visible.
+			struct wl_resource *curr_cb;
+			bz_list_foreach(curr_cb, stack_item->active_state->frame_callbacks) {
 				wl_callback_send_done(curr_cb, timestamp);
 				wl_resource_destroy(curr_cb);
 			}
-			bz_list_clear(child_surf->active_state->frame_callbacks, nullptr);
+			bz_list_clear(stack_item->active_state->frame_callbacks, nullptr);
+		} else {
+			bz_graphics_process_frame_callbacks(stack_item, timestamp);
 		}
+	}
+
+	// Next, process the callbacks for each popup.
+	struct bz_xdg_popup *popup; bz_list_foreach(popup, surface->popups) {
+		bz_graphics_process_frame_callbacks(popup->wlsurface, timestamp);
 	}
 }

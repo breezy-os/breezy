@@ -13,7 +13,7 @@ struct bz_client {
 	pid_t pid;
 
 	struct bz_list *seats; // List of "struct bz_wl_seat *"
-	uint32_t last_enter_serial;   // Serial from the last wl_pointer::enter event
+	uint32_t last_enter_serial; // Serial from the last wl_pointer::enter event
 	struct bz_surface *cursor_surface; // One "cursor" per seat. All wl_pointers impact this one cursor.
 };
 

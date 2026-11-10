@@ -19,10 +19,8 @@ struct bz_drm {
 	int device_id;
 	uint32_t connector_id;
 	uint32_t crtc_id;
-	drmModeModeInfo mode_info;
 	uint32_t mode_blob_id;
 	uint32_t plane_id;
-	bz_mat3 output_projection;
 	bool retry_render_on_page_flip;
 	struct bz_output *current_output;
 };
@@ -35,11 +33,13 @@ struct bz_gbm {
 };
 
 struct bz_renderable {
-	struct bz_position position;
-	/** How far to shift the position before rendering. A positive number means the buffer should
-	 * be shifted to the right and down. For cursors, this is the "negative hotspot". */
-	struct bz_position offset;
-	struct bz_dimension size;
+	/** The size of the raw, provided wl_buffer (when applicable). */
+	struct bz_size *buffer_size;
+	/** The bounds for the purposes of compositor placement, ignoring things like client decorations. */
+	struct bz_rect compositor_bounds; // Pointers only use x/y for this.
+	/** The bounds for the purposes of rendering, computed from compositor_bounds + shifts. */
+	struct bz_rect render_bounds;
+
 	GLuint texture;
 };
 
@@ -51,7 +51,9 @@ struct bz_gl {
 	bool is_dirty;
 	GLuint client_shader_program;
 	GLuint vbo;
+
 	struct bz_renderable cursor;
+	struct bz_position cursor_offset;
 };
 
 struct bz_seat {
@@ -91,13 +93,26 @@ struct bz_wayland {
 
 struct bz_window_mgmt {
 	/**
-	 * These are keyboard-focusable surfaces, and include xdg_toplevel, xdg_popup, and
-	 * sometimes wlr_layer_surfaces. The final item in the list has "keyboard focus".
+	 * These are keyboard-focusable surfaces, and include xdg_toplevel, xdg_popup, and sometimes
+	 * wlr_layer_surfaces. The final item in the list has "keyboard focus". Mostly intended for
+	 * returning focus to the previously-focused window on request or when the current one closes.
 	 */
 	struct bz_list *activable_surfaces; // Each item is of type "struct bz_surface *"
 
 	struct bz_surface *pointer_focus;  // nullptr if cursor isn't above a surface
 	struct bz_position last_cursor_loc;
+	struct bz_section *resize_divider; // nullptr if not actively resizing
+
+	struct bz_section *root_tile;
+};
+
+struct bz_user_config {
+	char *config_dir;
+	GLuint bg_texture;
+
+	uint32_t output_scale;
+	enum wl_output_transform output_transform;
+	uint32_t tile_gap;
 };
 
 
@@ -109,6 +124,7 @@ struct bz_breezy {
 	struct bz_input input;
 	struct bz_wayland wayland;
 	struct bz_window_mgmt window_mgmt;
+	struct bz_user_config user_config;
 	bool is_terminating;
 };
 

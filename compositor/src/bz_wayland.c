@@ -9,12 +9,14 @@
 #include <xdg-shell-server-protocol.h>
 #include <viewporter-server-protocol.h>
 #include <xdg-output-unstable-v1-server-protocol.h>
+#include <fractional-scale-v1-server-protocol.h>
 
 #include "breezy/bz_graphics.h"
 #include "breezy/bz_list.h"
 #include "breezy/bz_logger.h"
 #include "breezy/bz_wl_devices.h"
 #include "breezy/bz_wl_display.h"
+#include "breezy/bz_wp_fractional_scale.h"
 #include "breezy/bz_wp_viewporter.h"
 #include "breezy/bz_xdg_output.h"
 #include "breezy/bz_xdg_shell.h"
@@ -39,6 +41,7 @@ static int bz_wayland_create_output(struct bz_breezy *breezy);
 static int bz_wayland_create_xdg_wm_base(struct bz_breezy *breezy);
 static int bz_wayland_create_wp_viewporter(struct bz_breezy *breezy);
 static int bz_wayland_create_xdg_output(struct bz_breezy *breezy);
+static int bz_wayland_create_wp_fractional_scale_manager(struct bz_breezy *breezy);
 
 
 // =================================================================================================
@@ -278,6 +281,24 @@ static int bz_wayland_create_xdg_output(struct bz_breezy *breezy)
 	return 0;
 }
 
+/** Creates the wp_fractional_scale_manager global. */
+static int bz_wayland_create_wp_fractional_scale_manager(struct bz_breezy *breezy)
+{
+	struct wl_global *glob = wl_global_create(
+		breezy->wayland.display,
+		&wp_fractional_scale_manager_v1_interface,
+		BZ_WP_FRACTIONAL_SCALE_MANAGER_VERSION,
+		nullptr,
+		bz_wp_fractional_scale_manager_v1_constructor
+	);
+	if (glob == nullptr) {
+		bz_error(BZ_LOG_WAYLAND, "Error creating wp_fractional_scale_manager global.");
+		return -1;
+	}
+
+	return 0;
+}
+
 // =================================================================================================
 //  Exposed API
 // -------------------------------------------------------------------------------------------------
@@ -325,6 +346,9 @@ int bz_wayland_initialize(struct bz_breezy *breezy)
 	if (bz_wayland_create_xdg_output(breezy) < 0) {
 		return -10;
 	}
+	if (bz_wayland_create_wp_fractional_scale_manager(breezy) < 0) {
+		return -11;
+	}
 
 
 	// Set up a listener for new client connections
@@ -338,7 +362,7 @@ int bz_wayland_initialize(struct bz_breezy *breezy)
 	breezy->wayland.socket_name = wl_display_add_socket_auto(breezy->wayland.display);
 	if (!breezy->wayland.socket_name) {
 		bz_error(BZ_LOG_WAYLAND, "Failed to add socket to Wayland display.");
-		return -11;
+		return -12;
 	}
 
 	bz_info(BZ_LOG_WAYLAND, "Successfully initialized our Wayland system.");
