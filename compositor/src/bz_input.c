@@ -58,7 +58,10 @@ static bool bz_input_process_wheel_for_axis(struct libinput_event_pointer *pt_ev
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static void bz_input_move_active_window(struct bz_breezy *breezy, enum bz_direction direction);
 static void bz_input_focus_relative_window(struct bz_breezy *breezy, enum bz_direction direction);
+static struct bz_workspace *bz_input_get_target_workspace(struct bz_breezy *breezy, enum bz_in_out direction);
 static void bz_input_switch_workspace(struct bz_breezy *breezy, enum bz_in_out direction);
+static void bz_input_reorder_workspace(struct bz_breezy *breezy, enum bz_in_out direction);
+static void bz_input_move_window_to_workspace(struct bz_breezy *breezy, enum bz_in_out direction);
 static int bz_input_check_vt_change(bool ctrl_held, bool alt_held, uint32_t keysym);
 static void bz_input_spawn_child(const char *socket_name, const char *program_path);
 
@@ -386,14 +389,18 @@ static void bz_input_process_kb_event(
 			return;
 		case XKB_KEY_i: case XKB_KEY_I:
 			if (shift_held) {
-				// TODO-dl14
+				bz_input_move_window_to_workspace(breezy, BZ_IN);
+			} else if (ctrl_held) {
+				bz_input_reorder_workspace(breezy, BZ_IN);
 			} else {
 				bz_input_switch_workspace(breezy, BZ_IN);
 			}
 			return;
 		case XKB_KEY_o: case XKB_KEY_O:
 			if (shift_held) {
-				// TODO-dl14
+				bz_input_move_window_to_workspace(breezy, BZ_OUT);
+			} else if (ctrl_held) {
+				bz_input_reorder_workspace(breezy, BZ_OUT);
 			} else {
 				bz_input_switch_workspace(breezy, BZ_OUT);
 			}
@@ -541,7 +548,7 @@ static void bz_input_focus_relative_window(struct bz_breezy *breezy, enum bz_dir
 	}
 }
 
-static void bz_input_switch_workspace(struct bz_breezy *breezy, enum bz_in_out direction)
+static struct bz_workspace *bz_input_get_target_workspace(struct bz_breezy *breezy, enum bz_in_out direction)
 {
 	struct bz_workspace *target = nullptr;
 	struct bz_window_mgmt *mgmt = &breezy->window_mgmt;
@@ -558,12 +565,79 @@ static void bz_input_switch_workspace(struct bz_breezy *breezy, enum bz_in_out d
 	if (target == nullptr) {
 		// This should never come up.
 		bz_error(BZ_LOG_INPUT, "Failed to find workspace before/after the current one.");
-		return;
+		return nullptr;
+	}
+
+	return target;
+}
+
+static void bz_input_switch_workspace(struct bz_breezy *breezy, enum bz_in_out direction)
+{
+	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction);
+	if (target == nullptr) {
+		return; // This should never come up.
 	}
 
 	// Update the current workspace to the new one.
-	mgmt->current_space = target;
+	breezy->window_mgmt.current_space = target;
 	bz_mgmt_update_window_focus(breezy);
+	bz_graphics_schedule_render(breezy);
+}
+
+static void bz_input_reorder_workspace(struct bz_breezy *breezy, enum bz_in_out direction)
+{
+	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction);
+	if (target == nullptr) {
+		return; // This should never come up.
+	}
+
+	// Swap the order of these two items
+	struct bz_window_mgmt *mgmt = &breezy->window_mgmt;
+	int status = bz_list_swap_items(mgmt->workspaces, mgmt->current_space, target);
+	if (status != 0) {
+		bz_error(BZ_LOG_INPUT, "Failed to swap workspaces.");
+		return;
+	}
+	bz_mgmt_normalize_workspaces(breezy);
+}
+
+static void bz_input_move_window_to_workspace(struct bz_breezy *breezy, enum bz_in_out direction)
+{
+	// Look up our source workspace/window/section.
+	struct bz_workspace *source = breezy->window_mgmt.current_space;
+	// TODO-dl14: Might be a popup. Don't want it to be a popup.
+	struct bz_surface *source_surface = bz_mgmt_get_active_surface(&breezy->window_mgmt);
+	if (source_surface == nullptr) {
+		bz_error(BZ_LOG_INPUT, "Failed to move window between workspaces: No source surface.");
+		return;
+	}
+	struct bz_section *source_section = source_surface->section;
+	if (source_section == nullptr) {
+		bz_error(BZ_LOG_INPUT, "Failed to move window between workspaces: No source section.");
+		return;
+	}
+	struct bz_position centerpoint = {
+		.x = source_section->bounds.x + source_section->bounds.w/2,
+		.y = source_section->bounds.y + source_section->bounds.h/2
+	};
+
+	// Look up our target workspace/section
+	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction);
+	if (target == nullptr) { return; } // This should never come up.
+	struct bz_section *target_section = bz_mgmt_get_leaf_at_coordinates(target->root, centerpoint);
+	target_section = target_section == nullptr
+		? target->root
+		: bz_mgmt_get_nearest_window(target_section, centerpoint);
+	if (target_section == nullptr) { // Can happen if there are no windows in target section
+		target_section = target->root;
+	}
+
+	// Move the window
+	bz_mgmt_move_section_across_workspaces(&breezy->user_config, source, source_section, target, target_section);
+
+	// Update our workspaces
+	breezy->window_mgmt.current_space = target;
+	bz_mgmt_normalize_workspaces(breezy);
 	bz_graphics_schedule_render(breezy);
 }
 

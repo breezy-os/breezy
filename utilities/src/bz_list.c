@@ -804,6 +804,51 @@ int bz_list_move_item_to_end(struct bz_list *list, void *data)
 	return -2;
 }
 
+// TODO-dl14: Test this
+int bz_list_swap_items(struct bz_list *list, void *item1, void *item2)
+{
+	// Uninitialized list.
+	if (list == nullptr) {
+		bz_warn(BZ_LOG_LIST, "Swap list items failed: list was not initialized.");
+		return -1;
+	}
+
+	// Not enough items in the list for it to contain two items.
+	if (list->length < 2) {
+		return -2;
+	}
+
+	// No point in swapping something with itself. Counting this as a failure for "misuse".
+	if (item1 == item2) {
+		bz_warn(BZ_LOG_LIST, "Swap list items noop: provided items were equal.");
+		return -3;
+	}
+
+	// Locate our two nodes
+	struct bz_node *node1 = nullptr;
+	struct bz_node *node2 = nullptr;
+	struct bz_node *curr = list->head;
+	while (curr != nullptr) {
+		if (curr->data == item1) { node1 = curr; }
+		if (curr->data == item2) { node2 = curr; }
+		curr = curr->next;
+	}
+	if (node1 == nullptr) {
+		bz_warn(BZ_LOG_LIST, "Unable to find item1 in the provided list.");
+		return -4;
+	}
+	if (node2 == nullptr) {
+		bz_warn(BZ_LOG_LIST, "Unable to find item2 in the provided list.");
+		return -5;
+	}
+
+	// Swap! No need to muck around with the pointers - just change the data references.
+	node1->data = item2;
+	node2->data = item1;
+
+	return 0;
+}
+
 /**
  * Creates a duplicate of the provided list. The data for each element is provided to "clone_data",
  * and its returned value is used as the data for the new list. If clone_data is null, a shallow

@@ -20,7 +20,6 @@
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
 
-static int bz_mgmt_normalize_workspaces(struct bz_breezy *breezy);
 static struct bz_workspace *bz_mgmt_create_workspace(struct bz_breezy *breezy);
 
 
@@ -33,6 +32,8 @@ static void bz_mgmt_update_focus_for_full_tree(struct bz_surface *surface, bool 
 static void bz_mgmt_update_focus_for_children(struct bz_surface *surface, bool is_focused);
 
 static struct bz_surface *bz_mgmt_check_surface_overlap(struct bz_window_mgmt *mgmt, struct bz_surface *root_surf, struct bz_surface *surface);
+
+static bool does_not_belong_to_surface(void *current, void *match_data);
 
 
 // =================================================================================================
@@ -68,7 +69,7 @@ void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt)
 	}
 }
 
-static int bz_mgmt_normalize_workspaces(struct bz_breezy *breezy)
+int bz_mgmt_normalize_workspaces(struct bz_breezy *breezy)
 {
 	struct bz_list *workspaces = breezy->window_mgmt.workspaces;
 
@@ -804,7 +805,6 @@ struct bz_section *bz_mgmt_get_nearest_window(
 		// In case the final item in the loop is the closest.
 		return bz_mgmt_get_nearest_window(closest, coords);
 	}
-	bz_error(BZ_LOG_WINDOW_MGMT, "Unsupported section given to get_nearest_window.");
 	return nullptr;
 }
 
@@ -1208,7 +1208,7 @@ void bz_mgmt_remove_section_from_split(
  * redistributing it as needed. It's a similar process to calling "remove_section_from_split"
  * followed by "add_section_to_section", but the redistribute / collapse step is saved until
  * the end.
-*
+ *
  * If the given section doesn't have a parent split, this is a no-op.
  */
 void bz_mgmt_move_section(
@@ -1262,4 +1262,65 @@ void bz_mgmt_delete_section(
 		bz_mgmt_remove_section_from_split(&breezy->user_config, section);
 		bz_mgmt_free_section(section, false);
 	}
+}
+
+void bz_mgmt_move_section_across_workspaces(
+	struct bz_user_config *config,
+	struct bz_workspace *source_ws,
+	struct bz_section *source_section,
+	struct bz_workspace *target_ws,
+	struct bz_section *after_section
+) {
+	// Param validation. Source must be a window. Target must be a window or root section.
+	if (source_section->type != BZ_SECTION_WINDOW) {
+		return;
+	}
+	if (after_section->type != BZ_SECTION_WINDOW && after_section->type != BZ_SECTION_UNINITIALIZED) {
+		return;
+	}
+
+	// Remove it from the source workspace
+	struct bz_surface *source_surface = source_section->window;
+	if (source_section->parent == nullptr) {
+		source_section->type = BZ_SECTION_UNINITIALIZED;
+		source_section->window = nullptr;
+		source_surface->section = nullptr; // Gets reassigned below.
+	} else {
+		bz_mgmt_remove_section_from_split(config, source_section);
+		bz_mgmt_free_section(source_section, false);
+	}
+
+	// Add it to the target workspace
+	if (after_section->type == BZ_SECTION_UNINITIALIZED) {
+		after_section->type = BZ_SECTION_WINDOW;
+		after_section->window = source_surface;
+		source_surface->section = after_section;
+		bz_mgmt_redistribute_section(config, after_section, after_section->bounds);
+	} else {
+		struct bz_section *new_section = bz_mgmt_create_new_window_section(after_section->bounds, source_surface);
+		struct bz_section *parent_section = after_section->parent == nullptr ? after_section : after_section->parent->section;
+		bz_mgmt_add_section_to_section(config, parent_section, new_section, after_section);
+	}
+
+	// Move the source surface and its "activable surfaces" to the new workspace's activable list.
+	// Need to maintain the moved surfaces relative order to each other.
+	struct bz_list *moved_surfaces = bz_list_create();
+	struct bz_surface *surf; bz_list_foreach(surf, source_ws->activable_surfaces) {
+		if (!does_not_belong_to_surface(surf, source_surface)) {
+			bz_list_append(moved_surfaces, surf);
+		}
+	}
+	bz_list_filter(source_ws->activable_surfaces, source_surface, does_not_belong_to_surface, nullptr);
+	bz_list_move_to_end(moved_surfaces, target_ws->activable_surfaces);
+	bz_list_free(moved_surfaces, nullptr);
+}
+
+static bool does_not_belong_to_surface(void *current, void *match_data)
+{
+	struct bz_surface *parent_surf = match_data;
+
+	struct bz_surface *current_surf = current;
+	struct bz_surface *root_surf = bz_get_root_surface(current_surf);
+
+	return root_surf == nullptr || root_surf != parent_surf;
 }

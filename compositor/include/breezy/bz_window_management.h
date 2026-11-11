@@ -13,6 +13,8 @@
 int bz_mgmt_initialize(struct bz_breezy *breezy);
 void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt);
 
+int bz_mgmt_normalize_workspaces(struct bz_breezy *breezy);
+
 
 // -- Window Lifecycle --
 
@@ -97,6 +99,7 @@ void bz_mgmt_add_section_to_section(struct bz_user_config *config, struct bz_sec
 void bz_mgmt_remove_section_from_split(struct bz_user_config *config, struct bz_section *to_remove);
 void bz_mgmt_move_section(struct bz_user_config *config, struct bz_section *destination_parent, struct bz_section *section, struct bz_section *after_section);
 void bz_mgmt_delete_section(struct bz_breezy *breezy, struct bz_section *section);
+void bz_mgmt_move_section_across_workspaces(struct bz_user_config *config, struct bz_workspace *source_ws, struct bz_section *source_section, struct bz_workspace *target_ws, struct bz_section *after_section);
 
 // #################################################################################################
 #endif
