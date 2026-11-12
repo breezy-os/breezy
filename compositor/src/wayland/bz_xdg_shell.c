@@ -57,6 +57,7 @@ static void bz_xdg_surface_set_window_geometry(struct wl_client *client, struct 
 static void bz_xdg_surface_ack_configure(struct wl_client *client, struct wl_resource *resource, uint32_t serial);
 // Helpers
 void bz_xdg_surface_initial_configure(struct bz_surface *bzsurf);
+static void bz_xdg_surface_add_toplevel_state(struct wl_array *states, enum xdg_toplevel_state state);
 void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf);
 void bz_xdg_surface_configure_popup(struct bz_surface *bzsurf);
 static struct bz_rect *bz_calculate_popup_position(struct bz_xdg_positioner *positioner);
@@ -662,9 +663,7 @@ static void bz_xdg_surface_ack_configure(
 	}
 
 	// Update our last ack'd configure
-	if (xdgsurf->last_acked_configure != nullptr) {
-		free(xdgsurf->last_acked_configure);
-	}
+	bz_free_xdg_surface_configure(xdgsurf->last_acked_configure);
 	xdgsurf->last_acked_configure = configevt;
 
 	// Remove any pending configure events that are older than the provided one.
@@ -684,6 +683,12 @@ void bz_xdg_surface_initial_configure(struct bz_surface *bzsurf)
 	} else if (bzsurf->role == BZ_SURF_ROLE_XDG_POPUP) {
 		bz_xdg_surface_configure_popup(bzsurf);
 	}
+}
+
+static void bz_xdg_surface_add_toplevel_state(struct wl_array *states, enum xdg_toplevel_state state)
+{
+	enum xdg_toplevel_state *p = wl_array_add(states, sizeof(enum xdg_toplevel_state));
+	*p = state;
 }
 
 void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf)
@@ -712,6 +717,14 @@ void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf)
 	configevt->serial = wl_display_next_serial(wl_client_get_display(client));
 	configevt->type = BZ_XDG_SURF_TOPLEVEL;
 	wl_array_init(&configevt->toplevel.states);
+	bz_xdg_surface_add_toplevel_state(&configevt->toplevel.states, XDG_TOPLEVEL_STATE_TILED_LEFT);
+	bz_xdg_surface_add_toplevel_state(&configevt->toplevel.states, XDG_TOPLEVEL_STATE_TILED_RIGHT);
+	bz_xdg_surface_add_toplevel_state(&configevt->toplevel.states, XDG_TOPLEVEL_STATE_TILED_TOP);
+	bz_xdg_surface_add_toplevel_state(&configevt->toplevel.states, XDG_TOPLEVEL_STATE_TILED_BOTTOM);
+	bz_xdg_surface_add_toplevel_state(&configevt->toplevel.states, XDG_TOPLEVEL_STATE_CONSTRAINED_LEFT);
+	bz_xdg_surface_add_toplevel_state(&configevt->toplevel.states, XDG_TOPLEVEL_STATE_CONSTRAINED_RIGHT);
+	bz_xdg_surface_add_toplevel_state(&configevt->toplevel.states, XDG_TOPLEVEL_STATE_CONSTRAINED_TOP);
+	bz_xdg_surface_add_toplevel_state(&configevt->toplevel.states, XDG_TOPLEVEL_STATE_CONSTRAINED_BOTTOM);
 	configevt->toplevel.max_size.w = globals->drm.current_output->compositor_bounds.w;
 	configevt->toplevel.max_size.h = globals->drm.current_output->compositor_bounds.h;
 
@@ -878,6 +891,7 @@ static void bz_free_xdg_surface_configure(void *xdg_surface_configure)
 
 	if (configure->type == BZ_XDG_SURF_TOPLEVEL) {
 		wl_array_release(&configure->toplevel.states);
+		bz_error(BZ_LOG_TEMP, "releasing array and states");
 	} else if (configure->type == BZ_XDG_SURF_POPUP) {
 		free(configure->popup.bounds);
 	}
