@@ -89,6 +89,7 @@ struct bz_breezy *bz_create_breezy_data(void)
 
 	data->window_mgmt.workspaces = bz_list_create();
 	bz_list_append(data->window_mgmt.workspaces, bz_create_workspace_data());
+	data->window_mgmt.current_space = data->window_mgmt.workspaces->head->data;
 	data->wayland.clients = bz_list_create();
 
 	data->drm.current_output = calloc(1, sizeof(*data->drm.current_output));
@@ -136,6 +137,7 @@ void bz_free_workspace_data(struct bz_workspace *data)
 	if (data->activable_surfaces != nullptr) {
 		bz_list_free(data->activable_surfaces, nullptr);
 	}
+	free(data);
 }
 
 

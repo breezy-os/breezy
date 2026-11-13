@@ -20,9 +20,6 @@
 //  File Variables / Declarations
 // -------------------------------------------------------------------------------------------------
 
-static struct bz_workspace *bz_mgmt_create_workspace(struct bz_breezy *breezy);
-
-
 static void bz_free_workspace(void *space);
 static void bz_mgmt_free_section_recursively(struct bz_section *section);
 
@@ -142,7 +139,7 @@ int bz_mgmt_normalize_workspaces(struct bz_breezy *breezy)
 		return 0;
 }
 
-static struct bz_workspace *bz_mgmt_create_workspace(struct bz_breezy *breezy)
+struct bz_workspace *bz_mgmt_create_workspace(struct bz_breezy *breezy)
 {
 	// Allocations
 	struct bz_workspace *space = calloc(1, sizeof(*space));

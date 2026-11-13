@@ -669,7 +669,12 @@ static void bz_xdg_surface_ack_configure(
 
 	// Remove any pending configure events that are older than the provided one.
 	bz_list_remove(pending_configs, configevt, nullptr); // Remove current one first to avoid "free"
-	const int removed_items = bz_list_filter(pending_configs, &serial, bz_serial_is_newer, free);
+	const int removed_items = bz_list_filter(
+		pending_configs,
+		&serial,
+		bz_serial_is_newer,
+		bz_free_xdg_surface_configure
+	);
 	if (removed_items > 0) {
 		bz_info(BZ_LOG_WL_XDG_SHELL, "Removed %d outdated configure events.", removed_items);
 	}

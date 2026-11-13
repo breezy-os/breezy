@@ -14,6 +14,7 @@ int bz_mgmt_initialize(struct bz_breezy *breezy);
 void bz_mgmt_cleanup(struct bz_window_mgmt *mgmt);
 
 int bz_mgmt_normalize_workspaces(struct bz_breezy *breezy);
+struct bz_workspace *bz_mgmt_create_workspace(struct bz_breezy *breezy);
 
 
 // -- Window Lifecycle --

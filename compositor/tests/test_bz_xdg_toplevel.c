@@ -38,8 +38,16 @@ extern const struct xdg_toplevel_interface bz_xdg_toplevel_implementation;
 
 void test_xdg_toplevel_destroy__destroys_the_resource(void)
 {
+	// Set up
+	struct bz_xdg_toplevel *toplevel = bz_create_xdg_toplevel_data();
+	wl_resource_get_user_data_fake.return_val = toplevel;
+
+	// Test
 	bz_xdg_toplevel_implementation.destroy(nullptr, nullptr);
 	TEST_ASSERT_EQUAL_INT(1, wl_resource_destroy_fake.call_count);
+
+	// Clean up
+	bz_free_xdg_toplevel_data(toplevel);
 }
 
 

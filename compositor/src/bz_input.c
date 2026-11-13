@@ -58,7 +58,7 @@ static bool bz_input_process_wheel_for_axis(struct libinput_event_pointer *pt_ev
 static void bz_input_process_kb_event(struct bz_breezy *breezy, struct libinput_event_keyboard *kb_event);
 static void bz_input_move_active_window(struct bz_breezy *breezy, enum bz_direction direction);
 static void bz_input_focus_relative_window(struct bz_breezy *breezy, enum bz_direction direction);
-static struct bz_workspace *bz_input_get_target_workspace(struct bz_breezy *breezy, enum bz_in_out direction);
+static struct bz_workspace *bz_input_get_target_workspace(struct bz_breezy *breezy, enum bz_in_out direction, bool loop);
 static void bz_input_switch_workspace(struct bz_breezy *breezy, enum bz_in_out direction);
 static void bz_input_reorder_workspace(struct bz_breezy *breezy, enum bz_in_out direction);
 static void bz_input_move_window_to_workspace(struct bz_breezy *breezy, enum bz_in_out direction);
@@ -548,18 +548,28 @@ static void bz_input_focus_relative_window(struct bz_breezy *breezy, enum bz_dir
 	}
 }
 
-static struct bz_workspace *bz_input_get_target_workspace(struct bz_breezy *breezy, enum bz_in_out direction)
+static struct bz_workspace *bz_input_get_target_workspace(struct bz_breezy *breezy, enum bz_in_out direction, bool loop)
 {
 	struct bz_workspace *target = nullptr;
 	struct bz_window_mgmt *mgmt = &breezy->window_mgmt;
 	if (direction == BZ_IN) {
-		target = mgmt->workspaces->head->data == mgmt->current_space
-			? mgmt->workspaces->tail->data
-			: bz_list_get_item_before(mgmt->workspaces, mgmt->current_space);
+		if (mgmt->workspaces->head->data != mgmt->current_space) {
+			target = bz_list_get_item_before(mgmt->workspaces, mgmt->current_space);
+		} else if (loop) {
+			target = mgmt->workspaces->tail->data;
+		} else {
+			target = bz_mgmt_create_workspace(breezy);
+			bz_list_insert(mgmt->workspaces, target, nullptr);
+		}
 	} else if (direction == BZ_OUT) {
-		target = mgmt->workspaces->tail->data == mgmt->current_space
-			? mgmt->workspaces->head->data
-			: bz_list_get_item_after(mgmt->workspaces, mgmt->current_space);
+		if (mgmt->workspaces->tail->data != mgmt->current_space) {
+			target = bz_list_get_item_after(mgmt->workspaces, mgmt->current_space);
+		} else if (loop) {
+			target = mgmt->workspaces->head->data;
+		} else {
+			target = bz_mgmt_create_workspace(breezy);
+			bz_list_append(mgmt->workspaces, target);
+		}
 	}
 
 	if (target == nullptr) {
@@ -573,7 +583,7 @@ static struct bz_workspace *bz_input_get_target_workspace(struct bz_breezy *bree
 
 static void bz_input_switch_workspace(struct bz_breezy *breezy, enum bz_in_out direction)
 {
-	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction);
+	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction, true);
 	if (target == nullptr) {
 		return; // This should never come up.
 	}
@@ -586,7 +596,7 @@ static void bz_input_switch_workspace(struct bz_breezy *breezy, enum bz_in_out d
 
 static void bz_input_reorder_workspace(struct bz_breezy *breezy, enum bz_in_out direction)
 {
-	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction);
+	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction, false);
 	if (target == nullptr) {
 		return; // This should never come up.
 	}
@@ -605,9 +615,9 @@ static void bz_input_move_window_to_workspace(struct bz_breezy *breezy, enum bz_
 {
 	// Look up our source workspace/window/section.
 	struct bz_workspace *source = breezy->window_mgmt.current_space;
-	// TODO-dl14: Might be a popup. Don't want it to be a popup.
 	struct bz_surface *source_surface = bz_mgmt_get_active_surface(&breezy->window_mgmt);
-	if (source_surface == nullptr) {
+	source_surface = bz_get_root_surface(source_surface); // Ensure we have a toplevel.
+	if (source_surface == nullptr || source_surface->role != BZ_SURF_ROLE_XDG_TOPLEVEL) {
 		bz_error(BZ_LOG_INPUT, "Failed to move window between workspaces: No source surface.");
 		return;
 	}
@@ -622,7 +632,7 @@ static void bz_input_move_window_to_workspace(struct bz_breezy *breezy, enum bz_
 	};
 
 	// Look up our target workspace/section
-	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction);
+	struct bz_workspace *target = bz_input_get_target_workspace(breezy, direction, false);
 	if (target == nullptr) { return; } // This should never come up.
 	struct bz_section *target_section = bz_mgmt_get_leaf_at_coordinates(target->root, centerpoint);
 	target_section = target_section == nullptr
