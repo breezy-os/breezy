@@ -19,6 +19,15 @@ xdg_output_code = wl_mod.scan_xml(
     public: false,
     include_core_only: false)
 
+# Import the XDG Decoration protocol extension
+xdg_decoration_xml = wl_mod.find_protocol('xdg-decoration', state: 'unstable', version: 1)
+xdg_decoration_code = wl_mod.scan_xml(
+    xdg_decoration_xml,
+    client: false,
+    server: true,
+    public: false,
+    include_core_only: false)
+
 # Import the WP Viewporter protocol extension
 viewporter_xml = wl_mod.find_protocol('viewporter')
 viewporter_code = wl_mod.scan_xml(
@@ -52,9 +61,11 @@ bz_main_lib = static_library(
         './wayland/bz_wl_devices.c',
         './wayland/bz_wp_fractional_scale.c',
         './wayland/bz_wp_viewporter.c',
+        './wayland/bz_xdg_decoration.c',
         './wayland/bz_xdg_output.c',
         './wayland/bz_xdg_shell.c',
         xdg_output_code,
+        xdg_decoration_code,
         xdg_shell_code,
         viewporter_code,
         fractional_scale_code,

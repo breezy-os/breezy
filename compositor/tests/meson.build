@@ -10,6 +10,15 @@ xdg_shell_code = wl_mod.scan_xml(
     public: false,
     include_core_only: false)
 
+# Import the XDG Decoration protocol extension
+xdg_decoration_xml = wl_mod.find_protocol('xdg-decoration', state: 'unstable', version: 1)
+xdg_decoration_code = wl_mod.scan_xml(
+    xdg_decoration_xml,
+    client: false,
+    server: true,
+    public: false,
+    include_core_only: false)
+
 # Import the WP Viewporter protocol extension
 viewporter_xml = wl_mod.find_protocol('viewporter')
 viewporter_code = wl_mod.scan_xml(
@@ -67,6 +76,7 @@ foreach t : [
         'test_' + t + '.c',
         sources: [
             xdg_shell_code,
+            xdg_decoration_code,
             viewporter_code,
             fractional_scale_code,
         ],

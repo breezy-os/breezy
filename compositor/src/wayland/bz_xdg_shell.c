@@ -14,6 +14,7 @@
 #include "breezy/bz_xdg_shell.h"
 
 #include "breezy/bz_window_management.h"
+#include "breezy/bz_xdg_decoration.h"
 
 
 // =================================================================================================
@@ -759,6 +760,17 @@ void bz_xdg_surface_configure_toplevel(struct bz_surface *bzsurf)
 		&configevt->toplevel.states
 	);
 
+	if (bzsurf->xdgtoplevel->decoration != nullptr) {
+		// Breezy chooses to ignore the client's requested mode, and tries to force SSDs.
+		// configevt->toplevel.decoration_mode = bzsurf->xdgtoplevel->decoration->requested_mode;
+		configevt->toplevel.decoration_mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+
+		zxdg_toplevel_decoration_v1_send_configure(
+			bzsurf->xdgtoplevel->decoration->resource,
+			configevt->toplevel.decoration_mode
+		);
+	}
+
 	bz_list_append(bzsurf->xdgsurface->pending_configures, configevt);
 	xdg_surface_send_configure(bzsurf->xdgsurface->resource, configevt->serial);
 }
@@ -891,7 +903,6 @@ static void bz_free_xdg_surface_configure(void *xdg_surface_configure)
 
 	if (configure->type == BZ_XDG_SURF_TOPLEVEL) {
 		wl_array_release(&configure->toplevel.states);
-		bz_error(BZ_LOG_TEMP, "releasing array and states");
 	} else if (configure->type == BZ_XDG_SURF_POPUP) {
 		free(configure->popup.bounds);
 	}
@@ -934,6 +945,14 @@ const struct xdg_toplevel_interface bz_xdg_toplevel_implementation = {
 
 static void bz_xdg_toplevel_destroy(struct wl_client *client, struct wl_resource *resource)
 {
+	struct bz_xdg_toplevel *toplevel_data = wl_resource_get_user_data(resource);
+	if (toplevel_data->decoration != nullptr) {
+		wl_resource_post_error(resource, ZXDG_TOPLEVEL_DECORATION_V1_ERROR_ORPHANED,
+			"Client destroyed toplevel prior to its decoration object.");
+		bz_warn(BZ_LOG_WL_XDG_SHELL, "Client destroyed toplevel prior to its decoration object.");
+		return;
+	}
+
 	wl_resource_destroy(resource);
 }
 

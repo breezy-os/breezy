@@ -20,6 +20,7 @@
 #include "breezy/bz_xdg_shell.h"
 #include "breezy/bz_wp_viewporter.h"
 #include "breezy/bz_wp_fractional_scale.h"
+#include "breezy/bz_xdg_decoration.h"
 
 
 // =================================================================================================
@@ -732,6 +733,25 @@ static void bz_surface_attach(
 ) {
 	struct bz_surface *surf_data = wl_resource_get_user_data(resource);
 	surf_data->pending_state->buffer = buffer;
+
+	// >> XDG Decoration
+	// "For objects of version 1, [...] any attempts by a client to attach or manipulate a buffer
+	//   prior to the first xdg_toplevel_decoration.configure event must also be treated as errors."
+	if (
+		// If this is a toplevel...
+		surf_data->role == BZ_SURF_ROLE_XDG_TOPLEVEL &&
+		// ...with a decoration of version 1...
+		surf_data->xdgtoplevel != nullptr && surf_data->xdgtoplevel->decoration != nullptr &&
+		wl_resource_get_version(surf_data->xdgtoplevel->decoration->resource) == 1 &&
+		// ...and hasn't been configured yet.
+		surf_data->xdgsurface != nullptr  && surf_data->xdgsurface->last_acked_configure == nullptr
+	) {
+		wl_resource_post_error(resource, ZXDG_TOPLEVEL_DECORATION_V1_ERROR_UNCONFIGURED_BUFFER,
+			"Client attempted to attach a buffer prior to the toplevel decoration getting configured.");
+		bz_error(BZ_LOG_WL_DISPLAY,
+			"Client attempted to attach a buffer prior to the toplevel decoration getting configured.");
+		return;
+	}
 
 	if (wl_resource_get_version(resource) < 5) {
 		// x and y can only be used if the version is less than 5

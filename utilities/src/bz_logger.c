@@ -76,7 +76,7 @@ static void bz_log(
 		return;
 	}
 
-	if (level >= BZ_LOG_ERROR) {
+	if (level >= BZ_LOG_WARN) {
 		(void) fprintf(err_stream, "[%s:%d]\t%s\n", file, line, message);
 		fflush(err_stream);
 	}

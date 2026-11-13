@@ -6,6 +6,7 @@
 
 #include <wayland-server.h>
 #include <xdg-shell-server-protocol.h>
+#include <xdg-decoration-unstable-v1-server-protocol.h>
 
 #include "breezy/bz_breezy.h"
 #include "breezy/bz_math.h"
@@ -45,6 +46,7 @@ struct bz_toplevel_configure {
 	struct wl_array states;
 	struct bz_size max_size;
 	struct bz_size recommended_size;
+	enum zxdg_toplevel_decoration_v1_mode decoration_mode;
 };
 struct bz_popup_configure {
 	struct bz_rect *bounds; // X/Y is relative to the parent surface
@@ -84,6 +86,7 @@ struct bz_xdg_toplevel {
 
 	char *title;
 	char *app_id;
+	struct bz_xdg_toplevel_decoration *decoration;
 };
 
 void bz_xdg_toplevel_dtor(struct wl_resource *data);
